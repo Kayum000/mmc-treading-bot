@@ -1,4 +1,4 @@
-"""Minimal on-demand web UI: selected Forex pair -> GET SIGNAL."""
+"""On-demand web UI for Real Forex and Crypto MMC signals."""
 from __future__ import annotations
 
 import hmac
@@ -10,8 +10,6 @@ from signals.get_signal import get_signal
 from data.twelve_data_forex import fetch_api_usage, get_credit_usage
 
 app = Flask(__name__)
-# Authentication is configured through Render environment variables.
-# Do not put the real password in source control.
 app.secret_key = os.getenv("APP_SECRET_KEY") or os.urandom(32)
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
@@ -21,11 +19,15 @@ app.config.update(
 AUTH_USERNAME = os.getenv("APP_USERNAME", "admin")
 AUTH_PASSWORD = os.getenv("APP_PASSWORD", "")
 
-PAIRS = [
+REAL_PAIRS = [
     "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD",
     "NZD/USD", "EUR/GBP", "EUR/JPY", "GBP/JPY", "EUR/CHF", "GBP/CHF",
     "AUD/JPY", "CAD/JPY", "CHF/JPY", "NZD/JPY", "EUR/AUD", "GBP/AUD",
     "AUD/CAD", "NZD/CAD",
+]
+CRYPTO_PAIRS = [
+    "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
+    "ADA/USDT", "DOGE/USDT", "AVAX/USDT", "LINK/USDT", "LTC/USDT",
 ]
 
 _USAGE_CACHE = {"data": None, "at": 0.0}
@@ -50,7 +52,7 @@ def _find_number(obj, names):
 
 
 def _usage_view():
-    """Use real Twelve Data usage, cached for 60 seconds to avoid polling."""
+    """Use real Twelve Data usage, cached for 60 seconds."""
     now = time.time()
     if now - _USAGE_CACHE["at"] >= 60 or _USAGE_CACHE["data"] is None:
         try:
@@ -79,7 +81,6 @@ def _usage_view():
 def login():
     if session.get("authenticated"):
         return redirect(url_for("index"))
-
     error = None
     if request.method == "POST":
         username = request.form.get("username", "")
@@ -92,7 +93,6 @@ def login():
             return redirect(url_for("index"))
         else:
             error = "Invalid username or password."
-
     return render_template("login.html", error=error)
 
 
@@ -102,9 +102,14 @@ def logout():
     return redirect(url_for("login"))
 
 
+@app.route("/favicon.ico")
+def favicon():
+    return redirect(url_for("static", filename="sk_bot_logo.svg"))
+
+
 @app.before_request
 def require_login():
-    if request.endpoint in {"login", "static"}:
+    if request.endpoint in {"login", "favicon", "static"}:
         return None
     if not session.get("authenticated"):
         return redirect(url_for("login"))
@@ -115,14 +120,29 @@ def require_login():
 def index():
     result = None
     error = None
-    pair = request.form.get("pair", PAIRS[0])
+    mode = request.form.get("mode", "real").strip().lower()
+    if mode not in {"real", "crypto"}:
+        mode = "real"
+    pairs = REAL_PAIRS if mode == "real" else CRYPTO_PAIRS
+    pair = request.form.get("pair", pairs[0])
+    if pair not in pairs:
+        pair = pairs[0]
     if request.method == "POST":
         try:
-            result = get_signal(pair)
+            result = get_signal(pair, mode)
         except Exception as exc:
             error = str(exc)
     usage = _usage_view()
-    return render_template("index.html", pairs=PAIRS, pair=pair, result=result, error=error, usage=usage)
+    return render_template(
+        "index.html",
+        real_pairs=REAL_PAIRS,
+        crypto_pairs=CRYPTO_PAIRS,
+        mode=mode,
+        pair=pair,
+        result=result,
+        error=error,
+        usage=usage,
+    )
 
 
 if __name__ == "__main__":
