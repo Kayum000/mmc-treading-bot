@@ -1,6 +1,13 @@
 # MMC Multi-Timeframe Signal Bot
 
-A rule-based educational signal engine for BUY / SELL / NO_TRADE decisions using a simplified MMC-style market-structure model and multi-timeframe confirmation.
+A rule-based signal engine for BUY / SELL / NO_TRADE decisions using a simplified MMC-style market-structure model and multi-timeframe confirmation.
+
+## Market modes
+
+- **REAL_MARKET:** normalized candles from a user-authorized live feed (including a broker-compatible feed where permitted).
+- **CRYPTO:** public Binance candle data. No Binance API key is required for public market data.
+
+These modes generate signals only. They do **not** submit orders.
 
 ## Timeframes
 
@@ -8,26 +15,23 @@ A rule-based educational signal engine for BUY / SELL / NO_TRADE decisions using
 - **5m:** setup confirmation
 - **1m:** entry confirmation
 
-## Logic in v1
+## Logic
 
 1. EMA trend alignment (20/50)
-2. Basic market-structure break (BOS)
-3. Liquidity sweep and reclaim
+2. Market-structure break (BOS)
+3. Liquidity sweep and rejection
 4. Candle displacement
 5. Weighted multi-timeframe score
 6. BUY/SELL only when the minimum score is met and the two sides are not tied
 
-The current implementation is intentionally conservative: it produces signals only and **does not place trades** or store broker credentials/tokens.
+## Data boundary
 
-## Run
+`data/market_modes.py` selects `REAL_MARKET` or `CRYPTO`.
 
-```bash
-pip install -r requirements.txt
-python main.py --tf15 data/15m.csv --tf5 data/5m.csv --tf1 data/1m.csv
-```
+`data/quotex_adapter.py` accepts normalized candles from an authorized source without handling passwords/tokens or placing orders.
 
-CSV files need these OHLC columns:
+`data/binance_adapter.py` normalizes public Binance klines for 1m, 5m and 15m analysis.
 
-`open, high, low, close`
+The live network transport is intentionally kept separate from the strategy engine so a data source can be tested without enabling trade execution.
 
-> This is a research/prototyping implementation. Binary-options trading is high risk; signals are not guaranteed to be profitable.
+> Research/prototyping only. Market and binary-options trading are high risk; signals are not guaranteed to be profitable.
