@@ -8,7 +8,7 @@
 <body>
 <main>
 <h1>MMC Live Forex Signal</h1>
-<p>Select one market. Fresh data is fetched only when GET SIGNAL is pressed.</p>
+<p>GET SIGNAL prepares the next 1-minute candle. The signal is generated 30 seconds before that candle starts.</p>
 <form method="post">
 <label>Forex pair
 <select name="pair">{% for p in pairs %}<option value="{{p}}" {% if p == pair %}selected{% endif %}>{{p}}</option>{% endfor %}</select>
@@ -22,8 +22,8 @@
 <p><strong>Signal Time (Bangladesh):</strong> {{result.signal_time_bd}}</p>
 <p><strong>Running 1m candle:</strong> <span data-candle-time>{{result.candle_time}}</span></p>
 <p><strong>Current Bangladesh time:</strong> <span data-bd-clock>--:--:--</span></p>
-<p><strong>Entry after signal:</strong> <span data-entry-time>{{result.entry_time_bd}}</span></p>
-<p><strong>Entry countdown:</strong> <span data-entry-timer data-entry-at="{{result.entry_time_utc}}">01:00</span></p>
+<p><strong>Next 1m candle / Entry:</strong> <span data-entry-time>{{result.entry_time_bd}}</span></p>
+<p><strong>Entry countdown:</strong> <span data-entry-timer data-entry-at="{{result.entry_time_utc}}">00:30</span></p>
 <p><strong>Reference price at signal:</strong> {{result.entry_price if result.entry_price is not none else 'N/A'}}</p>
 <p><strong>Timeframe:</strong> {{result.timeframe}}</p>
 <p><strong>Buy score:</strong> {{result.buy_score}}</p>
