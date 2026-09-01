@@ -19,11 +19,12 @@
 {% if result %}
 <section>
 <h2>{{result.pair}} — {{result.signal}}</h2>
-<p><strong>Entry price:</strong> {{result.entry_price if result.entry_price is not none else 'N/A'}}</p>
 <p><strong>Signal Time (Bangladesh):</strong> {{result.signal_time_bd}}</p>
-<p><strong>Latest candle:</strong> <span data-candle-time>{{result.candle_time}}</span></p>
-<p><strong>1m candle time (Bangladesh):</strong> <span data-bd-clock>--:--:--</span></p>
-<p><strong>1m candle countdown:</strong> <span data-candle-timer data-interval-seconds="60">01:00</span></p>
+<p><strong>Running 1m candle:</strong> <span data-candle-time>{{result.candle_time}}</span></p>
+<p><strong>Current Bangladesh time:</strong> <span data-bd-clock>--:--:--</span></p>
+<p><strong>Entry after signal:</strong> <span data-entry-time>{{result.entry_time_bd}}</span></p>
+<p><strong>Entry countdown:</strong> <span data-entry-timer data-entry-at="{{result.entry_time_utc}}">01:00</span></p>
+<p><strong>Reference price at signal:</strong> {{result.entry_price if result.entry_price is not none else 'N/A'}}</p>
 <p><strong>Timeframe:</strong> {{result.timeframe}}</p>
 <p><strong>Buy score:</strong> {{result.buy_score}}</p>
 <p><strong>Sell score:</strong> {{result.sell_score}}</p>
