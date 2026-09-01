@@ -1,13 +1,37 @@
 """On-demand live Forex signal for the selected pair."""
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
+import time
 
 from data.twelve_data_forex import fetch_forex_multi_timeframe
 from data.live_signal import build_signal
 
+ENTRY_LEAD_SECONDS = 30
+
+
+def _next_candle_boundary_utc(now_utc: datetime) -> datetime:
+    epoch = int(now_utc.timestamp())
+    next_epoch = ((epoch // 60) + 1) * 60
+    return datetime.fromtimestamp(next_epoch, tz=timezone.utc)
+
 
 def get_signal(pair: str) -> dict:
     pair = pair.strip().upper()
+
+    # If GET SIGNAL is pressed before the final 30 seconds of the current
+    # candle, wait until exactly 30 seconds before the next 1m candle starts.
+    # This keeps the signal based on the running candle while giving the user
+    # a fixed 30-second preparation window for the next candle.
+    requested_at_utc = datetime.now(timezone.utc)
+    next_candle_utc = _next_candle_boundary_utc(requested_at_utc)
+    signal_at_utc = next_candle_utc - timedelta(seconds=ENTRY_LEAD_SECONDS)
+    wait_seconds = (signal_at_utc - requested_at_utc).total_seconds()
+    if wait_seconds > 0:
+        time.sleep(wait_seconds)
+
+    signal_at_utc = datetime.now(timezone.utc)
+    next_candle_utc = _next_candle_boundary_utc(signal_at_utc)
+
     frames = fetch_forex_multi_timeframe(pair)
     result = build_signal(frames)
 
@@ -19,14 +43,8 @@ def get_signal(pair: str) -> dict:
         entry_price = float(row["close"])
         candle_time = str(latest.index[-1])
 
-    # The signal is calculated from the currently running candle, but the
-    # planned entry is deliberately delayed by one full minute from the
-    # moment GET SIGNAL is pressed. This keeps the entry out of the running
-    # candle and leaves the existing signal/strategy calculation untouched.
-    now_utc = datetime.now(timezone.utc)
-    now_bd = now_utc.astimezone(timezone(timedelta(hours=6)))
-    entry_utc = now_utc + timedelta(minutes=1)
-    entry_bd = entry_utc.astimezone(timezone(timedelta(hours=6)))
+    signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
+    entry_bd = next_candle_utc.astimezone(timezone(timedelta(hours=6)))
 
     return {
         "pair": pair,
@@ -34,13 +52,13 @@ def get_signal(pair: str) -> dict:
         "buy_score": result.buy_score,
         "sell_score": result.sell_score,
         "reason": result.reason,
-        "signal_time_utc": now_utc.isoformat(timespec="seconds"),
-        "signal_time_bd": now_bd.strftime("%d %b %Y, %I:%M:%S %p"),
+        "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
+        "signal_time_bd": signal_bd.strftime("%d %b %Y, %I:%M:%S %p"),
         "candle_time": candle_time,
         "entry_price": entry_price,
-        "entry_time_utc": entry_utc.isoformat(timespec="seconds"),
+        "entry_time_utc": next_candle_utc.isoformat(timespec="seconds"),
         "entry_time_bd": entry_bd.strftime("%d %b %Y, %I:%M:%S %p"),
-        "entry_delay_seconds": 60,
+        "entry_delay_seconds": ENTRY_LEAD_SECONDS,
         "timeframe": "1m entry / 5m + 15m confirmation",
     }
 
