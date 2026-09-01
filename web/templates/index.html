@@ -4,7 +4,7 @@
 <body>
 <main>
 <h1>MMC Live Forex Signal</h1>
-<p>Select one market. Data is fetched only when you request a signal.</p>
+<p>Select one market. Fresh data is fetched only when GET SIGNAL is pressed.</p>
 <form method="post">
 <label>Forex pair
 <select name="pair">{% for p in pairs %}<option value="{{p}}" {% if p == pair %}selected{% endif %}>{{p}}</option>{% endfor %}</select>
@@ -12,7 +12,18 @@
 <button type="submit">GET SIGNAL</button>
 </form>
 {% if error %}<p><strong>Error:</strong> {{error}}</p>{% endif %}
-{% if result %}<section><h2>{{result.pair}} — {{result.signal}}</h2><p>Buy score: {{result.buy_score}}</p><p>Sell score: {{result.sell_score}}</p><p>Reason: {{result.reason}}</p></section>{% endif %}
+{% if result %}
+<section>
+<h2>{{result.pair}} — {{result.signal}}</h2>
+<p><strong>Entry price:</strong> {{result.entry_price if result.entry_price is not none else 'N/A'}}</p>
+<p><strong>Signal time (UTC):</strong> {{result.signal_time_utc}}</p>
+<p><strong>Latest candle:</strong> {{result.candle_time}}</p>
+<p><strong>Timeframe:</strong> {{result.timeframe}}</p>
+<p><strong>Buy score:</strong> {{result.buy_score}}</p>
+<p><strong>Sell score:</strong> {{result.sell_score}}</p>
+<p><strong>Reason:</strong> {{result.reason}}</p>
+</section>
+{% endif %}
 </main>
 </body>
 </html>
