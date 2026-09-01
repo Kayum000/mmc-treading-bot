@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Login — MMC Live Signal</title>
+<style>
+  body{margin:0;background:#f5f7fb;font-family:Arial,sans-serif;color:#172033;min-height:100vh;display:flex;align-items:center;justify-content:center}
+  .login-box{width:min(420px,calc(100% - 40px));background:white;border-radius:18px;padding:28px;box-shadow:0 4px 20px rgba(0,0,0,.10);box-sizing:border-box}
+  .brand{text-align:center;margin-bottom:24px}
+  .brand img{width:72px;height:72px;object-fit:contain;border-radius:16px}
+  h1{font-size:30px;margin:12px 0 6px}
+  p{color:#5b6475}
+  label{display:block;font-size:16px;font-weight:700;margin:16px 0 7px}
+  input{width:100%;box-sizing:border-box;font-size:18px;padding:12px 14px;border:1px solid #cbd5e1;border-radius:10px;outline:none}
+  input:focus{border-color:#2563eb}
+  button{width:100%;margin-top:20px;font-size:19px;padding:13px;border:0;border-radius:10px;background:#2563eb;color:white;font-weight:700;cursor:pointer}
+  .error{background:#fff1f2;color:#b42318;border:1px solid #fecdd3;border-radius:10px;padding:10px 12px;margin-bottom:12px}
+</style>
+</head>
+<body>
+<div class="login-box">
+  <div class="brand">
+    <img src="{{ url_for('static', filename='sk_bot_logo.svg') }}" alt="SK BOT">
+    <h1>MMC Live Forex Signal</h1>
+    <p>Login required to access the signal app.</p>
+  </div>
+  {% if error %}<div class="error">{{error}}</div>{% endif %}
+  <form method="post" autocomplete="on">
+    <label for="username">Username</label>
+    <input id="username" name="username" type="text" autocomplete="username" required autofocus>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">LOGIN</button>
+  </form>
+</div>
+</body>
+</html>
