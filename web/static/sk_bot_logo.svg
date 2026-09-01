@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" role="img" aria-label="SK BOT logo">
+<defs><radialGradient id="bg" cx="50%" cy="45%" r="65%"><stop offset="0" stop-color="#082b66"/><stop offset="1" stop-color="#01030a"/></radialGradient><linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff08a"/><stop offset=".35" stop-color="#ffbd17"/><stop offset=".75" stop-color="#ff8c00"/><stop offset="1" stop-color="#fff07a"/></linearGradient></defs>
+<circle cx="627" cy="627" r="610" fill="url(#bg)" stroke="url(#gold)" stroke-width="22"/>
+<circle cx="627" cy="627" r="555" fill="none" stroke="#00aaff" stroke-width="9" opacity=".9"/>
+<path d="M230 520 L350 270 L390 385" fill="none" stroke="#5cff2d" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/><path d="M1024 520 L904 270 L864 385" fill="none" stroke="#ff3030" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="395" y="445" width="464" height="260" rx="95" fill="#dbe6f7" stroke="#58c9ff" stroke-width="12"/><rect x="438" y="500" width="378" height="145" rx="55" fill="#020b1e" stroke="#168dff" stroke-width="10"/>
+<text x="627" y="594" text-anchor="middle" font-family="Arial,sans-serif" font-size="108" font-weight="900" fill="#2e91ff">SK</text>
+<path d="M440 360 L510 290 L585 350 L627 250 L669 350 L744 290 L814 360" fill="url(#gold)" stroke="#fff0a0" stroke-width="9" stroke-linejoin="round"/>
+<text x="627" y="420" text-anchor="middle" font-family="Arial,sans-serif" font-size="44" font-weight="900" fill="#071a3b">AI POWERED</text>
+<rect x="95" y="650" width="275" height="125" rx="30" fill="#03130a" stroke="#45ff22" stroke-width="12"/><text x="232" y="735" text-anchor="middle" font-family="Arial,sans-serif" font-size="58" font-weight="900" fill="white">BUY</text>
+<rect x="884" y="650" width="275" height="125" rx="30" fill="#190303" stroke="#ff3030" stroke-width="12"/><text x="1022" y="735" text-anchor="middle" font-family="Arial,sans-serif" font-size="58" font-weight="900" fill="white">SELL</text>
+<text x="627" y="860" text-anchor="middle" font-family="Arial,sans-serif" font-size="190" font-weight="900" fill="url(#gold)" stroke="#101b3a" stroke-width="16" paint-order="stroke">SK</text>
+<text x="627" y="955" text-anchor="middle" font-family="Arial,sans-serif" font-size="78" font-weight="900" fill="white">BOT</text>
+<text x="627" y="1030" text-anchor="middle" font-family="Arial,sans-serif" font-size="38" font-weight="800" fill="#ffd22e">TRADE SMART • TRADE SAFE</text>
+<text x="627" y="1095" text-anchor="middle" font-family="Arial,sans-serif" font-size="42" font-weight="900" fill="white">1M • 5M • 15M • 30M • 1H</text>
+</svg>
