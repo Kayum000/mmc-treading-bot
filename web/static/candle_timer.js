@@ -1,23 +1,44 @@
 (() => {
-  const timer = document.querySelector('[data-candle-timer]');
-  if (!timer) return;
-
-  const intervalSeconds = Number(timer.dataset.intervalSeconds || 60);
-  if (!Number.isFinite(intervalSeconds) || intervalSeconds <= 0) return;
+  const entryTimer = document.querySelector('[data-entry-timer]');
+  const bdClock = document.querySelector('[data-bd-clock]');
 
   const pad = (value) => String(value).padStart(2, '0');
 
-  function render() {
-    // Use epoch time so the countdown follows the user's actual clock and
-    // rolls exactly on the market candle boundary, without touching signals.
-    const nowMs = Date.now();
-    const elapsed = Math.floor(nowMs / 1000) % intervalSeconds;
-    const remaining = intervalSeconds - elapsed;
-    const minutes = Math.floor(remaining / 60);
-    const seconds = remaining % 60;
+  function renderClock() {
+    if (!bdClock) return;
+    const now = new Date();
+    const bd = new Date(now.getTime() + (6 * 60 * 60 * 1000));
+    const hours = bd.getUTCHours();
+    const minutes = bd.getUTCMinutes();
+    const seconds = bd.getUTCSeconds();
+    bdClock.textContent = `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+  }
 
-    timer.textContent = `${pad(minutes)}:${pad(seconds)}`;
-    timer.setAttribute('aria-label', `Current candle closes in ${minutes} minutes ${seconds} seconds`);
+  function renderEntryCountdown() {
+    if (!entryTimer) return;
+
+    const entryAt = Date.parse(entryTimer.dataset.entryAt || '');
+    if (!Number.isFinite(entryAt)) return;
+
+    const remainingSeconds = Math.max(0, Math.ceil((entryAt - Date.now()) / 1000));
+    const minutes = Math.floor(remainingSeconds / 60);
+    const seconds = remainingSeconds % 60;
+
+    entryTimer.textContent = remainingSeconds > 0
+      ? `${pad(minutes)}:${pad(seconds)}`
+      : '00:00 — ENTRY NOW';
+
+    entryTimer.setAttribute(
+      'aria-label',
+      remainingSeconds > 0
+        ? `Entry starts in ${minutes} minutes ${seconds} seconds`
+        : 'Entry time reached'
+    );
+  }
+
+  function render() {
+    renderClock();
+    renderEntryCountdown();
   }
 
   render();
