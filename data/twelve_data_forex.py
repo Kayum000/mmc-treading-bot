@@ -5,10 +5,11 @@ This adapter only reads market data; it does not place trades.
 """
 from __future__ import annotations
 
+import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-import json
 
 import pandas as pd
 
@@ -38,4 +39,16 @@ def fetch_forex_candles(symbol: str, interval: str = "1min", outputsize: int = 2
 
 
 def fetch_forex_multi_timeframe(symbol: str) -> dict[str, pd.DataFrame]:
-    return {label: fetch_forex_candles(symbol, interval) for interval, label in INTERVALS.items()}
+    """Fetch 1m/5m/15m candles concurrently for the selected pair.
+
+    The strategy still receives exactly the same three DataFrames; only the
+    network wait is parallelized so one slow timeframe does not block the
+    other two from being fetched.
+    """
+    intervals = list(INTERVALS.items())
+    with ThreadPoolExecutor(max_workers=len(intervals)) as executor:
+        futures = {
+            label: executor.submit(fetch_forex_candles, symbol, interval)
+            for interval, label in intervals
+        }
+        return {label: futures[label].result() for _, label in intervals}
