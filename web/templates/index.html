@@ -18,6 +18,7 @@
 <p><strong>Entry price:</strong> {{result.entry_price if result.entry_price is not none else 'N/A'}}</p>
 <p><strong>Signal Time (Bangladesh):</strong> {{result.signal_time_bd}}</p>
 <p><strong>Latest candle:</strong> {{result.candle_time}}</p>
+<p><strong>1m candle countdown:</strong> <span data-candle-timer data-interval-seconds="60">01:00</span></p>
 <p><strong>Timeframe:</strong> {{result.timeframe}}</p>
 <p><strong>Buy score:</strong> {{result.buy_score}}</p>
 <p><strong>Sell score:</strong> {{result.sell_score}}</p>
@@ -25,5 +26,6 @@
 </section>
 {% endif %}
 </main>
+<script src="{{ url_for('static', filename='candle_timer.js') }}" defer></script>
 </body>
 </html>
