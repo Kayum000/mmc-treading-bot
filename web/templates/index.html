@@ -1,6 +1,10 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MMC Live Signal</title></head>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MMC Live Signal</title>
+</head>
 <body>
 <main>
 <h1>MMC Live Forex Signal</h1>
@@ -17,7 +21,8 @@
 <h2>{{result.pair}} — {{result.signal}}</h2>
 <p><strong>Entry price:</strong> {{result.entry_price if result.entry_price is not none else 'N/A'}}</p>
 <p><strong>Signal Time (Bangladesh):</strong> {{result.signal_time_bd}}</p>
-<p><strong>Latest candle:</strong> {{result.candle_time}}</p>
+<p><strong>Latest candle:</strong> <span data-candle-time>{{result.candle_time}}</span></p>
+<p><strong>1m candle time (Bangladesh):</strong> <span data-bd-clock>--:--:--</span></p>
 <p><strong>1m candle countdown:</strong> <span data-candle-timer data-interval-seconds="60">01:00</span></p>
 <p><strong>Timeframe:</strong> {{result.timeframe}}</p>
 <p><strong>Buy score:</strong> {{result.buy_score}}</p>
