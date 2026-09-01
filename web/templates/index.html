@@ -4,11 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MMC Live Signal</title>
+<style>
+  body{margin:0;background:#f5f7fb;font-family:Arial,sans-serif;color:#172033}
+  main{max-width:900px;margin:0 auto;padding:20px}
+  h1{font-size:38px;margin:0 0 8px}
+  .intro{font-size:18px;margin-bottom:22px}
+  form{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:22px}
+  select,button{font-size:20px;padding:12px 18px;border-radius:10px;border:1px solid #cbd5e1}
+  button{background:#2563eb;color:white;border:0;font-weight:700;cursor:pointer}
+  section{background:white;border-radius:16px;padding:22px;box-shadow:0 3px 14px rgba(0,0,0,.08)}
+  h2{font-size:38px;margin:0 0 20px}
+  .entry-box{border:2px solid #2563eb;border-radius:16px;padding:22px;text-align:center;background:#f8fbff}
+  .entry-title{font-size:25px;font-weight:800;color:#174ea6}
+  .entry-time{font-size:34px;font-weight:800;color:#174ea6;margin:12px 0 18px;letter-spacing:.5px}
+  .countdown-label{font-size:22px;font-weight:800;color:#174ea6}
+  .countdown{font-size:58px;font-weight:900;color:#174ea6;line-height:1.05;margin:5px 0 18px}
+  .price-box{border:2px solid #16803c;border-radius:14px;padding:14px 10px;background:#fbfffc}
+  .price-label{font-size:21px;font-weight:800;color:#16753a}
+  .price{font-size:52px;font-weight:900;color:#16803c;margin-top:3px}
+  .details{margin-top:20px;font-size:18px;line-height:1.7}
+  @media(max-width:600px){h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}.price{font-size:42px}}
+</style>
 </head>
 <body>
 <main>
 <h1>MMC Live Forex Signal</h1>
-<p>GET SIGNAL prepares the next 1-minute candle. The signal is generated 30 seconds before that candle starts.</p>
+<p class="intro">GET SIGNAL prepares the next 1-minute candle. The signal is generated 30 seconds before that candle starts.</p>
 <form method="post">
 <label>Forex pair
 <select name="pair">{% for p in pairs %}<option value="{{p}}" {% if p == pair %}selected{% endif %}>{{p}}</option>{% endfor %}</select>
@@ -19,16 +40,22 @@
 {% if result %}
 <section>
 <h2>{{result.pair}} — {{result.signal}}</h2>
-<p><strong>Signal Time (Bangladesh):</strong> {{result.signal_time_bd}}</p>
-<p><strong>Running 1m candle:</strong> <span data-candle-time>{{result.candle_time}}</span></p>
-<p><strong>Current Bangladesh time:</strong> <span data-bd-clock>--:--:--</span></p>
-<p><strong>Next 1m candle / Entry:</strong> <span data-entry-time>{{result.entry_time_bd}}</span></p>
-<p><strong>Entry countdown:</strong> <span data-entry-timer data-entry-at="{{result.entry_time_utc}}">00:30</span></p>
-<p><strong>Reference price at signal:</strong> {{result.entry_price if result.entry_price is not none else 'N/A'}}</p>
+<div class="entry-box">
+  <div class="entry-title">ENTRY TIME — NEXT 1-MINUTE CANDLE</div>
+  <div class="entry-time">{{result.entry_time_bd}}</div>
+  <div class="countdown-label">ENTRY COUNTDOWN</div>
+  <div class="countdown" data-entry-timer data-entry-at="{{result.entry_time_utc}}">00:30</div>
+  <div class="price-box">
+    <div class="price-label">ENTRY PRICE</div>
+    <div class="price">{{result.entry_price if result.entry_price is not none else 'N/A'}}</div>
+  </div>
+</div>
+<div class="details">
 <p><strong>Timeframe:</strong> {{result.timeframe}}</p>
 <p><strong>Buy score:</strong> {{result.buy_score}}</p>
 <p><strong>Sell score:</strong> {{result.sell_score}}</p>
 <p><strong>Reason:</strong> {{result.reason}}</p>
+</div>
 </section>
 {% endif %}
 </main>
