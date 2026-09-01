@@ -1,14 +1,26 @@
 """Minimal on-demand web UI: selected Forex pair -> GET SIGNAL."""
 from __future__ import annotations
 
+import hmac
 import os
 import time
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, redirect, url_for, session
 
 from signals.get_signal import get_signal
 from data.twelve_data_forex import fetch_api_usage, get_credit_usage
 
 app = Flask(__name__)
+# Authentication is configured through Render environment variables.
+# Do not put the real password in source control.
+app.secret_key = os.getenv("APP_SECRET_KEY") or os.urandom(32)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "1") == "1",
+)
+AUTH_USERNAME = os.getenv("APP_USERNAME", "admin")
+AUTH_PASSWORD = os.getenv("APP_PASSWORD", "")
+
 PAIRS = [
     "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD",
     "NZD/USD", "EUR/GBP", "EUR/JPY", "GBP/JPY", "EUR/CHF", "GBP/CHF",
@@ -61,6 +73,42 @@ def _usage_view():
         "minute_left": minute.get("left"),
         "minute_limit": minute.get("limit"),
     }
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if session.get("authenticated"):
+        return redirect(url_for("index"))
+
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        if not AUTH_PASSWORD:
+            error = "Login is not configured yet. Set APP_PASSWORD in the server environment."
+        elif hmac.compare_digest(username, AUTH_USERNAME) and hmac.compare_digest(password, AUTH_PASSWORD):
+            session.clear()
+            session["authenticated"] = True
+            return redirect(url_for("index"))
+        else:
+            error = "Invalid username or password."
+
+    return render_template("login.html", error=error)
+
+
+@app.route("/logout", methods=["GET"])
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@app.before_request
+def require_login():
+    if request.endpoint in {"login", "static"}:
+        return None
+    if not session.get("authenticated"):
+        return redirect(url_for("login"))
+    return None
 
 
 @app.route("/", methods=["GET", "POST"])
