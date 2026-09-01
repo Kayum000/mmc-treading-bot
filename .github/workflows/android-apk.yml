@@ -18,6 +18,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Restore SK BOT logo
+        working-directory: android
+        run: |
+          base64 --decode app/icon/ic_sk_bot_logo.b64 > app/src/main/res/drawable/ic_sk_bot_logo.jpg
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
