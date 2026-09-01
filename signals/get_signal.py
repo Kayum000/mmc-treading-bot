@@ -17,11 +17,13 @@ def _next_candle_boundary_utc(now_utc: datetime) -> datetime:
 
 
 def get_signal(pair: str, market_mode: str = "real") -> dict:
+    # Keep the user's selected market as the single source of truth.
     pair = pair.strip().upper()
     market_mode = market_mode.strip().lower()
     if market_mode not in {"real", "crypto"}:
         raise ValueError("Unsupported market mode")
 
+    requested_pair = pair
     requested_at_utc = datetime.now(timezone.utc)
     next_candle_utc = _next_candle_boundary_utc(requested_at_utc)
     signal_at_utc = next_candle_utc - timedelta(seconds=ENTRY_LEAD_SECONDS)
@@ -33,11 +35,11 @@ def get_signal(pair: str, market_mode: str = "real") -> dict:
     next_candle_utc = _next_candle_boundary_utc(signal_at_utc)
 
     if market_mode == "crypto":
-        symbol = pair.replace("/", "")
+        symbol = requested_pair.replace("/", "")
         frames = fetch_crypto_multi_timeframe(symbol)
         source = "Binance"
     else:
-        frames = fetch_forex_multi_timeframe(pair)
+        frames = fetch_forex_multi_timeframe(requested_pair)
         source = "Twelve Data"
 
     result = build_signal(frames)
@@ -54,7 +56,9 @@ def get_signal(pair: str, market_mode: str = "real") -> dict:
     entry_bd = next_candle_utc.astimezone(timezone(timedelta(hours=6)))
 
     return {
-        "pair": pair,
+        # Always display the exact market selected before GET SIGNAL.
+        "pair": requested_pair,
+        "requested_pair": requested_pair,
         "market_mode": market_mode,
         "source": source,
         "signal": result.action,
