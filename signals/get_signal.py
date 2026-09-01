@@ -19,8 +19,14 @@ def get_signal(pair: str) -> dict:
         entry_price = float(row["close"])
         candle_time = str(latest.index[-1])
 
+    # The signal is calculated from the currently running candle, but the
+    # planned entry is deliberately delayed by one full minute from the
+    # moment GET SIGNAL is pressed. This keeps the entry out of the running
+    # candle and leaves the existing signal/strategy calculation untouched.
     now_utc = datetime.now(timezone.utc)
     now_bd = now_utc.astimezone(timezone(timedelta(hours=6)))
+    entry_utc = now_utc + timedelta(minutes=1)
+    entry_bd = entry_utc.astimezone(timezone(timedelta(hours=6)))
 
     return {
         "pair": pair,
@@ -32,6 +38,9 @@ def get_signal(pair: str) -> dict:
         "signal_time_bd": now_bd.strftime("%d %b %Y, %I:%M:%S %p"),
         "candle_time": candle_time,
         "entry_price": entry_price,
+        "entry_time_utc": entry_utc.isoformat(timespec="seconds"),
+        "entry_time_bd": entry_bd.strftime("%d %b %Y, %I:%M:%S %p"),
+        "entry_delay_seconds": 60,
         "timeframe": "1m entry / 5m + 15m confirmation",
     }
 
