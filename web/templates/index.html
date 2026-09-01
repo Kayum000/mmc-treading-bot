@@ -17,6 +17,7 @@
   .api-usage{position:absolute;right:20px;top:20px;background:white;border:1px solid #d8dee9;border-radius:10px;padding:8px 11px;font-size:12px;line-height:1.35;text-align:right;box-shadow:0 2px 8px rgba(0,0,0,.06)}
   .api-usage strong{font-size:12px}
   .api-row{white-space:nowrap}
+  .logout{position:absolute;right:20px;top:82px;font-size:13px;color:#b42318;text-decoration:none}
   section{background:white;border-radius:16px;padding:22px;box-shadow:0 3px 14px rgba(0,0,0,.08)}
   h2{font-size:38px;margin:0 0 20px}
   .entry-box{border:2px solid #2563eb;border-radius:16px;padding:22px;text-align:center;background:#f8fbff}
@@ -28,7 +29,7 @@
   .price-label{font-size:21px;font-weight:800;color:#16753a}
   .price{font-size:52px;font-weight:900;color:#16803c;margin-top:3px}
   .details{margin-top:20px;font-size:18px;line-height:1.7}
-  @media(max-width:600px){main{padding-top:76px}.api-usage{top:14px;right:20px}.brand{padding-right:0}.brand img{width:58px;height:58px}h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}.price{font-size:42px}}
+  @media(max-width:600px){main{padding-top:76px}.api-usage{top:14px;right:20px}.brand{padding-right:0}.brand img{width:58px;height:58px}h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}.price{font-size:42px}.logout{top:70px}}
 </style>
 </head>
 <body>
@@ -38,6 +39,7 @@
   <div class="api-row">DAY: {% if usage.daily_limit is not none and usage.daily_left is not none %}{{usage.daily_limit}} / {{usage.daily_left}}{% else %}-- / --{% endif %}</div>
   <div class="api-row">MIN: {% if usage.minute_limit is not none and usage.minute_left is not none %}{{usage.minute_limit}} / {{usage.minute_left}}{% else %}-- / --{% endif %}</div>
 </div>
+<a class="logout" href="{{ url_for('logout') }}">LOGOUT</a>
 <div class="brand">
   <img src="{{ url_for('static', filename='sk_bot_logo.svg') }}" alt="SK BOT">
   <h1>MMC Live Forex Signal</h1>
