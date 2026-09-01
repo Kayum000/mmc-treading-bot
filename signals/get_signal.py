@@ -1,28 +1,40 @@
-"""On-demand live Forex signal: fetch only the selected pair when requested."""
+"""On-demand live Forex signal for the selected pair."""
 from __future__ import annotations
+from datetime import datetime, timezone
 
 from data.twelve_data_forex import fetch_forex_multi_timeframe
 from data.live_signal import build_signal
 
 
 def get_signal(pair: str) -> dict:
-    """Fetch fresh 1m/5m/15m data for one pair and return one analysis result."""
     pair = pair.strip().upper()
     frames = fetch_forex_multi_timeframe(pair)
     result = build_signal(frames)
+
+    latest = frames.get("1m")
+    entry_price = None
+    candle_time = None
+    if latest is not None and not latest.empty:
+        row = latest.iloc[-1]
+        entry_price = float(row["close"])
+        candle_time = str(latest.index[-1])
+
     return {
         "pair": pair,
         "signal": result.action,
         "buy_score": result.buy_score,
         "sell_score": result.sell_score,
         "reason": result.reason,
+        "signal_time_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "candle_time": candle_time,
+        "entry_price": entry_price,
+        "timeframe": "1m entry / 5m + 15m confirmation",
     }
 
 
 if __name__ == "__main__":
     import argparse
-
     parser = argparse.ArgumentParser(description="Get one fresh live Forex signal")
-    parser.add_argument("pair", help="Selected pair, e.g. EUR/USD")
+    parser.add_argument("pair")
     args = parser.parse_args()
     print(get_signal(args.pair))
