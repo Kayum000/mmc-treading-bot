@@ -13,71 +13,64 @@
   main{max-width:900px;margin:0 auto;padding:20px;position:relative}
   .brand{display:flex;align-items:center;gap:12px;margin:0 0 8px;padding-right:150px}
   .brand img{width:70px;height:70px;object-fit:contain;border-radius:16px;flex:none}
-  h1{font-size:38px;margin:0}
-  .intro{font-size:18px;margin-bottom:22px}
+  h1{font-size:38px;margin:0}.intro{font-size:18px;margin-bottom:22px}
   form{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:22px}
   select,button{font-size:20px;padding:12px 18px;border-radius:10px;border:1px solid #cbd5e1}
   button{background:#2563eb;color:white;border:0;font-weight:700;cursor:pointer}
   .api-usage{position:absolute;right:20px;top:20px;background:white;border:1px solid #d8dee9;border-radius:10px;padding:8px 11px;font-size:12px;line-height:1.35;text-align:right;box-shadow:0 2px 8px rgba(0,0,0,.06)}
-  .api-usage strong{font-size:12px}
-  .api-row{white-space:nowrap}
-  .logout{position:absolute;right:20px;top:82px;font-size:13px;color:#b42318;text-decoration:none}
+  .api-usage strong{font-size:12px}.api-row{white-space:nowrap}.logout{position:absolute;right:20px;top:82px;font-size:13px;color:#b42318;text-decoration:none}
+  .mode-tabs{display:flex;gap:10px;margin-bottom:14px}.mode-tabs button{background:#e8edf5;color:#172033;border:1px solid #cbd5e1}.mode-tabs button.active{background:#2563eb;color:#fff;border-color:#2563eb}
   section{background:white;border-radius:16px;padding:22px;box-shadow:0 3px 14px rgba(0,0,0,.08)}
-  h2{font-size:38px;margin:0 0 20px}
-  .entry-box{border:2px solid #2563eb;border-radius:16px;padding:22px;text-align:center;background:#f8fbff}
-  .entry-title{font-size:25px;font-weight:800;color:#174ea6}
-  .entry-time{font-size:34px;font-weight:800;color:#174ea6;margin:12px 0 18px;letter-spacing:.5px}
-  .countdown-label{font-size:22px;font-weight:800;color:#174ea6}
-  .countdown{font-size:58px;font-weight:900;color:#174ea6;line-height:1.05;margin:5px 0 18px}
-  .price-box{border:2px solid #16803c;border-radius:14px;padding:14px 10px;background:#fbfffc}
-  .price-label{font-size:21px;font-weight:800;color:#16753a}
-  .price{font-size:52px;font-weight:900;color:#16803c;margin-top:3px}
-  .details{margin-top:20px;font-size:18px;line-height:1.7}
-  @media(max-width:600px){main{padding-top:76px}.api-usage{top:14px;right:20px}.brand{padding-right:0}.brand img{width:58px;height:58px}h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}.price{font-size:42px}.logout{top:70px}}
+  h2{font-size:38px;margin:0 0 20px}.entry-box{border:2px solid #2563eb;border-radius:16px;padding:22px;text-align:center;background:#f8fbff}
+  .entry-title{font-size:25px;font-weight:800;color:#174ea6}.entry-time{font-size:34px;font-weight:800;color:#174ea6;margin:12px 0 18px;letter-spacing:.5px}
+  .countdown-label{font-size:22px;font-weight:800;color:#174ea6}.countdown{font-size:58px;font-weight:900;color:#174ea6;line-height:1.05;margin:5px 0 18px}
+  .price-box{border:2px solid #16803c;border-radius:14px;padding:14px 10px;background:#fbfffc}.price-label{font-size:21px;font-weight:800;color:#16753a}.price{font-size:52px;font-weight:900;color:#16803c;margin-top:3px}
+  .details{margin-top:20px;font-size:18px;line-height:1.7}.source-badge{display:inline-block;padding:5px 10px;border-radius:999px;background:#eef2ff;font-weight:700}
+  @media(max-width:600px){main{padding-top:76px}.api-usage{top:14px;right:20px}.brand{padding-right:0}.brand img{width:58px;height:58px}h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}.price{font-size:42px}}
 </style>
 </head>
 <body>
 <main>
-<div class="api-usage">
-  <strong>TWELVE DATA</strong>
-  <div class="api-row">DAY: {% if usage.daily_limit is not none and usage.daily_left is not none %}{{usage.daily_limit}} / {{usage.daily_left}}{% else %}-- / --{% endif %}</div>
-  <div class="api-row">MIN: {% if usage.minute_limit is not none and usage.minute_left is not none %}{{usage.minute_limit}} / {{usage.minute_left}}{% else %}-- / --{% endif %}</div>
-</div>
+<div class="api-usage"><strong>TWELVE DATA</strong><div class="api-row">DAY: {% if usage.daily_limit is not none and usage.daily_left is not none %}{{usage.daily_limit}} / {{usage.daily_left}}{% else %}-- / --{% endif %}</div><div class="api-row">MIN: {% if usage.minute_limit is not none and usage.minute_left is not none %}{{usage.minute_limit}} / {{usage.minute_left}}{% else %}-- / --{% endif %}</div></div>
 <a class="logout" href="{{ url_for('logout') }}">LOGOUT</a>
-<div class="brand">
-  <img src="{{ url_for('static', filename='sk_bot_logo.svg') }}" alt="SK BOT">
-  <h1>MMC Live Forex Signal</h1>
-</div>
-<p class="intro">GET SIGNAL prepares the next 1-minute candle. The signal is generated 30 seconds before that candle starts.</p>
-<form method="post">
-<label>Forex pair
-<select name="pair">{% for p in pairs %}<option value="{{p}}" {% if p == pair %}selected{% endif %}>{{p}}</option>{% endfor %}</select>
-</label>
-<button type="submit">GET SIGNAL</button>
+<div class="brand"><img src="{{ url_for('static', filename='sk_bot_logo.svg') }}" alt="SK BOT"><h1>MMC Live Signal</h1></div>
+<p class="intro">Choose a market mode. Data is fetched only after GET SIGNAL. The signal prepares the next 1-minute candle.</p>
+<form method="post" id="signal-form">
+  <div style="width:100%"><strong>MARKET MODE</strong></div>
+  <div class="mode-tabs">
+    <button type="button" class="mode-btn {% if mode == 'real' %}active{% endif %}" data-mode="real">REAL</button>
+    <button type="button" class="mode-btn {% if mode == 'crypto' %}active{% endif %}" data-mode="crypto">CRYPTO</button>
+  </div>
+  <input type="hidden" name="mode" id="mode" value="{{mode}}">
+  <label>Market
+    <select name="pair" id="pair">
+      {% for p in real_pairs %}<option data-market="real" value="{{p}}" {% if mode == 'real' and p == pair %}selected{% endif %}>{{p}}</option>{% endfor %}
+      {% for p in crypto_pairs %}<option data-market="crypto" value="{{p}}" {% if mode == 'crypto' and p == pair %}selected{% endif %}>{{p}}</option>{% endfor %}
+    </select>
+  </label>
+  <button type="submit">GET SIGNAL</button>
 </form>
 {% if error %}<p><strong>Error:</strong> {{error}}</p>{% endif %}
 {% if result %}
 <section>
 <h2>{{result.pair}} — {{result.signal}}</h2>
+<p><span class="source-badge">{{result.market_mode|upper}} · DATA: {{result.source}}</span></p>
 <div class="entry-box">
   <div class="entry-title">ENTRY TIME — NEXT 1-MINUTE CANDLE</div>
   <div class="entry-time">{{result.entry_time_bd}}</div>
   <div class="countdown-label">ENTRY COUNTDOWN</div>
   <div class="countdown" data-entry-timer data-entry-at="{{result.entry_time_utc}}">00:30</div>
-  <div class="price-box">
-    <div class="price-label">ENTRY PRICE</div>
-    <div class="price">{{result.entry_price if result.entry_price is not none else 'N/A'}}</div>
-  </div>
+  <div class="price-box"><div class="price-label">ENTRY PRICE</div><div class="price">{{result.entry_price if result.entry_price is not none else 'N/A'}}</div></div>
 </div>
-<div class="details">
-<p><strong>Timeframe:</strong> {{result.timeframe}}</p>
-<p><strong>Buy score:</strong> {{result.buy_score}}</p>
-<p><strong>Sell score:</strong> {{result.sell_score}}</p>
-<p><strong>Reason:</strong> {{result.reason}}</p>
-</div>
+<div class="details"><p><strong>Data source:</strong> {{result.source}}</p><p><strong>Timeframe:</strong> {{result.timeframe}}</p><p><strong>Buy score:</strong> {{result.buy_score}}</p><p><strong>Sell score:</strong> {{result.sell_score}}</p><p><strong>Reason:</strong> {{result.reason}}</p></div>
 </section>
 {% endif %}
 </main>
+<script>
+const modeInput=document.getElementById('mode'), pairSelect=document.getElementById('pair');
+function setMode(mode){modeInput.value=mode;document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));Array.from(pairSelect.options).forEach(o=>o.hidden=o.dataset.market!==mode);const first=Array.from(pairSelect.options).find(o=>o.dataset.market===mode);if(first)pairSelect.value=first.value;}
+document.querySelectorAll('.mode-btn').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.mode)));setMode(modeInput.value);
+</script>
 <script src="{{ url_for('static', filename='candle_timer.js') }}" defer></script>
 </body>
 </html>
