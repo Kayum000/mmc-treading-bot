@@ -107,9 +107,15 @@ def favicon():
     return redirect(url_for("static", filename="sk_bot_logo.svg"))
 
 
+@app.route("/privacy")
+def privacy():
+    """Public privacy policy page for app-store review and users."""
+    return render_template("privacy.html")
+
+
 @app.before_request
 def require_login():
-    if request.endpoint in {"login", "favicon", "static"}:
+    if request.endpoint in {"login", "favicon", "privacy", "static"}:
         return None
     if not session.get("authenticated"):
         return redirect(url_for("login"))
