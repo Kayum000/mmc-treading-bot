@@ -68,7 +68,7 @@
 </section>
 {% endif %}
 </main>
-<a class="download-app" href="/static/manifest.webmanifest" aria-label="Download App">📲 Download App</a>
+<a class="download-app" href="https://github.com/Kayum000/mmc-treading-bot/releases/download/latest/app-debug.apk" aria-label="Download App">📲 Download App</a>
 <script>
 const modeInput=document.getElementById('mode'), pairSelect=document.getElementById('pair');
 function setMode(mode){modeInput.value=mode;document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));Array.from(pairSelect.options).forEach(o=>o.hidden=o.dataset.market!==mode);const first=Array.from(pairSelect.options).find(o=>o.dataset.market===mode);if(first)pairSelect.value=first.value;}
