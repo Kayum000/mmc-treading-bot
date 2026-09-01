@@ -53,11 +53,11 @@ def get_signal(pair: str) -> dict:
         "sell_score": result.sell_score,
         "reason": result.reason,
         "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
-        "signal_time_bd": signal_bd.strftime("%d %b %Y, %I:%M:%S %p"),
+        "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
         "candle_time": candle_time,
         "entry_price": entry_price,
         "entry_time_utc": next_candle_utc.isoformat(timespec="seconds"),
-        "entry_time_bd": entry_bd.strftime("%d %b %Y, %I:%M:%S %p"),
+        "entry_time_bd": entry_bd.strftime("%d %b %Y, %H:%M:%S"),
         "entry_delay_seconds": ENTRY_LEAD_SECONDS,
         "timeframe": "1m entry / 5m + 15m confirmation",
     }
