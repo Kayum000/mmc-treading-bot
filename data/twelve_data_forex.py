@@ -15,6 +15,40 @@ import pandas as pd
 
 INTERVALS = {"1min": "1m", "5min": "5m", "15min": "15m"}
 
+_LAST_CREDIT_USAGE = {"used": None, "left": None, "limit": None}
+
+
+def _record_credit_headers(headers) -> None:
+    used = headers.get("api-credits-used")
+    left = headers.get("api-credits-left")
+    if used is not None or left is not None:
+        try:
+            used_i = int(used) if used is not None else None
+            left_i = int(left) if left is not None else None
+            limit_i = (used_i + left_i) if used_i is not None and left_i is not None else None
+            _LAST_CREDIT_USAGE.update({"used": used_i, "left": left_i, "limit": limit_i})
+        except ValueError:
+            pass
+
+
+def get_credit_usage() -> dict:
+    return dict(_LAST_CREDIT_USAGE)
+
+
+def fetch_api_usage() -> dict:
+    """Fetch real account usage; this endpoint costs 1 API credit."""
+    api_key = os.getenv("TWELVE_DATA_API_KEY")
+    if not api_key:
+        raise RuntimeError("Set TWELVE_DATA_API_KEY in the environment; never commit it to GitHub.")
+    params = urlencode({"apikey": api_key})
+    req = Request(
+        f"https://api.twelvedata.com/api_usage?{params}",
+        headers={"User-Agent": "mmc-signal-bot/1.0"},
+    )
+    with urlopen(req, timeout=10) as response:
+        _record_credit_headers(response.headers)
+        return json.load(response)
+
 
 def fetch_forex_candles(symbol: str, interval: str = "1min", outputsize: int = 200) -> pd.DataFrame:
     api_key = os.getenv("TWELVE_DATA_API_KEY")
@@ -25,6 +59,7 @@ def fetch_forex_candles(symbol: str, interval: str = "1min", outputsize: int = 2
     params = urlencode({"symbol": symbol, "interval": interval, "outputsize": outputsize, "apikey": api_key})
     req = Request(f"https://api.twelvedata.com/time_series?{params}", headers={"User-Agent": "mmc-signal-bot/1.0"})
     with urlopen(req, timeout=10) as response:
+        _record_credit_headers(response.headers)
         payload = json.load(response)
     if payload.get("status") == "error":
         raise RuntimeError(payload.get("message", "Twelve Data API error"))
@@ -39,12 +74,7 @@ def fetch_forex_candles(symbol: str, interval: str = "1min", outputsize: int = 2
 
 
 def fetch_forex_multi_timeframe(symbol: str) -> dict[str, pd.DataFrame]:
-    """Fetch 1m/5m/15m candles concurrently for the selected pair.
-
-    The strategy still receives exactly the same three DataFrames; only the
-    network wait is parallelized so one slow timeframe does not block the
-    other two from being fetched.
-    """
+    """Fetch 1m/5m/15m candles concurrently for the selected pair."""
     intervals = list(INTERVALS.items())
     with ThreadPoolExecutor(max_workers=len(intervals)) as executor:
         futures = {
