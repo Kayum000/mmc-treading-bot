@@ -26,7 +26,9 @@
   .countdown-label{font-size:22px;font-weight:800;color:#174ea6}.countdown{font-size:58px;font-weight:900;color:#174ea6;line-height:1.05;margin:5px 0 18px}
   .price-box{border:2px solid #16803c;border-radius:14px;padding:14px 10px;background:#fbfffc}.price-label{font-size:21px;font-weight:800;color:#16753a}.price{font-size:52px;font-weight:900;color:#16803c;margin-top:3px}
   .details{margin-top:20px;font-size:18px;line-height:1.7}.source-badge{display:inline-block;padding:5px 10px;border-radius:999px;background:#eef2ff;font-weight:700}
-  @media(max-width:600px){main{padding-top:76px}.api-usage{top:14px;right:20px}.brand{padding-right:0}.brand img{width:58px;height:58px}h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}.price{font-size:42px}}
+  .download-app{position:fixed;right:12px;bottom:12px;z-index:1000;text-decoration:none;background:#2563eb;color:#fff;font-size:16px;font-weight:700;padding:12px 16px;border-radius:999px;box-shadow:0 4px 14px rgba(0,0,0,.2);display:flex;align-items:center;gap:7px}
+  .download-app:hover{background:#1d4ed8}
+  @media(max-width:600px){main{padding-top:76px}.api-usage{top:14px;right:20px}.brand{padding-right:0}.brand img{width:58px;height:58px}h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}.download-app{right:12px;bottom:12px;font-size:15px;padding:11px 14px}}
 </style>
 </head>
 <body>
@@ -66,6 +68,7 @@
 </section>
 {% endif %}
 </main>
+<a class="download-app" href="/static/manifest.webmanifest" aria-label="Download App">📲 Download App</a>
 <script>
 const modeInput=document.getElementById('mode'), pairSelect=document.getElementById('pair');
 function setMode(mode){modeInput.value=mode;document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));Array.from(pairSelect.options).forEach(o=>o.hidden=o.dataset.market!==mode);const first=Array.from(pairSelect.options).find(o=>o.dataset.market===mode);if(first)pairSelect.value=first.value;}
