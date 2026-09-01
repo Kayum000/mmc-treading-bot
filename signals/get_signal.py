@@ -1,9 +1,10 @@
-"""On-demand live Forex signal for the selected pair."""
+"""On-demand live MMC signal for the selected Real or Crypto market."""
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import time
 
 from data.twelve_data_forex import fetch_forex_multi_timeframe
+from data.binance_crypto import fetch_crypto_multi_timeframe
 from data.live_signal import build_signal
 
 ENTRY_LEAD_SECONDS = 30
@@ -15,13 +16,12 @@ def _next_candle_boundary_utc(now_utc: datetime) -> datetime:
     return datetime.fromtimestamp(next_epoch, tz=timezone.utc)
 
 
-def get_signal(pair: str) -> dict:
+def get_signal(pair: str, market_mode: str = "real") -> dict:
     pair = pair.strip().upper()
+    market_mode = market_mode.strip().lower()
+    if market_mode not in {"real", "crypto"}:
+        raise ValueError("Unsupported market mode")
 
-    # If GET SIGNAL is pressed before the final 30 seconds of the current
-    # candle, wait until exactly 30 seconds before the next 1m candle starts.
-    # This keeps the signal based on the running candle while giving the user
-    # a fixed 30-second preparation window for the next candle.
     requested_at_utc = datetime.now(timezone.utc)
     next_candle_utc = _next_candle_boundary_utc(requested_at_utc)
     signal_at_utc = next_candle_utc - timedelta(seconds=ENTRY_LEAD_SECONDS)
@@ -32,7 +32,14 @@ def get_signal(pair: str) -> dict:
     signal_at_utc = datetime.now(timezone.utc)
     next_candle_utc = _next_candle_boundary_utc(signal_at_utc)
 
-    frames = fetch_forex_multi_timeframe(pair)
+    if market_mode == "crypto":
+        symbol = pair.replace("/", "")
+        frames = fetch_crypto_multi_timeframe(symbol)
+        source = "Binance"
+    else:
+        frames = fetch_forex_multi_timeframe(pair)
+        source = "Twelve Data"
+
     result = build_signal(frames)
 
     latest = frames.get("1m")
@@ -48,6 +55,8 @@ def get_signal(pair: str) -> dict:
 
     return {
         "pair": pair,
+        "market_mode": market_mode,
+        "source": source,
         "signal": result.action,
         "buy_score": result.buy_score,
         "sell_score": result.sell_score,
@@ -61,11 +70,3 @@ def get_signal(pair: str) -> dict:
         "entry_delay_seconds": ENTRY_LEAD_SECONDS,
         "timeframe": "1m entry / 5m + 15m confirmation",
     }
-
-
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="Get one fresh live Forex signal")
-    parser.add_argument("pair")
-    args = parser.parse_args()
-    print(get_signal(args.pair))
