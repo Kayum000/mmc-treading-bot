@@ -7,7 +7,9 @@
 <style>
   body{margin:0;background:#f5f7fb;font-family:Arial,sans-serif;color:#172033}
   main{max-width:900px;margin:0 auto;padding:20px;position:relative}
-  h1{font-size:38px;margin:0 0 8px}
+  .brand{display:flex;align-items:center;gap:12px;margin:0 0 8px;padding-right:150px}
+  .brand img{width:70px;height:70px;object-fit:contain;border-radius:16px;flex:none}
+  h1{font-size:38px;margin:0}
   .intro{font-size:18px;margin-bottom:22px}
   form{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:22px}
   select,button{font-size:20px;padding:12px 18px;border-radius:10px;border:1px solid #cbd5e1}
@@ -26,7 +28,7 @@
   .price-label{font-size:21px;font-weight:800;color:#16753a}
   .price{font-size:52px;font-weight:900;color:#16803c;margin-top:3px}
   .details{margin-top:20px;font-size:18px;line-height:1.7}
-  @media(max-width:600px){main{padding-top:76px}.api-usage{top:14px;right:20px}h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}.price{font-size:42px}}
+  @media(max-width:600px){main{padding-top:76px}.api-usage{top:14px;right:20px}.brand{padding-right:0}.brand img{width:58px;height:58px}h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}.price{font-size:42px}}
 </style>
 </head>
 <body>
@@ -36,7 +38,10 @@
   <div class="api-row">DAY: {% if usage.daily_limit is not none and usage.daily_left is not none %}{{usage.daily_limit}} / {{usage.daily_left}}{% else %}-- / --{% endif %}</div>
   <div class="api-row">MIN: {% if usage.minute_limit is not none and usage.minute_left is not none %}{{usage.minute_limit}} / {{usage.minute_left}}{% else %}-- / --{% endif %}</div>
 </div>
-<h1>MMC Live Forex Signal</h1>
+<div class="brand">
+  <img src="{{ url_for('static', filename='sk_bot_logo.svg') }}" alt="SK BOT">
+  <h1>MMC Live Forex Signal</h1>
+</div>
 <p class="intro">GET SIGNAL prepares the next 1-minute candle. The signal is generated 30 seconds before that candle starts.</p>
 <form method="post">
 <label>Forex pair
