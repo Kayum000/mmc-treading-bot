@@ -6,7 +6,8 @@ class StrategyConfig:
     fast_ema: int = 20
     swing_lookback: int = 3
     sweep_lookback: int = 10
-    min_score: int = 6
+    # Higher threshold because the MTF score now requires stronger confirmation.
+    min_score: int = 12
 
 TIMEFRAMES = ("15m", "5m", "1m")
 CONFIG = StrategyConfig()
