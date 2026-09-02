@@ -8,12 +8,14 @@ from __future__ import annotations
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 import pandas as pd
 
 INTERVALS = {"1min": "1m", "5min": "5m", "15min": "15m"}
+_INTERVAL_SECONDS = {"1min": 60, "5min": 300, "15min": 900}
 
 _LAST_CREDIT_USAGE = {"used": None, "left": None, "limit": None}
 
@@ -50,6 +52,14 @@ def fetch_api_usage() -> dict:
         return json.load(response)
 
 
+def _closed_candles(df: pd.DataFrame, interval: str) -> pd.DataFrame:
+    """Keep only candles whose full interval has already closed in UTC."""
+    if df.empty:
+        return df
+    cutoff = pd.Timestamp(datetime.now(timezone.utc)) - pd.Timedelta(seconds=_INTERVAL_SECONDS[interval])
+    return df.loc[df["timestamp"] <= cutoff].copy()
+
+
 def fetch_forex_candles(symbol: str, interval: str = "1min", outputsize: int = 200) -> pd.DataFrame:
     api_key = os.getenv("TWELVE_DATA_API_KEY")
     if not api_key:
@@ -70,11 +80,15 @@ def fetch_forex_candles(symbol: str, interval: str = "1min", outputsize: int = 2
     df["timestamp"] = pd.to_datetime(df["datetime"], utc=True)
     for col in ("open", "high", "low", "close"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df[["timestamp", "open", "high", "low", "close"]].dropna().sort_values("timestamp")
+    df = df[["timestamp", "open", "high", "low", "close"]].dropna().sort_values("timestamp")
+    df = _closed_candles(df, interval)
+    if df.empty:
+        raise RuntimeError(f"Twelve Data returned no closed {INTERVALS[interval]} candles")
+    return df.reset_index(drop=True)
 
 
 def fetch_forex_multi_timeframe(symbol: str) -> dict[str, pd.DataFrame]:
-    """Fetch 1m/5m/15m candles concurrently for the selected pair."""
+    """Fetch closed 1m/5m/15m candles concurrently for the selected pair."""
     intervals = list(INTERVALS.items())
     with ThreadPoolExecutor(max_workers=len(intervals)) as executor:
         futures = {
