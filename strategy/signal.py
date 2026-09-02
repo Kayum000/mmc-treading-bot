@@ -53,20 +53,20 @@ def generate_signal(frames: dict[str, pd.DataFrame]) -> Signal:
             "BUY",
             buy,
             sell,
-            "Bullish MMC: 15m + 5m trend aligned, 1m entry trigger confirmed",
+            "বুলিশ MMC: 15m ও 5m ট্রেন্ড একমত, 1m এন্ট্রি ট্রিগার নিশ্চিত",
         )
     if sell_valid and sell > buy:
         return Signal(
             "SELL",
             buy,
             sell,
-            "Bearish MMC: 15m + 5m trend aligned, 1m entry trigger confirmed",
+            "বেয়ারিশ MMC: 15m ও 5m ট্রেন্ড একমত, 1m এন্ট্রি ট্রিগার নিশ্চিত",
         )
     if buy >= CONFIG.min_score or sell >= CONFIG.min_score:
         return Signal(
             "NO_TRADE",
             buy,
             sell,
-            "Score reached threshold but MTF, trigger, or structure confirmation conflicted",
+            "স্কোর নির্ধারিত সীমায় পৌঁছেছে, কিন্তু MTF, এন্ট্রি ট্রিগার বা মার্কেট স্ট্রাকচারে অসঙ্গতি আছে",
         )
-    return Signal("NO_TRADE", buy, sell, "Insufficient MMC confirmation")
+    return Signal("NO_TRADE", buy, sell, "যথেষ্ট MMC কনফার্মেশন পাওয়া যায়নি")
