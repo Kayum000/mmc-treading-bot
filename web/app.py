@@ -126,18 +126,37 @@ def require_login():
 def index():
     result = None
     error = None
-    mode = request.form.get("mode", "real").strip().lower()
-    if mode not in {"real", "crypto"}:
-        mode = "real"
-    pairs = REAL_PAIRS if mode == "real" else CRYPTO_PAIRS
-    pair = request.form.get("pair", pairs[0])
-    if pair not in pairs:
-        pair = pairs[0]
+
     if request.method == "POST":
-        try:
-            result = get_signal(pair, mode)
-        except Exception as exc:
-            error = str(exc)
+        mode = request.form.get("mode", "").strip().lower()
+        pair = request.form.get("pair", "").strip().upper()
+    else:
+        # Restore the last market selected by this logged-in user.
+        mode = session.get("selected_mode", "")
+        pair = session.get("selected_pair", "")
+
+    if mode not in {"real", "crypto"}:
+        mode = ""
+        pair = ""
+
+    pairs = REAL_PAIRS if mode == "real" else CRYPTO_PAIRS if mode == "crypto" else []
+
+    if pair not in pairs:
+        pair = ""
+
+    if request.method == "POST":
+        if not pair:
+            error = "Please select a market before GET SIGNAL."
+        else:
+            # Save exactly the market the user chose. It stays selected after
+            # GET SIGNAL and on the next page load until the user changes it.
+            session["selected_mode"] = mode
+            session["selected_pair"] = pair
+            try:
+                result = get_signal(pair, mode)
+            except Exception as exc:
+                error = str(exc)
+
     usage = _usage_view()
     return render_template(
         "index.html",
