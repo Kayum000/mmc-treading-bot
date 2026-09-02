@@ -31,6 +31,8 @@ def get_signal(pair: str, market_mode: str = "real") -> dict:
     if wait_seconds > 0:
         time.sleep(wait_seconds)
 
+    # Recalculate after the optional wait so the entry always points to a
+    # future 1-minute candle relative to the actual analysis time.
     signal_at_utc = datetime.now(timezone.utc)
     next_candle_utc = _next_candle_boundary_utc(signal_at_utc)
 
@@ -44,13 +46,16 @@ def get_signal(pair: str, market_mode: str = "real") -> dict:
 
     result = build_signal(frames)
 
+    # The adapters return closed candles only. Keep the real timestamp from
+    # the 1m candle instead of the DataFrame row number.
     latest = frames.get("1m")
     entry_price = None
     candle_time = None
     if latest is not None and not latest.empty:
         row = latest.iloc[-1]
         entry_price = float(row["close"])
-        candle_time = str(latest.index[-1])
+        candle_time_utc = pd_timestamp_to_utc(row["timestamp"])
+        candle_time = candle_time_utc.isoformat(timespec="seconds")
 
     signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
     entry_bd = next_candle_utc.astimezone(timezone(timedelta(hours=6)))
@@ -68,9 +73,20 @@ def get_signal(pair: str, market_mode: str = "real") -> dict:
         "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
         "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
         "candle_time": candle_time,
+        "analysis_candle_time_utc": candle_time,
         "entry_price": entry_price,
+        "entry_price_type": "last_closed_1m_close_reference",
         "entry_time_utc": next_candle_utc.isoformat(timespec="seconds"),
         "entry_time_bd": entry_bd.strftime("%d %b %Y, %H:%M:%S"),
         "entry_delay_seconds": ENTRY_LEAD_SECONDS,
         "timeframe": "1m entry / 5m + 15m confirmation",
     }
+
+
+def pd_timestamp_to_utc(value) -> datetime:
+    """Convert a candle timestamp to an aware UTC datetime."""
+    if hasattr(value, "to_pydatetime"):
+        value = value.to_pydatetime()
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
