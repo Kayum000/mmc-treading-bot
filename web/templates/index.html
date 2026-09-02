@@ -54,7 +54,6 @@
 {% if result %}
 <section>
 <h2>{{result.pair}} — {{result.signal}}</h2>
-<p><span class="source-badge">{{result.market_mode|upper}} · DATA: {{result.source}}</span></p>
 <div class="entry-box">
   <div class="entry-title">ENTRY TIME — NEXT 1-MINUTE CANDLE</div>
   <div class="entry-time">{{result.entry_time_bd}}</div>
@@ -62,7 +61,7 @@
   <div class="countdown" data-entry-timer data-entry-at="{{result.entry_time_utc}}">00:30</div>
   <div class="price-box"><div class="price-label">ENTRY PRICE</div><div class="price">{{result.entry_price if result.entry_price is not none else 'N/A'}}</div></div>
 </div>
-<div class="details"><p><strong>Data source:</strong> {{result.source}}</p><p><strong>Timeframe:</strong> {{result.timeframe}}</p><p><strong>Buy score:</strong> {{result.buy_score}}</p><p><strong>Sell score:</strong> {{result.sell_score}}</p><p><strong>Reason:</strong> {{result.reason}}</p></div>
+<div class="details"><p><strong>Timeframe:</strong> {{result.timeframe}}</p><p><strong>Buy score:</strong> {{result.buy_score}}</p><p><strong>Sell score:</strong> {{result.sell_score}}</p><p><strong>Reason:</strong> {{result.reason}}</p></div>
 </section>
 {% endif %}
 </main>
