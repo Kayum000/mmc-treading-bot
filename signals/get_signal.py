@@ -1,13 +1,10 @@
 """On-demand live MMC signal for the selected Real or Crypto market."""
 from __future__ import annotations
-from datetime import datetime, timedelta, timezone
-import time
+from datetime import datetime, timezone, timedelta
 
 from data.twelve_data_forex import fetch_forex_multi_timeframe
 from data.binance_crypto import fetch_crypto_multi_timeframe
 from data.live_signal import build_signal
-
-ENTRY_LEAD_SECONDS = 30
 
 
 def _next_candle_boundary_utc(now_utc: datetime) -> datetime:
@@ -24,18 +21,10 @@ def get_signal(pair: str, market_mode: str = "real") -> dict:
         raise ValueError("Unsupported market mode")
 
     requested_pair = pair
-    requested_at_utc = datetime.now(timezone.utc)
-    next_candle_utc = _next_candle_boundary_utc(requested_at_utc)
-    signal_at_utc = next_candle_utc - timedelta(seconds=ENTRY_LEAD_SECONDS)
-    wait_seconds = (signal_at_utc - requested_at_utc).total_seconds()
-    if wait_seconds > 0:
-        time.sleep(wait_seconds)
 
-    # Recalculate after the optional wait so the entry always points to a
-    # future 1-minute candle relative to the actual analysis time.
-    signal_at_utc = datetime.now(timezone.utc)
-    next_candle_utc = _next_candle_boundary_utc(signal_at_utc)
-
+    # GET SIGNAL must start data fetching immediately. We deliberately do not
+    # sleep here; the entry candle is calculated after the live-data fetch so
+    # it is always the next 1-minute candle relative to the actual analysis.
     if market_mode == "crypto":
         symbol = requested_pair.replace("/", "")
         frames = fetch_crypto_multi_timeframe(symbol)
@@ -44,6 +33,8 @@ def get_signal(pair: str, market_mode: str = "real") -> dict:
         frames = fetch_forex_multi_timeframe(requested_pair)
         source = "Twelve Data"
 
+    signal_at_utc = datetime.now(timezone.utc)
+    next_candle_utc = _next_candle_boundary_utc(signal_at_utc)
     result = build_signal(frames)
 
     # The adapters return closed candles only. Keep the real timestamp from
@@ -78,7 +69,7 @@ def get_signal(pair: str, market_mode: str = "real") -> dict:
         "entry_price_type": "last_closed_1m_close_reference",
         "entry_time_utc": next_candle_utc.isoformat(timespec="seconds"),
         "entry_time_bd": entry_bd.strftime("%d %b %Y, %H:%M:%S"),
-        "entry_delay_seconds": ENTRY_LEAD_SECONDS,
+        "entry_delay_seconds": 0,
         "timeframe": "1m entry / 5m + 15m confirmation",
     }
 
