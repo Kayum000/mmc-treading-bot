@@ -17,8 +17,7 @@
   form{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:22px}
   select,button{font-size:20px;padding:12px 18px;border-radius:10px;border:1px solid #cbd5e1}
   button{background:#2563eb;color:white;border:0;font-weight:700;cursor:pointer}
-  .api-usage{position:absolute;right:20px;top:20px;background:white;border:1px solid #d8dee9;border-radius:10px;padding:8px 11px;font-size:12px;line-height:1.35;text-align:right;box-shadow:0 2px 8px rgba(0,0,0,.06)}
-  .api-usage strong{font-size:12px}.api-row{white-space:nowrap}.logout{position:absolute;right:20px;top:82px;font-size:13px;color:#b42318;text-decoration:none}
+  .logout{position:absolute;right:20px;top:20px;font-size:13px;color:#b42318;text-decoration:none}
   .mode-tabs{display:flex;gap:10px;margin-bottom:14px}.mode-tabs button{background:#e8edf5;color:#172033;border:1px solid #cbd5e1}.mode-tabs button.active{background:#2563eb;color:#fff;border-color:#2563eb}
   section{background:white;border-radius:16px;padding:22px;box-shadow:0 3px 14px rgba(0,0,0,.08)}
   h2{font-size:38px;margin:0 0 20px}.entry-box{border:2px solid #2563eb;border-radius:16px;padding:22px;text-align:center;background:#f8fbff}
@@ -28,12 +27,11 @@
   .details{margin-top:20px;font-size:18px;line-height:1.7}.source-badge{display:inline-block;padding:5px 10px;border-radius:999px;background:#eef2ff;font-weight:700}
   .download-app{position:fixed;right:12px;bottom:12px;z-index:1000;text-decoration:none;background:#2563eb;color:#fff;font-size:16px;font-weight:700;padding:12px 16px;border-radius:999px;box-shadow:0 4px 14px rgba(0,0,0,.2);display:flex;align-items:center;gap:7px}
   .download-app:hover{background:#1d4ed8}
-  @media(max-width:600px){main{padding-top:76px}.api-usage{top:14px;right:20px}.brand{padding-right:0}.brand img{width:58px;height:58px}h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}.download-app{right:12px;bottom:12px;font-size:15px;padding:11px 14px}}
+  @media(max-width:600px){main{padding-top:76px}.brand{padding-right:0}.brand img{width:58px;height:58px}h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}.download-app{right:12px;bottom:12px;font-size:15px;padding:11px 14px}}
 </style>
 </head>
 <body>
 <main>
-<div class="api-usage"><strong>TWELVE DATA</strong><div class="api-row">DAY: {% if usage.daily_limit is not none and usage.daily_left is not none %}{{usage.daily_limit}} / {{usage.daily_left}}{% else %}-- / --{% endif %}</div><div class="api-row">MIN: {% if usage.minute_limit is not none and usage.minute_left is not none %}{{usage.minute_limit}} / {{usage.minute_left}}{% else %}-- / --{% endif %}</div></div>
 <a class="logout" href="{{ url_for('logout') }}">LOGOUT</a>
 <div class="brand"><img src="{{ url_for('static', filename='sk_bot_logo.svg') }}" alt="SK BOT"><h1>MMC Live Signal</h1></div>
 <p class="intro">Choose a market mode. Data is fetched only after GET SIGNAL. The signal prepares the next 1-minute candle.</p>
