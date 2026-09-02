@@ -9,6 +9,7 @@ import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -56,7 +57,8 @@ def _closed_candles(df: pd.DataFrame, interval: str) -> pd.DataFrame:
     """Keep only candles whose full interval has already closed in UTC."""
     if df.empty:
         return df
-    cutoff = pd.Timestamp(datetime.now(timezone.utc)) - pd.Timedelta(seconds=_INTERVAL_SECONDS[interval])
+    now_utc = pd.Timestamp(datetime.now(timezone.utc))
+    cutoff = now_utc - pd.Timedelta(seconds=_INTERVAL_SECONDS[interval])
     return df.loc[df["timestamp"] <= cutoff].copy()
 
 
@@ -66,11 +68,31 @@ def fetch_forex_candles(symbol: str, interval: str = "1min", outputsize: int = 2
         raise RuntimeError("Set TWELVE_DATA_API_KEY in the environment; never commit it to GitHub.")
     if interval not in INTERVALS:
         raise ValueError(f"Unsupported interval: {interval}")
-    params = urlencode({"symbol": symbol, "interval": interval, "outputsize": outputsize, "apikey": api_key})
-    req = Request(f"https://api.twelvedata.com/time_series?{params}", headers={"User-Agent": "mmc-signal-bot/1.0"})
-    with urlopen(req, timeout=10) as response:
-        _record_credit_headers(response.headers)
-        payload = json.load(response)
+
+    # Twelve Data's Forex default timezone is not UTC. Request UTC explicitly
+    # so candle timestamps can be compared safely with the server clock.
+    params = urlencode({
+        "symbol": symbol,
+        "interval": interval,
+        "outputsize": outputsize,
+        "timezone": "UTC",
+        "apikey": api_key,
+    })
+    req = Request(
+        f"https://api.twelvedata.com/time_series?{params}",
+        headers={"User-Agent": "mmc-signal-bot/1.0"},
+    )
+    try:
+        with urlopen(req, timeout=10) as response:
+            _record_credit_headers(response.headers)
+            payload = json.load(response)
+    except HTTPError as exc:
+        if exc.code == 429:
+            raise RuntimeError(
+                "Twelve Data rate limit reached (HTTP 429). Wait for the next API-credit minute and try again."
+            ) from exc
+        raise
+
     if payload.get("status") == "error":
         raise RuntimeError(payload.get("message", "Twelve Data API error"))
     values = payload.get("values", [])
@@ -88,11 +110,12 @@ def fetch_forex_candles(symbol: str, interval: str = "1min", outputsize: int = 2
 
 
 def fetch_forex_multi_timeframe(symbol: str) -> dict[str, pd.DataFrame]:
-    """Fetch closed 1m/5m/15m candles concurrently for the selected pair."""
-    intervals = list(INTERVALS.items())
-    with ThreadPoolExecutor(max_workers=len(intervals)) as executor:
-        futures = {
-            label: executor.submit(fetch_forex_candles, symbol, interval)
-            for interval, label in intervals
-        }
-        return {label: futures[label].result() for _, label in intervals}
+    """Fetch closed 1m/5m/15m candles for the selected pair.
+
+    Requests are intentionally sequential to avoid a burst of three REST
+    requests when the user presses GET SIGNAL, reducing rate-limit pressure.
+    """
+    return {
+        label: fetch_forex_candles(symbol, interval)
+        for interval, label in INTERVALS.items()
+    }
