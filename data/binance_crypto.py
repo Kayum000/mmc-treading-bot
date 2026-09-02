@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -9,6 +10,7 @@ from urllib.request import Request, urlopen
 import pandas as pd
 
 INTERVALS = {"1m": "1m", "5m": "5m", "15m": "15m"}
+_INTERVAL_SECONDS = {"1m": 60, "5m": 300, "15m": 900}
 # Binance documents these equivalent public API clusters. The Vision endpoint
 # also supports public /api/v3/klines and is useful when a hosting region
 # receives HTTP 451 from api.binance.com.
@@ -49,6 +51,14 @@ def _fetch_payload(symbol: str, interval: str, limit: int) -> list:
     raise RuntimeError(f"Binance market data unavailable: {last_error}")
 
 
+def _closed_candles(df: pd.DataFrame, interval: str) -> pd.DataFrame:
+    """Keep only candles whose full interval has already closed in UTC."""
+    if df.empty:
+        return df
+    cutoff = pd.Timestamp(datetime.now(timezone.utc)) - pd.Timedelta(seconds=_INTERVAL_SECONDS[interval])
+    return df.loc[df["timestamp"] <= cutoff].copy()
+
+
 def fetch_crypto_candles(symbol: str, interval: str = "1m", limit: int = 200) -> pd.DataFrame:
     if interval not in INTERVALS:
         raise ValueError(f"Unsupported interval: {interval}")
@@ -63,11 +73,15 @@ def fetch_crypto_candles(symbol: str, interval: str = "1m", limit: int = 200) ->
     df["timestamp"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
     for col in ("open", "high", "low", "close"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df[["timestamp", "open", "high", "low", "close"]].dropna().sort_values("timestamp")
+    df = df[["timestamp", "open", "high", "low", "close"]].dropna().sort_values("timestamp")
+    df = _closed_candles(df, interval)
+    if df.empty:
+        raise RuntimeError(f"Binance returned no closed {interval} candles")
+    return df.reset_index(drop=True)
 
 
 def fetch_crypto_multi_timeframe(symbol: str) -> dict[str, pd.DataFrame]:
-    """Fetch 1m/5m/15m candles concurrently for the selected crypto pair."""
+    """Fetch closed 1m/5m/15m candles concurrently for the selected crypto pair."""
     from concurrent.futures import ThreadPoolExecutor
 
     intervals = list(INTERVALS)
