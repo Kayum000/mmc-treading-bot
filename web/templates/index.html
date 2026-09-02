@@ -17,6 +17,7 @@
   form{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:22px}
   select,button{font-size:20px;padding:12px 18px;border-radius:10px;border:1px solid #cbd5e1}
   button{background:#2563eb;color:white;border:0;font-weight:700;cursor:pointer}
+  button:disabled{opacity:.55;cursor:not-allowed}
   .logout{position:absolute;right:20px;top:20px;font-size:13px;color:#b42318;text-decoration:none}
   .mode-tabs{display:flex;gap:10px;margin-bottom:14px}.mode-tabs button{background:#e8edf5;color:#172033;border:1px solid #cbd5e1}.mode-tabs button.active{background:#2563eb;color:#fff;border-color:#2563eb}
   section{background:white;border-radius:16px;padding:22px;box-shadow:0 3px 14px rgba(0,0,0,.08)}
@@ -43,12 +44,13 @@
   </div>
   <input type="hidden" name="mode" id="mode" value="{{mode}}">
   <label>Market
-    <select name="pair" id="pair">
+    <select name="pair" id="pair" required>
+      <option value="" disabled {% if not pair %}selected{% endif %}>Select market</option>
       {% for p in real_pairs %}<option data-market="real" value="{{p}}" {% if mode == 'real' and p == pair %}selected{% endif %}>{{p}}</option>{% endfor %}
       {% for p in crypto_pairs %}<option data-market="crypto" value="{{p}}" {% if mode == 'crypto' and p == pair %}selected{% endif %}>{{p}}</option>{% endfor %}
     </select>
   </label>
-  <button type="submit">GET SIGNAL</button>
+  <button type="submit" id="signal-button" disabled>GET SIGNAL</button>
 </form>
 {% if error %}<p><strong>Error:</strong> {{error}}</p>{% endif %}
 {% if result %}
@@ -67,9 +69,76 @@
 </main>
 <a class="download-app" href="https://github.com/Kayum000/mmc-treading-bot/releases/download/latest/app-debug.apk" aria-label="Download App">📲 Download App</a>
 <script>
-const modeInput=document.getElementById('mode'), pairSelect=document.getElementById('pair');
-function setMode(mode){modeInput.value=mode;document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));Array.from(pairSelect.options).forEach(o=>o.hidden=o.dataset.market!==mode);const first=Array.from(pairSelect.options).find(o=>o.dataset.market===mode);if(first)pairSelect.value=first.value;}
-document.querySelectorAll('.mode-btn').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.mode)));setMode(modeInput.value);
+const modeInput=document.getElementById('mode');
+const pairSelect=document.getElementById('pair');
+const signalButton=document.getElementById('signal-button');
+const STORAGE_MODE='mmc_selected_mode';
+const STORAGE_REAL='mmc_selected_real_pair';
+const STORAGE_CRYPTO='mmc_selected_crypto_pair';
+
+function savedPairForMode(mode){
+  return localStorage.getItem(mode==='crypto' ? STORAGE_CRYPTO : STORAGE_REAL) || '';
+}
+
+function saveCurrentPair(){
+  const mode=modeInput.value;
+  const pair=pairSelect.value;
+  if(mode && pair){
+    localStorage.setItem(STORAGE_MODE, mode);
+    localStorage.setItem(mode==='crypto' ? STORAGE_CRYPTO : STORAGE_REAL, pair);
+  }
+}
+
+function updateSignalButton(){
+  signalButton.disabled=!pairSelect.value;
+}
+
+function setMode(mode, preserveSelection=true){
+  modeInput.value=mode;
+  document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
+  Array.from(pairSelect.options).forEach(o=>{
+    o.hidden=o.dataset.market && o.dataset.market!==mode;
+  });
+
+  let target=preserveSelection && pairSelect.value && pairSelect.options[pairSelect.selectedIndex].dataset.market===mode
+    ? pairSelect.value
+    : savedPairForMode(mode);
+
+  const matching=Array.from(pairSelect.options).find(o=>o.dataset.market===mode && o.value===target);
+  if(matching){
+    pairSelect.value=matching.value;
+  }else{
+    pairSelect.value='';
+  }
+  updateSignalButton();
+}
+
+pairSelect.addEventListener('change',()=>{
+  saveCurrentPair();
+  updateSignalButton();
+});
+
+document.querySelectorAll('.mode-btn').forEach(b=>b.addEventListener('click',()=>{
+  saveCurrentPair();
+  setMode(b.dataset.mode,false);
+}));
+
+// Server session is authoritative after GET SIGNAL/page reload. Local storage
+// only remembers the last choice made in each mode, so no market is forced.
+const serverMode=modeInput.value;
+const serverPair={{ pair|tojson }};
+const storedMode=localStorage.getItem(STORAGE_MODE);
+if(!serverMode){
+  const initialMode=storedMode==='crypto' ? 'crypto' : 'real';
+  setMode(initialMode,false);
+}else{
+  setMode(serverMode,true);
+  if(serverPair && pairSelect.value!==serverPair){
+    const option=Array.from(pairSelect.options).find(o=>o.dataset.market===serverMode && o.value===serverPair);
+    if(option) pairSelect.value=option.value;
+    updateSignalButton();
+  }
+}
 </script>
 <script src="{{ url_for('static', filename='candle_timer.js') }}" defer></script>
 </body>
