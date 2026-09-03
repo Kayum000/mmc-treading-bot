@@ -8,7 +8,7 @@ from flask import Flask, jsonify, render_template, request, redirect, url_for, s
 
 from signals.get_signal import get_signal
 from data.twelve_data_forex import fetch_api_usage, get_credit_usage
-from data.news_direction import get_weekly_news_overview_for_pair
+from data.news_direction import get_news_direction_for_pair
 from data.news_events import get_weekly_news_events_for_pair
 from data.market_status import get_market_status
 
@@ -200,28 +200,14 @@ def news_alert():
 
 @app.route("/news-direction", methods=["GET"])
 def news_direction():
-    """Call Alpha Vantage only when the UI explicitly needs news direction."""
+    """Use the event-keyed direction cache; Alpha Vantage is called only once per news event."""
     mode = session.get("selected_mode", "").strip().lower()
     pair = session.get("selected_pair", "").strip().upper()
     valid_pairs = REAL_PAIRS if mode == "real" else CRYPTO_PAIRS if mode == "crypto" else []
     if pair not in valid_pairs:
         return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
     try:
-        data = get_weekly_news_overview_for_pair(mode, REAL_PAIRS, CRYPTO_PAIRS, pair)
-        events = data.get("events", [])
-        direction_event = next(
-            (e for e in events if e.get("impact") == "high" and float(e.get("minutes_to_event") or 0) <= 5.0),
-            None,
-        )
-        if direction_event is None:
-            return jsonify({"ok": True, "needed": False, "pair": pair, "events": []})
-        return jsonify({
-            "ok": True,
-            "needed": True,
-            "pair": pair,
-            "event": direction_event,
-            "source": "Alpha Vantage NEWS_SENTIMENT",
-        })
+        return jsonify(get_news_direction_for_pair(mode, REAL_PAIRS, CRYPTO_PAIRS, pair))
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
 
@@ -241,14 +227,17 @@ def market_status():
 
 
 @app.after_request
-def add_panel_equalizer(response):
-    """Load the dashboard-only equal-height panel CSS without changing signal logic."""
+def add_dashboard_assets(response):
+    """Load dashboard-only assets without changing signal logic."""
     if response.content_type and response.content_type.startswith("text/html"):
         html = response.get_data(as_text=True)
-        marker = "</head>"
-        link = '<link rel="stylesheet" href="/static/panel_equalizer.css">'
-        if marker in html and link not in html:
-            response.set_data(html.replace(marker, link + marker, 1))
+        css = '<link rel="stylesheet" href="/static/panel_equalizer.css">'
+        script = '<script src="/static/news_persistence.js" defer></script>'
+        if "</head>" in html and css not in html:
+            html = html.replace("</head>", css + "</head>", 1)
+        if "</body>" in html and script not in html:
+            html = html.replace("</body>", script + "</body>", 1)
+        response.set_data(html)
     return response
 
 
