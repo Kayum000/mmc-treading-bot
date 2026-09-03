@@ -63,7 +63,7 @@
     const panel = document.getElementById('market-status-panel'); if (!panel) return null;
     let box = document.getElementById('pre-news-direction-status'); if (box) return box;
     box = document.createElement('div'); box.id = 'pre-news-direction-status';
-    box.innerHTML = '<div class="ins-heading">🔮 আসন্ন বড় নিউজ — Pre-News Direction</div><div class="ins-list"><div class="ins-empty">মার্কেট নির্বাচন করলে High/Medium/Low নিউজের সম্ভাব্য দিক ও confidence দেখা যাবে।</div></div>';
+    box.innerHTML = '<div class="ins-heading">🔮 আসন্ন নিউজ — Pre-News Direction</div><div class="ins-list"><div class="ins-empty">মার্কেট নির্বাচন করলে শুধু সবচেয়ে কাছের High/Medium/Low নিউজের সম্ভাব্য দিক ও confidence দেখা যাবে।</div></div>';
     const note = panel.querySelector('.status-note'); panel.insertBefore(box, note || null); return box;
   }
   function esc(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
@@ -75,16 +75,15 @@
       const response = await nativeFetch('/news-direction', {credentials:'same-origin', cache:'no-store', headers:{'Accept':'application/json'}});
       const data = await response.json(); const list = box.querySelector('.ins-list');
       if (!data?.ok || !Array.isArray(data.events) || !data.events.length) { list.innerHTML = '<div class="ins-empty">এই মার্কেটের সামনে কোনো High/Medium/Low Impact নিউজ পাওয়া যায়নি।</div>'; return; }
-      list.innerHTML = data.events.map(event => {
-        const dir = String(event.direction || 'WAIT').toUpperCase();
-        const confidence = Number(event.confidence_pct);
-        const confidenceText = Number.isFinite(confidence) ? `${Math.max(0, Math.min(100, Math.round(confidence)))}%` : '—';
-        const confidenceLabel = esc(event.confidence_label_bn || 'কম');
-        const dirText = dir === 'UP' ? `⬆ UP — উপরে (${confidenceText})` : dir === 'DOWN' ? `⬇ DOWN — নিচে (${confidenceText})` : `⏸ WAIT — নিশ্চিত নয় (${confidenceText})`;
-        const dirClass = dir === 'UP' ? 'ins-up' : dir === 'DOWN' ? 'ins-down' : 'ins-wait';
-        const mins = Number(event.minutes_to_event); const countdown = Number.isFinite(mins) ? (mins < 60 ? `${mins.toFixed(1)} মিনিট পরে` : `${(mins/60).toFixed(1)} ঘণ্টা পরে`) : 'আসন্ন';
-        return `<div class="ins-item ${dirClass}"><div class="ins-top"><strong>${esc(event.currency || '')}</strong><span>${esc(String(event.impact || 'HIGH').toUpperCase())} • Confidence: ${confidenceText}</span></div><div class="ins-title">${esc(event.title_bn || event.title || 'Economic News')}</div><div class="ins-time">🕒 ${esc(bdTime(event.event_time_utc))} • ${esc(countdown)}</div><div class="ins-direction">${dirText}</div><div class="ins-basis">Confidence ${confidenceText} — ${confidenceLabel}. ${esc(event.direction_basis_bn || 'Alpha Vantage sentiment ভিত্তিক সম্ভাব্য pre-news bias।')}</div></div>`;
-      }).join('');
+      const event = data.events[0];
+      const dir = String(event.direction || 'WAIT').toUpperCase();
+      const confidence = Number(event.confidence_pct);
+      const confidenceText = Number.isFinite(confidence) ? `${Math.max(0, Math.min(100, Math.round(confidence)))}%` : '—';
+      const confidenceLabel = esc(event.confidence_label_bn || 'কম');
+      const dirText = dir === 'UP' ? `⬆ UP — উপরে (${confidenceText})` : dir === 'DOWN' ? `⬇ DOWN — নিচে (${confidenceText})` : `⏸ WAIT — নিশ্চিত নয় (${confidenceText})`;
+      const dirClass = dir === 'UP' ? 'ins-up' : dir === 'DOWN' ? 'ins-down' : 'ins-wait';
+      const mins = Number(event.minutes_to_event); const countdown = Number.isFinite(mins) ? (mins < 60 ? `${mins.toFixed(1)} মিনিট পরে` : `${(mins/60).toFixed(1)} ঘণ্টা পরে`) : 'আসন্ন';
+      list.innerHTML = `<div class="ins-item ${dirClass}"><div class="ins-top"><strong>${esc(event.currency || '')}</strong><span>${esc(String(event.impact || 'HIGH').toUpperCase())} • Confidence: ${confidenceText}</span></div><div class="ins-title">${esc(event.title_bn || event.title || 'Economic News')}</div><div class="ins-time">🕒 ${esc(bdTime(event.event_time_utc))} • ${esc(countdown)}</div><div class="ins-direction">${dirText}</div><div class="ins-basis">Confidence ${confidenceText} — ${confidenceLabel}. ${esc(event.direction_basis_bn || 'Alpha Vantage sentiment ভিত্তিক সম্ভাব্য pre-news bias।')}</div></div>`;
     } catch (_) { const list = box.querySelector('.ins-list'); if (list) list.innerHTML = '<div class="ins-empty">Pre-News Direction এখন পাওয়া যাচ্ছে না। পরে আবার চেষ্টা করা হবে।</div>'; }
     finally { statusDirectionBusy = false; }
   }
