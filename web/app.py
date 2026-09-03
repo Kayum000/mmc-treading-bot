@@ -200,14 +200,16 @@ def auto_signal():
 
 @app.route("/news-alert", methods=["GET"])
 def news_alert():
-    """Return scheduled news for every configured pair in chronological order."""
+    """Return all Real/Forex news together; keep Crypto news behavior unchanged."""
     mode = session.get("selected_mode", "").strip().lower()
     pair = session.get("selected_pair", "").strip().upper()
     valid_pairs = REAL_PAIRS if mode == "real" else CRYPTO_PAIRS if mode == "crypto" else []
     if pair not in valid_pairs:
         return jsonify({"ok": False, "unselected": True, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"})
     try:
-        return jsonify(get_all_news_events(mode, REAL_PAIRS, CRYPTO_PAIRS))
+        if mode == "real":
+            return jsonify(get_all_news_events(mode, REAL_PAIRS, CRYPTO_PAIRS))
+        return jsonify(get_weekly_news_events_for_pair(mode, REAL_PAIRS, CRYPTO_PAIRS, pair))
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
 
