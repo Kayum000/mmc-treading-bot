@@ -2,6 +2,8 @@
   const bdClock = document.querySelector('[data-bd-clock]');
   const pad = (value) => String(value).padStart(2, '0');
   let enhancingNews = false;
+  let directionRequestInFlight = false;
+  let lastDirectionKey = '';
 
   function renderClock() {
     if (!bdClock) return;
@@ -56,7 +58,14 @@
       #important-news-status .ins-direction.up{color:#15803d;border-color:#86efac;background:#f0fdf4}
       #important-news-status .ins-direction.down{color:#dc2626;border-color:#fca5a5;background:#fef2f2}
       #important-news-status .ins-direction.wait{color:#92400e;border-color:#fcd34d;background:#fffbeb}
-      @media(max-width:600px){#important-news-hero{padding:13px}#important-news-hero .important-news-heading{font-size:21px}#important-news-hero .important-news-title{font-size:19px}#important-news-hero .important-news-time{font-size:17px}#important-news-hero .important-news-direction{font-size:28px}#important-news-status .ins-heading{font-size:18px}#important-news-status .ins-direction{font-size:23px}}
+      #alpha-news-direction-status{margin:10px 0 4px;padding:13px;border:2px solid #60a5fa;border-radius:11px;background:#eff6ff}
+      #alpha-news-direction-status .and-heading{font-size:18px;font-weight:900;color:#1d4ed8;margin-bottom:7px}
+      #alpha-news-direction-status .and-direction{font-size:27px;font-weight:1000;text-align:center;margin:7px 0;padding:8px;border-radius:9px;background:#fff;border:2px solid #bfdbfe}
+      #alpha-news-direction-status .and-direction.up{color:#15803d;border-color:#86efac;background:#f0fdf4}
+      #alpha-news-direction-status .and-direction.down{color:#dc2626;border-color:#fca5a5;background:#fef2f2}
+      #alpha-news-direction-status .and-direction.wait{color:#92400e;border-color:#fcd34d;background:#fffbeb}
+      #alpha-news-direction-status .and-meta{font-size:13px;line-height:1.5;color:#334155}
+      @media(max-width:600px){#important-news-hero{padding:13px}#important-news-hero .important-news-heading{font-size:21px}#important-news-hero .important-news-title{font-size:19px}#important-news-hero .important-news-time{font-size:17px}#important-news-hero .important-news-direction{font-size:28px}#important-news-status .ins-heading{font-size:18px}#important-news-status .ins-direction{font-size:23px}#alpha-news-direction-status .and-direction{font-size:24px}}
     `;
     document.head.appendChild(style);
   }
@@ -74,13 +83,14 @@
   }
 
   function extractTitle(node) {
-    const strong = node?.querySelector('strong');
-    if (strong) {
-      let title = strong.textContent.trim().replace(/^🚨\s*/, '');
+    if (!node) return 'গুরুত্বপূর্ণ নির্ধারিত নিউজ';
+    const alertStrong = node.classList.contains('news-alert') ? node.querySelector('strong') : null;
+    if (alertStrong) {
+      let title = alertStrong.textContent.trim().replace(/^🚨\s*/, '');
       title = title.replace(/^[^—]+—\s*/, '');
       if (title) return title;
     }
-    const text = node?.textContent || '';
+    const text = node.textContent || '';
     const parts = text.split('—').map(v => v.trim()).filter(Boolean);
     if (parts.length >= 3) return parts[2];
     return 'গুরুত্বপূর্ণ নির্ধারিত নিউজ';
@@ -113,7 +123,6 @@
       if (box) box.remove();
       return;
     }
-    const direction = extractDirection(source);
     const eventTime = extractEventTime(source);
     const bdTime = formatBangladeshTime(eventTime);
     const title = extractTitle(source);
@@ -131,8 +140,57 @@
       <div class="ins-time">🕒 REAL MARKET TIME (UTC): ${escapeText(eventTime)}</div>
       ${bdTime ? `<div class="ins-time">🇧🇩 বাংলাদেশ সময়: ${escapeText(bdTime)}</div>` : ''}
       ${countdown ? `<div class="ins-count">⏱ ${escapeText(countdown)}</div>` : ''}
-      <div class="ins-direction ${direction.toLowerCase()}">${direction === 'UP' ? '⬆ UP — উপরে' : direction === 'DOWN' ? '⬇ DOWN — নিচে' : '⏸ WAIT — দিক নিশ্চিত নয়'}</div>
+      <div class="ins-direction wait">⏳ Direction বিশ্লেষণ দরকার হলে Alpha Vantage কল হবে</div>
     `;
+  }
+
+  function renderAlphaDirection(data) {
+    const panel = document.getElementById('market-status-panel');
+    if (!panel) return;
+    let box = document.getElementById('alpha-news-direction-status');
+    if (!data?.needed || !data?.event) {
+      if (box) box.remove();
+      return;
+    }
+    const event = data.event;
+    const direction = String(event.direction || 'WAIT').toUpperCase();
+    const sentiment = event.news_sentiment || {};
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'alpha-news-direction-status';
+      const note = panel.querySelector('.status-note');
+      if (note) panel.insertBefore(box, note);
+      else panel.appendChild(box);
+    }
+    box.innerHTML = `
+      <div class="and-heading">🧠 News Direction — Alpha Vantage</div>
+      <div class="and-direction ${direction.toLowerCase()}">${direction === 'UP' ? '⬆ UP — উপরে' : direction === 'DOWN' ? '⬇ DOWN — নিচে' : '⏸ WAIT — দিক নিশ্চিত নয়'}</div>
+      <div class="and-meta">নিউজ: ${escapeText(event.title_bn || event.title || '')}<br>সময়: ${escapeText(event.event_time_utc || '')} UTC<br>Sentiment: ${escapeText(sentiment.label_bn || 'তথ্য নেই')} | Score: ${escapeText(sentiment.score ?? '—')} | Articles: ${escapeText(sentiment.articles ?? 0)}<br>${escapeText(event.direction_basis_bn || 'Alpha Vantage sentiment ভিত্তিক সম্ভাব্য bias।')}<br><strong>এটি নিশ্চিত BUY/SELL prediction নয়।</strong></div>
+    `;
+  }
+
+  async function checkAlphaDirection() {
+    const content = document.getElementById('news-content');
+    const source = getImportantSource(content);
+    if (!source || !source.classList.contains('news-impact-high') && !source.matches('.news-list li.news-impact-high')) return;
+    const eventTime = extractEventTime(source);
+    const key = `${eventTime}|${document.getElementById('pair')?.value || ''}`;
+    if (directionRequestInFlight || key === lastDirectionKey) return;
+    directionRequestInFlight = true;
+    try {
+      const response = await fetch('/news-direction', {method:'GET', cache:'no-store', headers:{'Accept':'application/json'}});
+      const data = await response.json();
+      if (data?.needed) {
+        lastDirectionKey = key;
+        renderAlphaDirection(data);
+      } else {
+        renderAlphaDirection(null);
+      }
+    } catch (e) {
+      renderAlphaDirection(null);
+    } finally {
+      directionRequestInFlight = false;
+    }
   }
 
   function enhanceImportantNews() {
@@ -146,10 +204,10 @@
     const oldHero = document.getElementById('important-news-hero');
     if (!source) {
       if (oldHero) oldHero.remove();
+      renderAlphaDirection(null);
       return;
     }
 
-    const direction = extractDirection(source);
     const eventTime = extractEventTime(source);
     const bdTime = formatBangladeshTime(eventTime);
     const title = extractTitle(source);
@@ -167,8 +225,8 @@
         <div class="important-news-time">🕒 REAL MARKET TIME (UTC): ${escapeText(eventTime)}</div>
         ${bdTime ? `<div class="important-news-time">🇧🇩 বাংলাদেশ সময়: ${escapeText(bdTime)}</div>` : ''}
         ${countdown ? `<div class="important-news-count">⏱ ${escapeText(countdown)}</div>` : ''}
-        <div class="important-news-direction ${direction.toLowerCase()}">${direction === 'UP' ? '⬆ UP — উপরে' : direction === 'DOWN' ? '⬇ DOWN — নিচে' : '⏸ WAIT — দিক নিশ্চিত নয়'}</div>
-        <div class="important-news-source">দিকটি নিউজ সেন্টিমেন্টভিত্তিক সম্ভাব্য bias; নিশ্চিত BUY/SELL নয়।</div>
+        <div class="important-news-direction wait">⏳ Direction Market Status-এ প্রয়োজন হলে বিশ্লেষণ হবে</div>
+        <div class="important-news-source">News Events-এর calendar data আলাদা রাখা হয়েছে; Alpha Vantage শুধু direction দরকার হলে ব্যবহার হবে।</div>
         <div class="important-news-original"></div>
       `;
       const original = source.cloneNode(true);
@@ -188,6 +246,7 @@
 
   render();
   window.setInterval(render, 1000);
+  window.setInterval(checkAlphaDirection, 30000);
 
   const content = document.getElementById('news-content');
   if (content && 'MutationObserver' in window) {
@@ -195,7 +254,10 @@
     const observer = new MutationObserver(() => {
       if (enhancingNews) return;
       window.clearTimeout(observerTimer);
-      observerTimer = window.setTimeout(enhanceImportantNews, 20);
+      observerTimer = window.setTimeout(() => {
+        enhanceImportantNews();
+        checkAlphaDirection();
+      }, 20);
     });
     observer.observe(content, { childList: true, subtree: true });
   }
