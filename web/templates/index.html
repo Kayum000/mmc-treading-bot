@@ -14,12 +14,15 @@
   .brand{display:flex;align-items:center;gap:12px;margin:0 0 8px;padding-right:150px}
   .brand img{width:70px;height:70px;object-fit:contain;border-radius:16px;flex:none}
   h1{font-size:38px;margin:0}.intro{font-size:18px;margin-bottom:22px}
-  form{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:22px}
+  form{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
   select,button{font-size:20px;padding:12px 18px;border-radius:10px;border:1px solid #cbd5e1}
   button{background:#2563eb;color:white;border:0;font-weight:700;cursor:pointer}
   button:disabled{opacity:.55;cursor:not-allowed}
   .logout{position:absolute;right:20px;top:20px;font-size:13px;color:#b42318;text-decoration:none}
   .mode-tabs{display:flex;gap:10px;margin-bottom:14px}.mode-tabs button{background:#e8edf5;color:#172033;border:1px solid #cbd5e1}.mode-tabs button.active{background:#2563eb;color:#fff;border-color:#2563eb}
+  .auto-row{display:flex;align-items:center;gap:12px;margin:0 0 22px;padding:12px 14px;background:#eef4ff;border-radius:12px;font-size:17px}
+  .auto-toggle{display:flex;align-items:center;gap:8px;font-weight:800}.auto-toggle input{width:20px;height:20px}
+  .auto-status{font-size:15px;color:#475569}
   section{background:white;border-radius:16px;padding:22px;box-shadow:0 3px 14px rgba(0,0,0,.08)}
   h2{font-size:38px;margin:0 0 20px}.entry-box{border:2px solid #2563eb;border-radius:16px;padding:22px;text-align:center;background:#f8fbff}
   .entry-title{font-size:25px;font-weight:800;color:#174ea6}.entry-time{font-size:34px;font-weight:800;color:#174ea6;margin:12px 0 18px;letter-spacing:.5px}
@@ -28,14 +31,14 @@
   .details{margin-top:20px;font-size:18px;line-height:1.7}.source-badge{display:inline-block;padding:5px 10px;border-radius:999px;background:#eef2ff;font-weight:700}
   .download-app{position:fixed;right:12px;bottom:12px;z-index:1000;text-decoration:none;background:#2563eb;color:#fff;font-size:16px;font-weight:700;padding:12px 16px;border-radius:999px;box-shadow:0 4px 14px rgba(0,0,0,.2);display:flex;align-items:center;gap:7px}
   .download-app:hover{background:#1d4ed8}
-  @media(max-width:600px){main{padding-top:76px}.brand{padding-right:0}.brand img{width:58px;height:58px}h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}.download-app{right:12px;bottom:12px;font-size:15px;padding:11px 14px}}
+  @media(max-width:600px){main{padding-top:76px}.brand{padding-right:0}.brand img{width:58px;height:58px}h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}}
 </style>
 </head>
 <body>
 <main>
 <a class="logout" href="{{ url_for('logout') }}">LOGOUT</a>
 <div class="brand"><img src="{{ url_for('static', filename='sk_bot_logo.svg') }}" alt="SK BOT"><h1>MMC Live Signal</h1></div>
-<p class="intro">Choose a market mode. Data is fetched only after GET SIGNAL. The signal prepares the next 1-minute candle.</p>
+<p class="intro">মার্কেট নির্বাচন করুন। অটো সিগন্যাল চালু থাকলে নির্বাচিত মার্কেটেই স্বয়ংক্রিয়ভাবে নতুন সিগন্যাল তৈরি হবে।</p>
 <form method="post" id="signal-form">
   <div style="width:100%"><strong>MARKET MODE</strong></div>
   <div class="mode-tabs">
@@ -52,93 +55,94 @@
   </label>
   <button type="submit" id="signal-button" disabled>GET SIGNAL</button>
 </form>
-{% if error %}<p><strong>Error:</strong> {{error}}</p>{% endif %}
+<div class="auto-row">
+  <label class="auto-toggle"><input type="checkbox" id="auto-signal" checked> AUTO SIGNAL</label>
+  <span id="auto-status" class="auto-status">মার্কেট নির্বাচন করলে প্রতি নতুন ৫ মিনিটের ক্যান্ডেলে স্বয়ংক্রিয়ভাবে যাচাই হবে।</span>
+</div>
+{% if error %}<p id="server-error"><strong>Error:</strong> {{error}}</p>{% endif %}
+<div id="result-container">
 {% if result %}
 <section>
 <h2>{{result.pair}} — {{result.signal}}</h2>
 <div class="entry-box">
-  <div class="entry-title">ENTRY TIME — NEXT 1-MINUTE CANDLE</div>
+  <div class="entry-title">ENTRY TIME — NEXT 5-MINUTE CANDLE</div>
   <div class="entry-time">{{result.entry_time_bd}}</div>
   <div class="countdown-label">ENTRY COUNTDOWN</div>
-  <div class="countdown" data-entry-timer data-entry-at="{{result.entry_time_utc}}">00:30</div>
+  <div class="countdown" data-entry-timer data-entry-at="{{result.entry_time_utc}}">00:00</div>
   <div class="price-box"><div class="price-label">ENTRY PRICE</div><div class="price">{{result.entry_price if result.entry_price is not none else 'N/A'}}</div></div>
 </div>
 <div class="details"><p><strong>Timeframe:</strong> {{result.timeframe}}</p><p><strong>Buy score:</strong> {{result.buy_score}}</p><p><strong>Sell score:</strong> {{result.sell_score}}</p><p><strong>কারণ ও বিস্তারিত যাচাই:</strong> {{result.reason}}</p></div>
 </section>
 {% endif %}
+</div>
 </main>
 <a class="download-app" href="https://github.com/Kayum000/mmc-treading-bot/releases/download/latest/app-debug.apk" aria-label="Download App">📲 Download App</a>
 <script>
 const modeInput=document.getElementById('mode');
 const pairSelect=document.getElementById('pair');
 const signalButton=document.getElementById('signal-button');
+const autoToggle=document.getElementById('auto-signal');
+const autoStatus=document.getElementById('auto-status');
+const resultContainer=document.getElementById('result-container');
 const STORAGE_MODE='mmc_selected_mode';
 const STORAGE_REAL='mmc_selected_real_pair';
 const STORAGE_CRYPTO='mmc_selected_crypto_pair';
+const STORAGE_AUTO='mmc_auto_signal_enabled';
+let autoTimer=null;
+let autoRequestInFlight=false;
 
-function savedPairForMode(mode){
-  return localStorage.getItem(mode==='crypto' ? STORAGE_CRYPTO : STORAGE_REAL) || '';
-}
-
-function saveCurrentPair(){
-  const mode=modeInput.value;
-  const pair=pairSelect.value;
-  if(mode && pair){
-    localStorage.setItem(STORAGE_MODE, mode);
-    localStorage.setItem(mode==='crypto' ? STORAGE_CRYPTO : STORAGE_REAL, pair);
-  }
-}
-
-function updateSignalButton(){
-  signalButton.disabled=!pairSelect.value;
-}
-
-function setMode(mode, preserveSelection=true){
+function savedPairForMode(mode){return localStorage.getItem(mode==='crypto'?STORAGE_CRYPTO:STORAGE_REAL)||'';}
+function saveCurrentPair(){const mode=modeInput.value,pair=pairSelect.value;if(mode&&pair){localStorage.setItem(STORAGE_MODE,mode);localStorage.setItem(mode==='crypto'?STORAGE_CRYPTO:STORAGE_REAL,pair);}}
+function updateSignalButton(){signalButton.disabled=!pairSelect.value;}
+function setMode(mode,preserveSelection=true){
   modeInput.value=mode;
   document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
-  Array.from(pairSelect.options).forEach(o=>{
-    o.hidden=o.dataset.market && o.dataset.market!==mode;
-  });
-
-  let target=preserveSelection && pairSelect.value && pairSelect.options[pairSelect.selectedIndex].dataset.market===mode
-    ? pairSelect.value
-    : savedPairForMode(mode);
-
-  const matching=Array.from(pairSelect.options).find(o=>o.dataset.market===mode && o.value===target);
-  if(matching){
-    pairSelect.value=matching.value;
-  }else{
-    pairSelect.value='';
-  }
+  Array.from(pairSelect.options).forEach(o=>{o.hidden=o.dataset.market&&o.dataset.market!==mode;});
+  let target=preserveSelection&&pairSelect.value&&pairSelect.options[pairSelect.selectedIndex].dataset.market===mode?pairSelect.value:savedPairForMode(mode);
+  const matching=Array.from(pairSelect.options).find(o=>o.dataset.market===mode&&o.value===target);
+  pairSelect.value=matching?matching.value:'';
   updateSignalButton();
 }
 
-pairSelect.addEventListener('change',()=>{
-  saveCurrentPair();
-  updateSignalButton();
-});
+function escapeHtml(value){return String(value??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+function renderResult(r){
+  const action=escapeHtml(r.signal),pair=escapeHtml(r.pair),entry=escapeHtml(r.entry_time_bd),price=r.entry_price==null?'N/A':escapeHtml(r.entry_price),reason=escapeHtml(r.reason),tf=escapeHtml(r.timeframe);
+  resultContainer.innerHTML=`<section><h2>${pair} — ${action}</h2><div class="entry-box"><div class="entry-title">ENTRY TIME — NEXT 5-MINUTE CANDLE</div><div class="entry-time">${entry}</div><div class="countdown-label">ENTRY COUNTDOWN</div><div class="countdown" data-entry-timer data-entry-at="${escapeHtml(r.entry_time_utc)}">00:00</div><div class="price-box"><div class="price-label">ENTRY PRICE</div><div class="price">${price}</div></div></div><div class="details"><p><strong>Timeframe:</strong> ${tf}</p><p><strong>Buy score:</strong> ${escapeHtml(r.buy_score)}</p><p><strong>Sell score:</strong> ${escapeHtml(r.sell_score)}</p><p><strong>কারণ ও বিস্তারিত যাচাই:</strong> ${reason}</p></div></section>`;
+}
 
-document.querySelectorAll('.mode-btn').forEach(b=>b.addEventListener('click',()=>{
-  saveCurrentPair();
-  setMode(b.dataset.mode,false);
-}));
+function nextAutoDelayMs(){
+  const now=Date.now();
+  const next=(Math.floor(now/300000)+1)*300000;
+  return Math.max(3000,next-now+3000);
+}
+async function runAutoSignal(){
+  if(!autoToggle.checked||!pairSelect.value||autoRequestInFlight)return;
+  autoRequestInFlight=true;
+  autoStatus.textContent='স্বয়ংক্রিয়ভাবে নির্বাচিত মার্কেটের নতুন ডেটা যাচাই করা হচ্ছে…';
+  try{
+    const response=await fetch('{{ url_for("auto_signal") }}',{method:'GET',cache:'no-store',headers:{'Accept':'application/json'}});
+    const data=await response.json();
+    if(data.ok){renderResult(data.result);autoStatus.textContent=`AUTO SIGNAL চালু — শেষ যাচাই: ${data.result.signal_time_bd}`;}
+    else{autoStatus.textContent='অটো সিগন্যাল সাময়িকভাবে ডেটা পায়নি: '+data.error;}
+  }catch(error){autoStatus.textContent='অটো সিগন্যাল সংযোগে সমস্যা হয়েছে। পরের নির্ধারিত সময়ে আবার চেষ্টা করবে।';}
+  finally{autoRequestInFlight=false;scheduleAutoSignal();}
+}
+function scheduleAutoSignal(){
+  if(autoTimer)clearTimeout(autoTimer);
+  if(!autoToggle.checked||!pairSelect.value){return;}
+  autoTimer=setTimeout(runAutoSignal,nextAutoDelayMs());
+}
 
-// Server session is authoritative after GET SIGNAL/page reload. Local storage
-// only remembers the last choice made in each mode, so no market is forced.
+pairSelect.addEventListener('change',()=>{saveCurrentPair();updateSignalButton();if(autoToggle.checked)runAutoSignal();else scheduleAutoSignal();});
+document.querySelectorAll('.mode-btn').forEach(b=>b.addEventListener('click',()=>{saveCurrentPair();setMode(b.dataset.mode,false);if(autoToggle.checked)runAutoSignal();else scheduleAutoSignal();}));
+autoToggle.checked=localStorage.getItem(STORAGE_AUTO)!=='0';
+autoToggle.addEventListener('change',()=>{localStorage.setItem(STORAGE_AUTO,autoToggle.checked?'1':'0');if(autoToggle.checked)runAutoSignal();else{if(autoTimer)clearTimeout(autoTimer);autoStatus.textContent='AUTO SIGNAL বন্ধ আছে।';}});
+
 const serverMode=modeInput.value;
 const serverPair={{ pair|tojson }};
 const storedMode=localStorage.getItem(STORAGE_MODE);
-if(!serverMode){
-  const initialMode=storedMode==='crypto' ? 'crypto' : 'real';
-  setMode(initialMode,false);
-}else{
-  setMode(serverMode,true);
-  if(serverPair && pairSelect.value!==serverPair){
-    const option=Array.from(pairSelect.options).find(o=>o.dataset.market===serverMode && o.value===serverPair);
-    if(option) pairSelect.value=serverPair;
-    updateSignalButton();
-  }
-}
+if(!serverMode){setMode(storedMode==='crypto'?'crypto':'real',false);}else{setMode(serverMode,true);if(serverPair&&pairSelect.value!==serverPair){const option=Array.from(pairSelect.options).find(o=>o.dataset.market===serverMode&&o.value===serverPair);if(option)pairSelect.value=serverPair;updateSignalButton();}}
+if(autoToggle.checked&&pairSelect.value){autoStatus.textContent='AUTO SIGNAL চালু — নির্বাচিত মার্কেটের পরবর্তী ৫ মিনিটের ক্যান্ডেলে স্বয়ংক্রিয় যাচাই হবে।';runAutoSignal();}
 </script>
 <script src="{{ url_for('static', filename='candle_timer.js') }}" defer></script>
 </body>
