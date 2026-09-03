@@ -15,9 +15,7 @@ class Signal:
 
 
 def _is_valid_setup(profile: dict, side: str) -> bool:
-    """Require score, higher-timeframe alignment, role reversal, and 5m trigger."""
-    if profile["score"] < CONFIG.min_score:
-        return False
+    """Validate the MTF structure without using the MTF score as a gate."""
     if not profile["higher_timeframe_trend"]:
         return False
     if not profile["role_reversal_confirmation"]:
@@ -26,34 +24,23 @@ def _is_valid_setup(profile: dict, side: str) -> bool:
         return False
     if profile["opposite_structure"]:
         return False
-
-    if profile["30m"]["score"] < 4:
-        return False
-    if profile["15m"]["score"] < 3:
-        return False
-    if profile["5m"]["score"] < 1:
-        return False
     return True
 
 
 def _diagnostic_reason(profile: dict, side: str) -> str:
-    """Explain every final gate without changing the signal decision logic."""
+    """Explain the structural gates without using score thresholds."""
     direction = "বিক্রির" if side == "sell" else "কেনার"
     opposite = "বিপরীত ঊর্ধ্বমুখী বাজার-গঠন পাওয়া যায়নি" if side == "sell" else "বিপরীত নিম্নমুখী বাজার-গঠন পাওয়া যায়নি"
 
     checks = [
-        f"স্কোর সীমা: {'ঠিক আছে' if profile['score'] >= CONFIG.min_score else 'মেলেনি'} ({profile['score']}/{CONFIG.min_score})",
         f"৩০ ও ১৫ মিনিটের দিক একমত: {'ঠিক আছে' if profile['higher_timeframe_trend'] else 'মেলেনি'}",
         f"ভাঙা স্তরের পুনঃপরীক্ষা ও নতুন ভূমিকা: {'ঠিক আছে' if profile['role_reversal_confirmation'] else 'মেলেনি'}",
         f"৫ মিনিটের {direction} প্রবেশের সংকেত: {'ঠিক আছে' if profile['entry_trigger'] else 'মেলেনি'}",
         f"{opposite}: {'ঠিক আছে' if not profile['opposite_structure'] else 'মেলেনি'}",
-        f"৩০ মিনিটের স্কোর: {'ঠিক আছে' if profile['30m']['score'] >= 4 else 'মেলেনি'} ({profile['30m']['score']}/4 ন্যূনতম)",
-        f"১৫ মিনিটের স্কোর: {'ঠিক আছে' if profile['15m']['score'] >= 3 else 'মেলেনি'} ({profile['15m']['score']}/3 ন্যূনতম)",
-        f"৫ মিনিটের স্কোর: {'ঠিক আছে' if profile['5m']['score'] >= 1 else 'মেলেনি'} ({profile['5m']['score']}/1 ন্যূনতম)",
     ]
     failed = [item for item in checks if "মেলেনি" in item]
-    status = "সব চূড়ান্ত শর্ত পূরণ হয়েছে, কিন্তু অন্য দিকের স্কোর বেশি হওয়ায় এই দিকে সিগন্যাল দেওয়া হয়নি।" if not failed else "যে শর্তগুলোতে সমস্যা হয়েছে: " + "; ".join(failed) + "."
-    return "স্কোর নির্ধারিত সীমায় পৌঁছেছে। বিস্তারিত যাচাই — " + " | ".join(checks) + "। " + status
+    status = "সব চূড়ান্ত কাঠামোগত শর্ত পূরণ হয়েছে, কিন্তু অন্য দিকও একইভাবে বৈধ হওয়ায় দিকটি পরিষ্কার নয়।" if not failed else "যে কাঠামোগত শর্তগুলোতে সমস্যা হয়েছে: " + "; ".join(failed) + "."
+    return "MTF স্কোর গেট OFF। বিস্তারিত যাচাই — " + " | ".join(checks) + "। " + status
 
 
 def generate_signal(frames: dict[str, pd.DataFrame]) -> Signal:
@@ -62,6 +49,8 @@ def generate_signal(frames: dict[str, pd.DataFrame]) -> Signal:
     if missing:
         raise ValueError(f"Missing timeframes: {sorted(missing)}")
 
+    # Scores are still calculated and returned for visibility/monitoring,
+    # but they no longer decide whether a structurally valid setup is traded.
     buy = multi_timeframe_score(frames, "buy")
     sell = multi_timeframe_score(frames, "sell")
     buy_profile = confirmation_profile(frames, "buy")
@@ -70,32 +59,34 @@ def generate_signal(frames: dict[str, pd.DataFrame]) -> Signal:
     buy_valid = _is_valid_setup(buy_profile, "buy")
     sell_valid = _is_valid_setup(sell_profile, "sell")
 
-    if buy_valid and buy > sell:
+    if buy_valid and not sell_valid:
         return Signal(
             "BUY",
             buy,
             sell,
-            "বুলিশ MMC: ৩০ মিনিট ও ১৫ মিনিটের বাজারের দিক ঊর্ধ্বমুখী এবং একমত। আগের প্রতিরোধের স্তর ভেঙে দাম আবার সেই স্তরে ফিরে এসে সেটিকে সমর্থন হিসেবে ধরে রেখেছে। ৫ মিনিটে কেনার প্রবেশের সংকেতও নিশ্চিত হয়েছে।",
+            "বুলিশ MMC: ৩০ মিনিট ও ১৫ মিনিটের বাজারের দিক ঊর্ধ্বমুখী এবং একমত। আগের প্রতিরোধের স্তর ভেঙে দাম আবার সেই স্তরে ফিরে এসে সেটিকে সমর্থন হিসেবে ধরে রেখেছে। ৫ মিনিটে কেনার প্রবেশের সংকেতও নিশ্চিত হয়েছে। MTF স্কোর গেট বর্তমানে OFF; স্কোর শুধু তথ্য হিসেবে দেখানো হচ্ছে।",
         )
-    if sell_valid and sell > buy:
+    if sell_valid and not buy_valid:
         return Signal(
             "SELL",
             buy,
             sell,
-            "বেয়ারিশ MMC: ৩০ মিনিট ও ১৫ মিনিটের বাজারের দিক নিম্নমুখী এবং একমত। আগের সমর্থনের স্তর ভেঙে দাম আবার সেই স্তরে ফিরে এসে সেটিকে প্রতিরোধ হিসেবে ধরে রেখেছে। ৫ মিনিটে বিক্রির প্রবেশের সংকেতও নিশ্চিত হয়েছে।",
+            "বেয়ারিশ MMC: ৩০ মিনিট ও ১৫ মিনিটের বাজারের দিক নিম্নমুখী এবং একমত। আগের সমর্থনের স্তর ভেঙে দাম আবার সেই স্তরে ফিরে এসে সেটিকে প্রতিরোধ হিসেবে ধরে রেখেছে। ৫ মিনিটে বিক্রির প্রবেশের সংকেতও নিশ্চিত হয়েছে। MTF স্কোর গেট বর্তমানে OFF; স্কোর শুধু তথ্য হিসেবে দেখানো হচ্ছে।",
         )
-    if buy >= CONFIG.min_score or sell >= CONFIG.min_score:
-        diagnostic = _diagnostic_reason(buy_profile, "buy") if buy >= sell else _diagnostic_reason(sell_profile, "sell")
-        return Signal("NO_TRADE", buy, sell, diagnostic)
-    return Signal("NO_TRADE", buy, sell, "যথেষ্ট MMC নিশ্চিতকরণ পাওয়া যায়নি। বাজারের দিক, বাজারের গঠন এবং ৫ মিনিটের প্রবেশের সংকেত এখনও যথেষ্ট শক্তিশালী নয়।")
+    if buy_valid and sell_valid:
+        return Signal("NO_TRADE", buy, sell, "MTF স্কোর গেট OFF, কিন্তু BUY ও SELL—দুই দিকের কাঠামোগত শর্তই একসঙ্গে বৈধ হয়েছে; তাই দ্ব্যর্থক অবস্থায় ট্রেড দেওয়া হয়নি।")
+
+    diagnostic = _diagnostic_reason(buy_profile, "buy") if buy >= sell else _diagnostic_reason(sell_profile, "sell")
+    return Signal("NO_TRADE", buy, sell, diagnostic)
 
 
 def confirm_1m_entry(signal: Signal, df_1m: pd.DataFrame) -> Signal:
     """Use the latest closed 1m candle as the final entry trigger.
 
-    The 30m/15m/5m MMC score is unchanged. A trade is only kept when the
-    latest closed 1m candle confirms the already-selected direction via a
-    matching BOS, liquidity sweep/reclaim, or displacement candle.
+    The 30m/15m/5m MMC score is still calculated for display, but it is not
+    used as a trade gate. A trade is only kept when the latest closed 1m
+    candle confirms the already-selected direction via a matching BOS,
+    liquidity sweep/reclaim, or displacement candle.
     """
     if signal.action not in {"BUY", "SELL"}:
         return signal
