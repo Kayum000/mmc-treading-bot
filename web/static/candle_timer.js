@@ -22,9 +22,9 @@
     const at = Date.parse(el.dataset.entryAt || '');
     if (!Number.isFinite(at)) return;
     const seconds = Math.max(0, Math.ceil((at - Date.now()) / 1000));
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    el.textContent = seconds > 0 ? `${pad(m)}:${pad(s)}` : '00:00 — ENTRY NOW';
+    const m = Math.floor(seconds / 60), s = seconds % 60;
+    const text = seconds > 0 ? `${pad(m)}:${pad(s)}` : '00:00 — ENTRY NOW';
+    if (el.textContent !== text) el.textContent = text;
     el.setAttribute('aria-label', seconds > 0 ? `Entry starts in ${m} minutes ${s} seconds` : 'Entry time reached');
   }
 
@@ -49,7 +49,6 @@
       #important-news-hero .important-news-queue-item.nearest{border:2px solid #dc2626;background:#fff7ed}
       #important-news-hero .important-news-queue-item strong{display:block;font-size:11px;margin-bottom:2px}
       #important-news-hero .important-news-queue-item span{display:block;font-size:11px;font-weight:800;margin-top:2px}
-      #important-news-hero .important-news-status{font-size:11px;color:#64748b;margin-top:5px}
       #important-news-status{margin:8px 0 3px;padding:9px;border:2px solid #f59e0b;border-radius:9px;background:#fff8dc}
       #important-news-status .ins-heading{font-size:17px;font-weight:900;color:#9a5b00;margin-bottom:4px}
       #important-news-status .ins-title{font-size:15px;font-weight:900;line-height:1.3;margin-bottom:4px}
@@ -142,11 +141,33 @@
     const meta = directionData?.event
       ? `Sentiment: ${escapeText(sentiment.label_bn || 'তথ্য নেই')} | Score: ${escapeText(sentiment.score ?? '—')} | Articles: ${escapeText(sentiment.articles ?? 0)}<br>${escapeText(directionData.event.direction_basis_bn || 'Alpha Vantage sentiment ভিত্তিক সম্ভাব্য bias।')}<br><strong>এটি নিশ্চিত BUY/SELL prediction নয়।</strong>`
       : 'High-impact নিউজ ৫ মিনিটের মধ্যে এলে Alpha Vantage sentiment দিয়ে Direction বিশ্লেষণ হবে।';
-    const desired = `${titleOf(source)}|${t}|${direction}|${source.querySelector('.news-count')?.textContent || ''}`;
-    if (box.dataset.renderKey !== desired) {
-      box.innerHTML = `<div class="ins-heading">🚨 পরবর্তী গুরুত্বপূর্ণ নিউজ</div><div class="ins-title">${escapeText(titleOf(source))}</div><div class="ins-time">🕒 REAL MARKET TIME (UTC): ${escapeText(t)}</div><div class="ins-time">🇧🇩 বাংলাদেশ সময়: ${escapeText(formatBd(t))}</div><div class="ins-count">⏱ ${escapeText(countdownText(Date.parse(t)))}</div><div class="ins-direction ${direction.toLowerCase()}">${dirText}</div><div class="ins-meta">${meta}</div>`;
-      box.dataset.renderKey = desired;
-    }
+    const key = `${titleOf(source)}|${t}|${direction}|${source.querySelector('.news-count')?.textContent || ''}`;
+    if (box.dataset.renderKey === key) return;
+    box.innerHTML = `<div class="ins-heading">🚨 পরবর্তী গুরুত্বপূর্ণ নিউজ</div><div class="ins-title">${escapeText(titleOf(source))}</div><div class="ins-time">🕒 REAL MARKET TIME (UTC): ${escapeText(t)}</div><div class="ins-time">🇧🇩 বাংলাদেশ সময়: ${escapeText(formatBd(t))}</div><div class="ins-count">⏱ ${escapeText(countdownText(Date.parse(t)))}</div><div class="ins-direction ${direction.toLowerCase()}">${dirText}</div><div class="ins-meta">${meta}</div>`;
+    box.dataset.renderKey = key;
+  }
+
+  function ensureHero() {
+    let hero = document.getElementById('important-news-hero');
+    if (hero) return hero;
+    const content = document.getElementById('news-content');
+    if (!content) return null;
+    hero = document.createElement('div');
+    hero.id = 'important-news-hero';
+    hero.setAttribute('role', 'status');
+    hero.innerHTML = `
+      <div class="important-news-heading">🚨 নিকটতম নিউজ</div>
+      <div class="important-news-title"></div>
+      <div class="important-news-time"></div>
+      <div class="important-news-time important-news-bd"></div>
+      <div class="important-news-count"></div>
+      <div class="important-news-direction wait">⏸ WAIT — দিক এখনো নিশ্চিত নয়</div>
+      <div class="important-news-queue-label">পরের নিউজগুলো — অল্প সময় বাকি থাকা আগে:</div>
+      <div class="important-news-queue"></div>
+      <div class="important-news-source"></div>
+    `;
+    content.insertBefore(hero, content.firstChild);
+    return hero;
   }
 
   function renderHero() {
@@ -155,21 +176,20 @@
     injectStyles();
     const items = allNewsSources(content);
     const hero = document.getElementById('important-news-hero');
-    if (!items.length) { if (hero) hero.remove(); lastHeroEventKey = ''; lastHeroQueueKey = ''; updateStatusImportant(null, null); return; }
-
-    const first = items[0].node;
-    const firstTime = eventTime(first);
-    const queueKey = items.map(x => `${eventTime(x.node)}|${titleOf(x.node)}|${x.node.className}`).join('||');
-    const eventKey = `${firstTime}|${titleOf(first)}`;
-    let box = hero;
-    if (!box) {
-      box = document.createElement('div');
-      box.id = 'important-news-hero';
-      box.setAttribute('role', 'status');
-      content.insertBefore(box, content.firstChild);
+    if (!items.length) {
+      if (hero) hero.remove();
       lastHeroEventKey = '';
       lastHeroQueueKey = '';
+      updateStatusImportant(null, null);
+      return;
     }
+
+    const first = items[0];
+    const firstTime = eventTime(first.node);
+    const eventKey = `${firstTime}|${titleOf(first.node)}`;
+    const queueKey = items.map(x => `${eventTime(x.node)}|${titleOf(x.node)}|${x.node.className}`).join('||');
+    const box = ensureHero();
+    if (!box) return;
 
     const important = importantSources(content);
     const directionSource = important[0]?.node || null;
@@ -177,47 +197,37 @@
 
     if (eventKey !== lastHeroEventKey) {
       lastHeroEventKey = eventKey;
-      const directionData = directionForSource(directionSource);
-      const direction = String(directionData?.event?.direction || 'WAIT').toUpperCase();
-      box.querySelector('.important-news-title')?.remove();
-      box.querySelector('.important-news-time')?.remove();
-      box.querySelector('.important-news-bd')?.remove();
-      box.querySelector('.important-news-count')?.remove();
-      box.querySelector('.important-news-direction')?.remove();
-      const heading = box.querySelector('.important-news-heading') || document.createElement('div');
-      heading.className = 'important-news-heading';
-      heading.textContent = '🚨 নিকটতম নিউজ';
-      if (!heading.parentNode) box.appendChild(heading);
-      const title = document.createElement('div'); title.className='important-news-title'; title.textContent=titleOf(first); box.appendChild(title);
-      const time = document.createElement('div'); time.className='important-news-time'; time.textContent=`🕒 REAL MARKET TIME (UTC): ${firstTime}`; box.appendChild(time);
-      const bd = document.createElement('div'); bd.className='important-news-time important-news-bd'; bd.textContent=`🇧🇩 ${formatBd(firstTime)}`; box.appendChild(bd);
-      const count = document.createElement('div'); count.className='important-news-count'; count.textContent=`⏱ ${countdownText(items[0].ms)}`; box.appendChild(count);
-      const dir = document.createElement('div'); dir.className=`important-news-direction ${direction.toLowerCase()}`; dir.textContent=direction === 'UP' ? '⬆ UP — উপরে' : direction === 'DOWN' ? '⬇ DOWN — নিচে' : '⏸ WAIT — দিক এখনো নিশ্চিত নয়'; box.appendChild(dir);
+      box.querySelector('.important-news-title').textContent = titleOf(first.node);
+      box.querySelector('.important-news-time').textContent = `🕒 REAL MARKET TIME (UTC): ${firstTime}`;
+      box.querySelector('.important-news-bd').textContent = `🇧🇩 ${formatBd(firstTime)}`;
     }
 
     const countNode = box.querySelector('.important-news-count');
-    if (countNode) countNode.textContent = `⏱ ${countdownText(items[0].ms)}`;
+    const countText = `⏱ ${countdownText(first.ms)}`;
+    if (countNode.textContent !== countText) countNode.textContent = countText;
+
+    const directionData = directionForSource(directionSource);
+    const direction = String(directionData?.event?.direction || 'WAIT').toUpperCase();
+    const directionNode = box.querySelector('.important-news-direction');
+    const directionText = direction === 'UP' ? '⬆ UP — উপরে' : direction === 'DOWN' ? '⬇ DOWN — নিচে' : '⏸ WAIT — দিক এখনো নিশ্চিত নয়';
+    const directionClass = `important-news-direction ${direction.toLowerCase()}`;
+    if (directionNode.className !== directionClass) directionNode.className = directionClass;
+    if (directionNode.textContent !== directionText) directionNode.textContent = directionText;
 
     if (queueKey !== lastHeroQueueKey) {
       lastHeroQueueKey = queueKey;
-      let label = box.querySelector('.important-news-queue-label');
-      if (!label) { label = document.createElement('div'); label.className='important-news-queue-label'; box.appendChild(label); }
-      label.textContent = 'পরের নিউজগুলো — অল্প সময় বাকি থাকা আগে:';
-      let queue = box.querySelector('.important-news-queue');
-      if (!queue) { queue = document.createElement('div'); queue.className='important-news-queue'; box.appendChild(queue); }
+      const queue = box.querySelector('.important-news-queue');
       queue.innerHTML = items.map((item, i) => `<div class="important-news-queue-item ${i===0?'nearest':''}"><strong>${i===0?'🔴 সবচেয়ে কাছের':'🕒 পরবর্তী'}</strong><div>${escapeText(titleOf(item.node))}</div><span>UTC: ${escapeText(eventTime(item.node))} — ${escapeText(countdownText(item.ms))}</span></div>`).join('');
-      let source = box.querySelector('.important-news-source');
-      if (!source) { source = document.createElement('div'); source.className='important-news-source'; box.appendChild(source); }
-      source.textContent = `মোট ${items.length}টি আসন্ন নিউজ • সবগুলো সময় অনুযায়ী সাজানো।`;
-    }
-
-    const directionSourceNow = important[0]?.node || null;
-    const directionData = directionForSource(directionSourceNow);
-    const directionNode = box.querySelector('.important-news-direction');
-    if (directionNode) {
-      const direction = String(directionData?.event?.direction || 'WAIT').toUpperCase();
-      directionNode.className = `important-news-direction ${direction.toLowerCase()}`;
-      directionNode.textContent = direction === 'UP' ? '⬆ UP — উপরে' : direction === 'DOWN' ? '⬇ DOWN — নিচে' : '⏸ WAIT — দিক এখনো নিশ্চিত নয়';
+      box.querySelector('.important-news-source').textContent = `মোট ${items.length}টি আসন্ন নিউজ • সবগুলো সময় অনুযায়ী সাজানো।`;
+    } else {
+      const queue = box.querySelector('.important-news-queue');
+      Array.from(queue.children).forEach((node, i) => {
+        const item = items[i];
+        if (!item) return;
+        const span = node.querySelector('span');
+        const text = `UTC: ${eventTime(item.node)} — ${countdownText(item.ms)}`;
+        if (span && span.textContent !== text) span.textContent = text;
+      });
     }
   }
 
