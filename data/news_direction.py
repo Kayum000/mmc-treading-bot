@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 
-from data.news_calendar import get_weekly_news_overview
+from data.news_events import get_weekly_news_events_for_pair
+from data.alpha_vantage_news import fetch_news_sentiment, pair_sentiment
 
 
 def _pair_currencies(pair: str, market_mode: str) -> tuple[str, str]:
@@ -39,7 +40,6 @@ def _entry_window(event_time_iso: str) -> tuple[str, str]:
     if event_time.tzinfo is None:
         event_time = event_time.replace(tzinfo=timezone.utc)
     event_time = event_time.astimezone(timezone.utc)
-    # Use the first complete 1-minute candle after the scheduled release.
     minute_start = event_time.replace(second=0, microsecond=0) + timedelta(minutes=1)
     minute_end = minute_start + timedelta(minutes=1)
     return (
@@ -49,16 +49,27 @@ def _entry_window(event_time_iso: str) -> tuple[str, str]:
 
 
 def get_weekly_news_overview_for_pair(market_mode: str, real_pairs: list[str], crypto_pairs: list[str], selected_pair: str) -> dict:
-    data = get_weekly_news_overview(market_mode, real_pairs, crypto_pairs)
+    """Return calendar events for one pair and use Alpha Vantage only for direction."""
     selected_pair = selected_pair.upper()
+    data = get_weekly_news_events_for_pair(market_mode, real_pairs, crypto_pairs, selected_pair)
     enriched = []
+
     for event in data.get("events", []):
-        if selected_pair not in event.get("pairs", []):
-            continue
-        sentiment = event.get("news_sentiment") or {}
-        direction, basis = _direction(selected_pair, market_mode, event.get("currency", ""), sentiment)
-        entry_utc, entry_window = _entry_window(event["event_time_utc"])
         minutes = float(event.get("minutes_to_event") or 0)
+        # Calendar display itself never calls Alpha Vantage. Only an imminent
+        # high-impact release needs sentiment/direction.
+        if event.get("impact") == "high" and 0 <= minutes <= 5.0:
+            sentiment_data = fetch_news_sentiment()
+            sentiment = pair_sentiment(selected_pair, market_mode, sentiment_data)
+            direction, basis = _direction(selected_pair, market_mode, event.get("currency", ""), sentiment)
+            event = dict(event)
+            event["news_sentiment"] = sentiment
+        else:
+            direction = "WAIT"
+            basis = "Direction বিশ্লেষণ শুধু high-impact নিউজের ৫ মিনিটের window-তে করা হবে।"
+            event = dict(event)
+
+        entry_utc, entry_window = _entry_window(event["event_time_utc"])
         if minutes >= 0:
             phase = "PRE-NEWS"
             action = "WAIT — নিউজের আগে entry নয়"
@@ -67,7 +78,7 @@ def get_weekly_news_overview_for_pair(market_mode: str, real_pairs: list[str], c
             action = f"{direction} — পরবর্তী 1M candle"
         if direction == "WAIT":
             action = "WAIT — direction নিশ্চিত নয়"
-        event = dict(event)
+
         event["selected_pair"] = selected_pair
         event["direction"] = direction
         event["direction_basis_bn"] = basis
@@ -86,7 +97,7 @@ def get_weekly_news_overview_for_pair(market_mode: str, real_pairs: list[str], c
     data["events"] = enriched
     data["alert_events"] = [e for e in enriched if e.get("five_minute_alert")]
     data["note_bn"] = (
-        "NEWS প্যানেল এখন নির্বাচিত pair অনুযায়ী দেখাবে: NEWS TIME, পরবর্তী 1M ENTRY CANDLE এবং সম্ভাব্য UP/DOWN bias। "
-        "PRE-NEWS অবস্থায় WAIT থাকবে; Alpha Vantage sentiment থাকলে সেটি শুধু সম্ভাব্য bias হিসেবে ব্যবহৃত হবে, নিশ্চিত prediction নয়।"
+        "NEWS প্যানেল নির্বাচিত pair অনুযায়ী দেখাবে। Calendar event দেখাতে Alpha Vantage কল করা হয় না; "
+        "শুধু high-impact release-এর ৫ মিনিটের মধ্যে direction দরকার হলে Alpha Vantage sentiment ব্যবহার হবে।"
     )
     return data
