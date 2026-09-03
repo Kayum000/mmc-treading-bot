@@ -29,9 +29,11 @@
   .countdown-label{font-size:22px;font-weight:800;color:#174ea6}.countdown{font-size:58px;font-weight:900;color:#174ea6;line-height:1.05;margin:5px 0 18px}
   .price-box{border:2px solid #16803c;border-radius:14px;padding:14px 10px;background:#fbfffc}.price-label{font-size:21px;font-weight:800;color:#16753a}.price{font-size:52px;font-weight:900;color:#16803c;margin-top:3px}
   .details{margin-top:20px;font-size:18px;line-height:1.7}.source-badge{display:inline-block;padding:5px 10px;border-radius:999px;background:#eef2ff;font-weight:700}
+  .news-box{margin-top:22px;border:2px solid #f59e0b;border-radius:16px;padding:20px;background:#fffdf7}.news-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.news-title{font-size:28px;font-weight:900;margin:0}.news-state{font-size:15px;color:#475569}.news-alert{margin-top:14px;padding:16px;border-radius:12px;background:#fff1d6;border:1px solid #f59e0b}.news-alert strong{font-size:22px}.news-count{font-size:26px;font-weight:900;margin:6px 0}.news-meta{font-size:16px;line-height:1.6}.news-list{margin:12px 0 0;padding-left:22px}.news-list li{margin:8px 0;line-height:1.5}.news-empty{margin-top:14px;padding:14px;border-radius:12px;background:#f1f5f9;color:#475569}
+  .news-refresh{font-size:15px;padding:8px 12px;background:#172033}
   .download-app{position:fixed;right:12px;bottom:12px;z-index:1000;text-decoration:none;background:#2563eb;color:#fff;font-size:16px;font-weight:700;padding:12px 16px;border-radius:999px;box-shadow:0 4px 14px rgba(0,0,0,.2);display:flex;align-items:center;gap:7px}
   .download-app:hover{background:#1d4ed8}
-  @media(max-width:600px){main{padding-top:76px}.brand{padding-right:0}.brand img{width:58px;height:58px}h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}}
+  @media(max-width:600px){main{padding-top:76px}.brand{padding-right:0}.brand img{width:58px;height:58px}h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}.news-title{font-size:24px}}
 </style>
 </head>
 <body>
@@ -75,6 +77,11 @@
 </section>
 {% endif %}
 </div>
+<section class="news-box" id="news-panel">
+  <div class="news-head"><h2 class="news-title">📰 নির্বাচিত মার্কেটের নিউজ অ্যালার্ট</h2><button type="button" class="news-refresh" id="news-refresh">রিফ্রেশ</button></div>
+  <div class="news-state" id="news-state">মার্কেট নির্বাচন করলে নির্ধারিত গুরুত্বপূর্ণ নিউজের সময় পর্যবেক্ষণ করা হবে।</div>
+  <div id="news-content"><div class="news-empty">এখনও কোনো মার্কেট নির্বাচন করা হয়নি।</div></div>
+</section>
 </main>
 <a class="download-app" href="https://github.com/Kayum000/mmc-treading-bot/releases/download/latest/app-debug.apk" aria-label="Download App">📲 Download App</a>
 <script>
@@ -84,12 +91,17 @@ const signalButton=document.getElementById('signal-button');
 const autoToggle=document.getElementById('auto-signal');
 const autoStatus=document.getElementById('auto-status');
 const resultContainer=document.getElementById('result-container');
+const newsContent=document.getElementById('news-content');
+const newsState=document.getElementById('news-state');
+const newsRefresh=document.getElementById('news-refresh');
 const STORAGE_MODE='mmc_selected_mode';
 const STORAGE_REAL='mmc_selected_real_pair';
 const STORAGE_CRYPTO='mmc_selected_crypto_pair';
 const STORAGE_AUTO='mmc_auto_signal_enabled';
 let autoTimer=null;
 let autoRequestInFlight=false;
+let newsTimer=null;
+let newsRequestInFlight=false;
 
 function savedPairForMode(mode){return localStorage.getItem(mode==='crypto'?STORAGE_CRYPTO:STORAGE_REAL)||'';}
 function saveCurrentPair(){const mode=modeInput.value,pair=pairSelect.value;if(mode&&pair){localStorage.setItem(STORAGE_MODE,mode);localStorage.setItem(mode==='crypto'?STORAGE_CRYPTO:STORAGE_REAL,pair);}}
@@ -104,17 +116,13 @@ function setMode(mode,preserveSelection=true){
   updateSignalButton();
 }
 
-function escapeHtml(value){return String(value??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));}
+function escapeHtml(value){return String(value??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));}
 function renderResult(r){
   const action=escapeHtml(r.signal),pair=escapeHtml(r.pair),entry=escapeHtml(r.entry_time_bd),price=r.entry_price==null?'N/A':escapeHtml(r.entry_price),reason=escapeHtml(r.reason),tf=escapeHtml(r.timeframe),entryTf=escapeHtml(r.entry_timeframe||'1m');
   resultContainer.innerHTML=`<section><h2>${pair} — ${action}</h2><div class="entry-box"><div class="entry-title">ENTRY TIME — NEXT 1-MINUTE CANDLE</div><div class="entry-time">${entry}</div><div class="countdown-label">ENTRY COUNTDOWN</div><div class="countdown" data-entry-timer data-entry-at="${escapeHtml(r.entry_time_utc)}">00:00</div><div class="price-box"><div class="price-label">ENTRY PRICE</div><div class="price">${price}</div></div></div><div class="details"><p><strong>Timeframe:</strong> ${tf}</p><p><strong>Entry TF:</strong> ${entryTf}</p><p><strong>Buy score:</strong> ${escapeHtml(r.buy_score)}</p><p><strong>Sell score:</strong> ${escapeHtml(r.sell_score)}</p><p><strong>কারণ ও বিস্তারিত যাচাই:</strong> ${reason}</p></div></section>`;
 }
 
-function nextAutoDelayMs(){
-  const now=Date.now();
-  const next=(Math.floor(now/60000)+1)*60000;
-  return Math.max(1500,next-now+1500);
-}
+function nextAutoDelayMs(){const now=Date.now();const next=(Math.floor(now/60000)+1)*60000;return Math.max(1500,next-now+1500);}
 async function runAutoSignal(){
   if(!autoToggle.checked||!pairSelect.value||autoRequestInFlight)return;
   autoRequestInFlight=true;
@@ -127,14 +135,43 @@ async function runAutoSignal(){
   }catch(error){autoStatus.textContent='অটো সিগন্যাল সংযোগে সমস্যা হয়েছে। পরের ১ মিনিটে আবার চেষ্টা করবে।';}
   finally{autoRequestInFlight=false;scheduleAutoSignal();}
 }
-function scheduleAutoSignal(){
-  if(autoTimer)clearTimeout(autoTimer);
-  if(!autoToggle.checked||!pairSelect.value){return;}
-  autoTimer=setTimeout(runAutoSignal,nextAutoDelayMs());
-}
+function scheduleAutoSignal(){if(autoTimer)clearTimeout(autoTimer);if(!autoToggle.checked||!pairSelect.value)return;autoTimer=setTimeout(runAutoSignal,nextAutoDelayMs());}
 
-pairSelect.addEventListener('change',()=>{saveCurrentPair();updateSignalButton();if(autoToggle.checked)runAutoSignal();else scheduleAutoSignal();});
-document.querySelectorAll('.mode-btn').forEach(b=>b.addEventListener('click',()=>{saveCurrentPair();setMode(b.dataset.mode,false);if(autoToggle.checked)runAutoSignal();else scheduleAutoSignal();}));
+function formatNewsCountdown(minutes){
+  if(minutes==null)return '';
+  const total=Math.max(0,Math.round(Number(minutes)*60));
+  const m=Math.floor(total/60),s=total%60;
+  return `${m} মিনিট ${String(s).padStart(2,'0')} সেকেন্ড`;
+}
+function renderNews(data){
+  if(!data.ok){newsContent.innerHTML=`<div class="news-empty">${escapeHtml(data.error||'নিউজ তথ্য পাওয়া যায়নি।')}</div>`;return;}
+  const a=data.alert;
+  if(a){
+    newsContent.innerHTML=`<div class="news-alert"><strong>🚨 ${escapeHtml(a.signal_bn)} — ${escapeHtml(a.currency_bn)}</strong><div class="news-count">${escapeHtml(a.title_bn)} — আর ${formatNewsCountdown(a.minutes_to_event)}</div><div class="news-meta">নিউজ সময় (UTC): ${escapeHtml(a.event_time_utc)}<br>প্রভাব: ${escapeHtml(a.impact||'unknown')} | পূর্বাভাস: ${escapeHtml(a.forecast??'N/A')} | আগের: ${escapeHtml(a.previous??'N/A')}<br>${escapeHtml(a.recommendation_bn)}</div></div>`;
+  }else if(data.upcoming&&data.upcoming.length){
+    const items=data.upcoming.map(e=>`<li><strong>${escapeHtml(e.title_bn)}</strong> — ${escapeHtml(e.currency_bn)} — আর ${formatNewsCountdown(e.minutes_to_event)} <span class="source-badge">${escapeHtml(e.impact||'')}</span></li>`).join('');
+    newsContent.innerHTML=`<div class="news-meta"><strong>পরবর্তী গুরুত্বপূর্ণ ইভেন্ট:</strong></div><ul class="news-list">${items}</ul>`;
+  }else{
+    newsContent.innerHTML='<div class="news-empty">নির্বাচিত মার্কেটের জন্য আগামী ৩০ মিনিটে কোনো নির্ধারিত নিউজ পাওয়া যায়নি।</div>';
+  }
+  newsState.textContent=`নিউজ ক্যালেন্ডার শেষবার যাচাই: ${escapeHtml(data.checked_at_utc)} UTC | উৎস: ${escapeHtml(data.source)}`;
+}
+async function checkNews(){
+  if(!pairSelect.value||!modeInput.value||newsRequestInFlight)return;
+  newsRequestInFlight=true;
+  newsState.textContent='নির্ধারিত নিউজ ক্যালেন্ডার যাচাই করা হচ্ছে…';
+  try{
+    const response=await fetch('{{ url_for("news_alert") }}',{method:'GET',cache:'no-store',headers:{'Accept':'application/json'}});
+    const data=await response.json();
+    renderNews(data);
+  }catch(error){newsContent.innerHTML='<div class="news-empty">নিউজ ক্যালেন্ডার এখন পাওয়া যাচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করা হবে।</div>';}
+  finally{newsRequestInFlight=false;}
+}
+function scheduleNews(){if(newsTimer)clearInterval(newsTimer);if(pairSelect.value&&modeInput.value){checkNews();newsTimer=setInterval(checkNews,30000);}else{newsContent.innerHTML='<div class="news-empty">এখনও কোনো মার্কেট নির্বাচন করা হয়নি।</div>';newsState.textContent='মার্কেট নির্বাচন করলে নির্ধারিত গুরুত্বপূর্ণ নিউজের সময় পর্যবেক্ষণ করা হবে।';}}
+
+pairSelect.addEventListener('change',()=>{saveCurrentPair();updateSignalButton();if(autoToggle.checked)runAutoSignal();else scheduleAutoSignal();scheduleNews();});
+document.querySelectorAll('.mode-btn').forEach(b=>b.addEventListener('click',()=>{saveCurrentPair();setMode(b.dataset.mode,false);if(autoToggle.checked)runAutoSignal();else scheduleAutoSignal();scheduleNews();}));
+newsRefresh.addEventListener('click',checkNews);
 autoToggle.checked=localStorage.getItem(STORAGE_AUTO)!=='0';
 autoToggle.addEventListener('change',()=>{localStorage.setItem(STORAGE_AUTO,autoToggle.checked?'1':'0');if(autoToggle.checked)runAutoSignal();else{if(autoTimer)clearTimeout(autoTimer);autoStatus.textContent='AUTO SIGNAL বন্ধ আছে।';}});
 
@@ -142,7 +179,8 @@ const serverMode=modeInput.value;
 const serverPair={{ pair|tojson }};
 const storedMode=localStorage.getItem(STORAGE_MODE);
 if(!serverMode){setMode(storedMode==='crypto'?'crypto':'real',false);}else{setMode(serverMode,true);if(serverPair&&pairSelect.value!==serverPair){const option=Array.from(pairSelect.options).find(o=>o.dataset.market===serverMode&&o.value===serverPair);if(option)pairSelect.value=serverPair;updateSignalButton();}}
-if(autoToggle.checked&&pairSelect.value){autoStatus.textContent='AUTO SIGNAL চালু — প্রতি ১ মিনিটে final entry যাচাই হবে। 30m/15m/5m MTF data তাদের নিজ নিজ candle close-এ refresh হবে; Entry হবে পরবর্তী ১ মিনিটের candle-এ।';runAutoSignal();}
+if(autoToggle.checked&&pairSelect.value){autoStatus.textContent='AUTO SIGNAL চালু — প্রতি ১ মিনিটে final entry যাচাই হবে।';runAutoSignal();}
+scheduleNews();
 </script>
 <script src="{{ url_for('static', filename='candle_timer.js') }}" defer></script>
 </body>
