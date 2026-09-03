@@ -46,3 +46,51 @@ def displacement(df: pd.DataFrame) -> str:
     if body < prev_range * 0.7:
         return "none"
     return "bullish" if last["close"] > last["open"] else "bearish"
+
+
+def breakout_retest_role_reversal(df: pd.DataFrame, lookback: int = 10) -> str:
+    """Detect breakout -> retest -> role-reversal confirmation.
+
+    Bullish: price closes above a prior resistance level, then a later candle
+    retests that level and closes back above it (resistance becomes support).
+    Bearish is the inverse (support becomes resistance).
+
+    The level is taken from the candles immediately before the breakout, and
+    retest tolerance is adaptive to recent candle range so the rule works
+    across different price scales without changing the existing score system.
+    """
+    if len(df) < lookback + 3:
+        return "none"
+
+    start = max(lookback, len(df) - (lookback * 3))
+    recent = df.iloc[start:].reset_index(drop=True)
+    if len(recent) < lookback + 2:
+        return "none"
+
+    avg_range = (recent["high"] - recent["low"]).tail(lookback).mean()
+    tolerance = max(float(avg_range) * 0.25, 1e-12)
+
+    # Search for the most recent breakout followed by a confirmed retest.
+    for breakout_idx in range(len(recent) - 2, lookback - 1, -1):
+        prior = recent.iloc[breakout_idx - lookback:breakout_idx]
+        breakout = recent.iloc[breakout_idx]
+        resistance = float(prior["high"].max())
+        support = float(prior["low"].min())
+
+        if float(breakout["close"]) > resistance:
+            for retest_idx in range(breakout_idx + 1, len(recent)):
+                retest = recent.iloc[retest_idx]
+                touched = float(retest["low"]) <= resistance + tolerance
+                held = float(retest["close"]) > resistance
+                if touched and held:
+                    return "bullish_role_reversal"
+
+        if float(breakout["close"]) < support:
+            for retest_idx in range(breakout_idx + 1, len(recent)):
+                retest = recent.iloc[retest_idx]
+                touched = float(retest["high"]) >= support - tolerance
+                held = float(retest["close"]) < support
+                if touched and held:
+                    return "bearish_role_reversal"
+
+    return "none"
