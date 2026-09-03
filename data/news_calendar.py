@@ -1,4 +1,4 @@
-"""Scheduled market-news calendar and five-minute pre-news alerts."""
+"""Scheduled market-news calendar, Alpha Vantage sentiment, and five-minute alerts."""
 from __future__ import annotations
 
 import json
@@ -7,6 +7,8 @@ import time
 from datetime import datetime, timezone, timedelta
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+from data.alpha_vantage_news import fetch_news_sentiment, pair_sentiment
 
 CALENDAR_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 CACHE_TTL_SECONDS = 600
@@ -182,12 +184,27 @@ def _prediction_bn(impact: str, minutes_to_event: float) -> str:
     return "কম প্রভাবের নিউজ—ক্যালেন্ডার হিসেবে পর্যবেক্ষণ করুন।"
 
 
+def _sentiment_for_event(event: dict, market_mode: str, pairs: list[str], sentiment_data: dict) -> dict:
+    """Aggregate Alpha Vantage sentiment for all pairs affected by a calendar event."""
+    affected = [pair for pair in pairs if event["currency"] in _relevant_currencies(pair, market_mode)]
+    if not affected:
+        return {"available": False, "label_bn": "নিউজ সেন্টিমেন্ট পাওয়া যায়নি", "score": 0.0, "articles": 0, "pairs": []}
+    summaries = [pair_sentiment(pair, market_mode, sentiment_data) for pair in affected]
+    available = [x for x in summaries if x.get("available")]
+    if not available:
+        return {"available": False, "label_bn": "এই নিউজের আগে পর্যাপ্ত Alpha Vantage sentiment নেই", "score": 0.0, "articles": 0, "pairs": affected}
+    score = sum(x["score"] for x in available) / len(available)
+    label = "ইতিবাচক" if score >= 0.15 else "নেতিবাচক" if score <= -0.15 else "নিরপেক্ষ"
+    return {"available": True, "label_bn": label, "score": round(score, 3), "articles": sum(x["articles"] for x in available), "pairs": affected}
+
+
 def get_weekly_news_overview(market_mode: str, real_pairs: list[str], crypto_pairs: list[str]) -> dict:
-    """Return the week's relevant news grouped across every supported pair."""
+    """Return the week's relevant calendar news grouped across every supported pair."""
     now = datetime.now(timezone.utc)
     pairs = list(crypto_pairs if market_mode == "crypto" else real_pairs)
     pair_map = {pair.upper(): pair for pair in pairs}
     grouped: dict[str, dict] = {}
+    sentiment_data = fetch_news_sentiment()
 
     for event in fetch_calendar():
         if event["time_utc"] < now - timedelta(minutes=1):
@@ -202,6 +219,10 @@ def get_weekly_news_overview(market_mode: str, real_pairs: list[str], crypto_pai
         payload["pairs"] = affected
         payload["pair_count"] = len(affected)
         payload["prediction_bn"] = _prediction_bn(payload["impact"], payload["minutes_to_event"])
+        sentiment = _sentiment_for_event(event, market_mode, pairs, sentiment_data)
+        payload["news_sentiment"] = sentiment
+        if sentiment["available"]:
+            payload["prediction_bn"] += f" | Alpha Vantage নিউজ সেন্টিমেন্ট: {sentiment['label_bn']} ({sentiment['articles']}টি প্রাসঙ্গিক আর্টিকেল)।"
         grouped[event["id"]] = payload
 
     events = sorted(grouped.values(), key=lambda e: e["event_time_utc"])
@@ -215,6 +236,11 @@ def get_weekly_news_overview(market_mode: str, real_pairs: list[str], crypto_pai
         "events": events,
         "total_events": len(events),
         "total_pairs": len(pair_map),
-        "source": "Forex Factory weekly economic calendar",
-        "note_bn": "এখানে সপ্তাহের নির্ধারিত নিউজগুলো সব সংশ্লিষ্ট পেয়ার অনুযায়ী দেখানো হয়। নিউজের ৫ মিনিট আগে প্রি-নিউজ সতর্কতা আসে; এটি নিশ্চিত BUY/SELL দিকের পূর্বাভাস নয়।",
+        "source": "Forex Factory weekly economic calendar + Alpha Vantage NEWS_SENTIMENT",
+        "alpha_vantage": {
+            "configured": bool(sentiment_data.get("configured")),
+            "articles": len(sentiment_data.get("articles", [])),
+            "source": sentiment_data.get("source", "Alpha Vantage"),
+        },
+        "note_bn": "সপ্তাহের নির্ধারিত নিউজগুলো সব সংশ্লিষ্ট পেয়ার অনুযায়ী দেখানো হয়। নিউজের ৫ মিনিট আগে প্রি-নিউজ সতর্কতা আসে। Alpha Vantage প্রকাশিত নিউজের sentiment দিয়ে অতিরিক্ত context দেয়; এটি নিশ্চিত BUY/SELL দিকের পূর্বাভাস নয়।",
     }
