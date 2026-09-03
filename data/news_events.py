@@ -1,9 +1,9 @@
 """Scheduled market-news events for the dashboard.
 
-Calendar data is kept separate from Alpha Vantage. The primary calendar export is
-used when it is current; if that public export is stale/empty, a live Forex Factory
-calendar page is used as a fallback. Alpha Vantage is only queried for a high-impact
-event within five minutes, and the resulting direction is cached per mode/pair/event.
+Calendar data is kept separate from Alpha Vantage. The live Forex Factory
+calendar is preferred because the public weekly export can lag; the weekly
+export remains a backup. Alpha Vantage is only queried for a high-impact event
+within five minutes, and the resulting direction is cached per mode/pair/event.
 """
 from __future__ import annotations
 
@@ -18,7 +18,10 @@ from zoneinfo import ZoneInfo
 from data.news_calendar import fetch_calendar, _event_payload, _prediction_bn, _relevant_currencies
 from data.alpha_vantage_news import fetch_news_sentiment, pair_sentiment
 
-LIVE_CALENDAR_URL = "https://calendar.forexfactory.com/calendar"
+LIVE_CALENDAR_URLS = (
+    "https://www.forexfactory.com/calendar?month=this",
+    "https://calendar.forexfactory.com/calendar",
+)
 LIVE_CACHE_TTL_SECONDS = 60
 _LIVE_CACHE = {"events": None, "at": 0.0}
 _LKG_NEWS = {}
@@ -46,7 +49,9 @@ class _CalendarParser(HTMLParser):
             field = next((x for x in ("date", "time", "currency", "impact", "event", "actual", "forecast", "previous") if x in classes), None)
             self._cell = {"field": field, "text": ""}
         elif tag == "span" and self._cell is not None:
-            self._span_title = dict(attrs).get("title", "")
+            title = dict(attrs).get("title", "")
+            if title:
+                self._span_title = title
 
     def handle_data(self, data):
         if self._cell is not None:
@@ -74,15 +79,30 @@ def _live_html_calendar() -> list[dict]:
     if cached and now.timestamp() - cached_at < LIVE_CACHE_TTL_SECONDS:
         return cached
 
-    req = Request(
-        LIVE_CALENDAR_URL,
-        headers={
-            "User-Agent": "Mozilla/5.0 (compatible; mmc-signal-bot/1.0)",
-            "Accept": "text/html,application/xhtml+xml",
-        },
-    )
-    with urlopen(req, timeout=12) as response:
-        html = response.read().decode("utf-8", errors="replace")
+    last_error = None
+    html = ""
+    for url in LIVE_CALENDAR_URLS:
+        try:
+            req = Request(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; mmc-signal-bot/1.0)",
+                    "Accept": "text/html,application/xhtml+xml",
+                    "Cache-Control": "no-cache",
+                },
+            )
+            with urlopen(req, timeout=12) as response:
+                html = response.read().decode("utf-8", errors="replace")
+            parser = _CalendarParser()
+            parser.feed(html)
+            if parser.rows:
+                break
+        except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
+            last_error = exc
+            continue
+    else:
+        return cached
+
     parser = _CalendarParser()
     parser.feed(html)
     if not parser.rows:
@@ -140,21 +160,20 @@ def _live_html_calendar() -> list[dict]:
 
 
 def _calendar_events_current() -> tuple[list[dict], str]:
-    now = datetime.now(timezone.utc)
-    try:
-        events = fetch_calendar()
-    except Exception:
-        events = []
-    future = [e for e in events if e.get("time_utc") and e["time_utc"] >= now - timedelta(minutes=1)]
-    if future:
-        return events, "Forex Factory weekly economic calendar"
+    """Prefer live calendar; use weekly export only as a backup."""
     try:
         live = _live_html_calendar()
-        if live:
+        now = datetime.now(timezone.utc)
+        if any(e.get("time_utc") and e["time_utc"] >= now - timedelta(minutes=1) for e in live):
             return live, "Forex Factory live calendar"
     except (HTTPError, URLError, TimeoutError, OSError, ValueError):
         pass
-    return events, "Forex Factory weekly economic calendar"
+
+    try:
+        weekly = fetch_calendar()
+    except Exception:
+        weekly = []
+    return weekly, "Forex Factory weekly economic calendar (backup)"
 
 
 def _payload_events(source_events: list[dict], currencies: set[str], selected_pair: str, now: datetime) -> list[dict]:
