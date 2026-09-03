@@ -119,7 +119,6 @@ def fetch_calendar(force: bool = False) -> list[dict]:
 
 def _relevant_currencies(pair: str, market_mode: str) -> set[str]:
     if market_mode == "crypto":
-        # Major USD macro releases can materially affect crypto as well.
         return {"USD"}
     return PAIR_CURRENCIES.get(pair.upper(), set())
 
@@ -149,7 +148,6 @@ def get_news_alert(pair: str, market_mode: str, alert_minutes: int = 5) -> dict:
     relevant = [e for e in events if e["currency"] in currencies and e["time_utc"] >= now - timedelta(minutes=1)]
     alert_window = [e for e in relevant if 0 <= (e["time_utc"] - now).total_seconds() <= alert_minutes * 60]
     upcoming = [e for e in relevant if 0 <= (e["time_utc"] - now).total_seconds() <= 30 * 60]
-    # High/medium impact events only become trade-risk alerts; low impact remains visible as calendar context.
     alert_window.sort(key=lambda e: (0 if e["impact"] == "high" else 1, e["time_utc"]))
     upcoming.sort(key=lambda e: e["time_utc"])
 
@@ -167,4 +165,56 @@ def get_news_alert(pair: str, market_mode: str, alert_minutes: int = 5) -> dict:
         "alert": active,
         "upcoming": [_event_payload(e, now) for e in upcoming[:5]],
         "source": "Forex Factory weekly economic calendar",
+    }
+
+
+def _prediction_bn(impact: str, minutes_to_event: float) -> str:
+    if 0 <= minutes_to_event <= 5:
+        if impact == "high":
+            return "৫ মিনিটের প্রি-নিউজ সতর্কতা: ভোলাটিলিটি দ্রুত বাড়তে পারে।"
+        if impact == "medium":
+            return "৫ মিনিটের প্রি-নিউজ সতর্কতা: স্বাভাবিকের চেয়ে বেশি মুভ হতে পারে।"
+        return "৫ মিনিটের প্রি-নিউজ সতর্কতা: নিউজের সময় মুভমেন্ট হতে পারে।"
+    if impact == "high":
+        return "উচ্চ প্রভাবের নির্ধারিত নিউজ—আগে থেকেই প্রস্তুত থাকুন।"
+    if impact == "medium":
+        return "মাঝারি প্রভাবের নিউজ—সম্ভাব্য মুভমেন্ট নজরে রাখুন।"
+    return "কম প্রভাবের নিউজ—ক্যালেন্ডার হিসেবে পর্যবেক্ষণ করুন।"
+
+
+def get_weekly_news_overview(market_mode: str, real_pairs: list[str], crypto_pairs: list[str]) -> dict:
+    """Return the week's relevant news grouped across every supported pair."""
+    now = datetime.now(timezone.utc)
+    pairs = list(crypto_pairs if market_mode == "crypto" else real_pairs)
+    pair_map = {pair.upper(): pair for pair in pairs}
+    grouped: dict[str, dict] = {}
+
+    for event in fetch_calendar():
+        if event["time_utc"] < now - timedelta(minutes=1):
+            continue
+        affected = []
+        for pair in pairs:
+            if event["currency"] in _relevant_currencies(pair, market_mode):
+                affected.append(pair)
+        if not affected:
+            continue
+        payload = _event_payload(event, now)
+        payload["pairs"] = affected
+        payload["pair_count"] = len(affected)
+        payload["prediction_bn"] = _prediction_bn(payload["impact"], payload["minutes_to_event"])
+        grouped[event["id"]] = payload
+
+    events = sorted(grouped.values(), key=lambda e: e["event_time_utc"])
+    alerts = [e for e in events if e["five_minute_alert"]]
+    return {
+        "ok": True,
+        "market_mode": market_mode,
+        "checked_at_utc": now.isoformat(timespec="seconds"),
+        "alert_window_minutes": 5,
+        "alert_events": alerts,
+        "events": events,
+        "total_events": len(events),
+        "total_pairs": len(pair_map),
+        "source": "Forex Factory weekly economic calendar",
+        "note_bn": "এখানে সপ্তাহের নির্ধারিত নিউজগুলো সব সংশ্লিষ্ট পেয়ার অনুযায়ী দেখানো হয়। নিউজের ৫ মিনিট আগে প্রি-নিউজ সতর্কতা আসে; এটি নিশ্চিত BUY/SELL দিকের পূর্বাভাস নয়।",
     }
