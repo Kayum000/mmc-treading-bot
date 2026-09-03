@@ -3,6 +3,7 @@ import pandas as pd
 
 from config import CONFIG
 from strategy.multi_timeframe import multi_timeframe_score, confirmation_profile
+from strategy.mmc import liquidity_sweep, displacement, market_structure
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,6 @@ def _is_valid_setup(profile: dict, side: str) -> bool:
     if profile["opposite_structure"]:
         return False
 
-    # Prevent a signal from being carried almost entirely by one timeframe.
     if profile["30m"]["score"] < 4:
         return False
     if profile["15m"]["score"] < 3:
@@ -88,3 +88,40 @@ def generate_signal(frames: dict[str, pd.DataFrame]) -> Signal:
         diagnostic = _diagnostic_reason(buy_profile, "buy") if buy >= sell else _diagnostic_reason(sell_profile, "sell")
         return Signal("NO_TRADE", buy, sell, diagnostic)
     return Signal("NO_TRADE", buy, sell, "যথেষ্ট MMC নিশ্চিতকরণ পাওয়া যায়নি। বাজারের দিক, বাজারের গঠন এবং ৫ মিনিটের প্রবেশের সংকেত এখনও যথেষ্ট শক্তিশালী নয়।")
+
+
+def confirm_1m_entry(signal: Signal, df_1m: pd.DataFrame) -> Signal:
+    """Use the latest closed 1m candle as the final entry trigger.
+
+    The 30m/15m/5m MMC score is unchanged. A trade is only kept when the
+    latest closed 1m candle confirms the already-selected direction via a
+    matching BOS, liquidity sweep/reclaim, or displacement candle.
+    """
+    if signal.action not in {"BUY", "SELL"}:
+        return signal
+    if df_1m is None or df_1m.empty:
+        return Signal(signal.action, signal.buy_score, signal.sell_score, signal.reason + " ১ মিনিটের প্রবেশ যাচাইয়ের জন্য ডেটা পাওয়া যায়নি; ট্রেড বাতিল করা হয়েছে।")
+
+    side = "buy" if signal.action == "BUY" else "sell"
+    bos = market_structure(df_1m, lookback=3)
+    sweep = liquidity_sweep(df_1m, lookback=10)
+    move = displacement(df_1m)
+
+    confirmed = (
+        (side == "buy" and (bos == "bullish_bos" or sweep == "buy_side_rejection" or move == "bullish"))
+        or (side == "sell" and (bos == "bearish_bos" or sweep == "sell_side_rejection" or move == "bearish"))
+    )
+    if confirmed:
+        return Signal(
+            signal.action,
+            signal.buy_score,
+            signal.sell_score,
+            signal.reason + " ১ মিনিটের শেষ বন্ধ ক্যান্ডেলেও একই দিকের প্রবেশ ট্রিগার নিশ্চিত হয়েছে; পরবর্তী ১ মিনিটের ক্যান্ডেল এন্ট্রির জন্য প্রস্তুত।",
+        )
+
+    return Signal(
+        "NO_TRADE",
+        signal.buy_score,
+        signal.sell_score,
+        signal.reason + " ১ মিনিটের শেষ বন্ধ ক্যান্ডেলে একই দিকের BOS, liquidity sweep/reclaim বা displacement নিশ্চিত হয়নি; তাই পরবর্তী ১ মিনিটের ক্যান্ডেলে এন্ট্রি দেওয়া হয়নি।",
+    )
