@@ -63,7 +63,7 @@
   <div class="countdown" data-entry-timer data-entry-at="{{result.entry_time_utc}}">00:30</div>
   <div class="price-box"><div class="price-label">ENTRY PRICE</div><div class="price">{{result.entry_price if result.entry_price is not none else 'N/A'}}</div></div>
 </div>
-<div class="details"><p><strong>Timeframe:</strong> {{result.timeframe}}</p><p><strong>Buy score:</strong> {{result.buy_score}}</p><p><strong>Sell score:</strong> {{result.sell_score}}</p><p><strong>Reason:</strong> {{result.reason}}</p></div>
+<div class="details"><p><strong>Timeframe:</strong> {{result.timeframe}}</p><p><strong>Buy score:</strong> {{result.buy_score}}</p><p><strong>Sell score:</strong> {{result.sell_score}}</p><p><strong>কারণ ও বিস্তারিত যাচাই:</strong> {{result.reason}}</p></div>
 </section>
 {% endif %}
 </main>
@@ -135,7 +135,7 @@ if(!serverMode){
   setMode(serverMode,true);
   if(serverPair && pairSelect.value!==serverPair){
     const option=Array.from(pairSelect.options).find(o=>o.dataset.market===serverMode && o.value===serverPair);
-    if(option) pairSelect.value=option.value;
+    if(option) pairSelect.value=serverPair;
     updateSignalButton();
   }
 }
