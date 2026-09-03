@@ -47,7 +47,16 @@
       #important-news-hero .important-news-original{margin-top:8px}
       #important-news-hero .important-news-original .news-pairs{font-size:15px}
       #important-news-hero .important-news-original .news-prediction{font-size:14px}
-      @media(max-width:600px){#important-news-hero{padding:13px}#important-news-hero .important-news-heading{font-size:21px}#important-news-hero .important-news-title{font-size:19px}#important-news-hero .important-news-time{font-size:17px}#important-news-hero .important-news-direction{font-size:28px}}
+      #important-news-status{margin:12px 0 4px;padding:13px;border:2px solid #f59e0b;border-radius:11px;background:#fff8dc}
+      #important-news-status .ins-heading{font-size:19px;font-weight:900;color:#9a5b00;margin-bottom:7px}
+      #important-news-status .ins-title{font-size:17px;font-weight:900;line-height:1.35;margin-bottom:7px}
+      #important-news-status .ins-time{font-size:15px;font-weight:900;line-height:1.5}
+      #important-news-status .ins-count{font-size:16px;font-weight:900;margin-top:5px}
+      #important-news-status .ins-direction{font-size:25px;font-weight:1000;text-align:center;margin-top:8px;padding:7px;border-radius:9px;border:2px solid #cbd5e1;background:#fff}
+      #important-news-status .ins-direction.up{color:#15803d;border-color:#86efac;background:#f0fdf4}
+      #important-news-status .ins-direction.down{color:#dc2626;border-color:#fca5a5;background:#fef2f2}
+      #important-news-status .ins-direction.wait{color:#92400e;border-color:#fcd34d;background:#fffbeb}
+      @media(max-width:600px){#important-news-hero{padding:13px}#important-news-hero .important-news-heading{font-size:21px}#important-news-hero .important-news-title{font-size:19px}#important-news-hero .important-news-time{font-size:17px}#important-news-hero .important-news-direction{font-size:28px}#important-news-status .ins-heading{font-size:18px}#important-news-status .ins-direction{font-size:23px}}
     `;
     document.head.appendChild(style);
   }
@@ -71,6 +80,9 @@
       title = title.replace(/^[^—]+—\s*/, '');
       if (title) return title;
     }
+    const text = node?.textContent || '';
+    const parts = text.split('—').map(v => v.trim()).filter(Boolean);
+    if (parts.length >= 3) return parts[2];
     return 'গুরুত্বপূর্ণ নির্ধারিত নিউজ';
   }
 
@@ -87,15 +99,50 @@
     }[c]));
   }
 
+  function getImportantSource(content) {
+    return content?.querySelector(
+      ':scope > .news-alert.news-impact-high, :scope > .news-list li.news-impact-high, :scope > .news-alert.news-impact-medium, :scope > .news-list li.news-impact-medium'
+    );
+  }
+
+  function updateMarketStatusImportantNews(source) {
+    const panel = document.getElementById('market-status-panel');
+    if (!panel) return;
+    let box = document.getElementById('important-news-status');
+    if (!source) {
+      if (box) box.remove();
+      return;
+    }
+    const direction = extractDirection(source);
+    const eventTime = extractEventTime(source);
+    const bdTime = formatBangladeshTime(eventTime);
+    const title = extractTitle(source);
+    const countdown = source.querySelector('.news-count')?.textContent?.trim() || '';
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'important-news-status';
+      const note = panel.querySelector('.status-note');
+      if (note) panel.insertBefore(box, note);
+      else panel.appendChild(box);
+    }
+    box.innerHTML = `
+      <div class="ins-heading">🚨 গুরুত্বপূর্ণ নিউজ</div>
+      <div class="ins-title">${escapeText(title)}</div>
+      <div class="ins-time">🕒 REAL MARKET TIME (UTC): ${escapeText(eventTime)}</div>
+      ${bdTime ? `<div class="ins-time">🇧🇩 বাংলাদেশ সময়: ${escapeText(bdTime)}</div>` : ''}
+      ${countdown ? `<div class="ins-count">⏱ ${escapeText(countdown)}</div>` : ''}
+      <div class="ins-direction ${direction.toLowerCase()}">${direction === 'UP' ? '⬆ UP — উপরে' : direction === 'DOWN' ? '⬇ DOWN — নিচে' : '⏸ WAIT — দিক নিশ্চিত নয়'}</div>
+    `;
+  }
+
   function enhanceImportantNews() {
     if (enhancingNews) return;
     const content = document.getElementById('news-content');
     if (!content) return;
     injectNewsStyles();
 
-    const source = content.querySelector(
-      ':scope > .news-alert.news-impact-high, :scope > .news-list li.news-impact-high, :scope > .news-alert.news-impact-medium, :scope > .news-list li.news-impact-medium'
-    );
+    const source = getImportantSource(content);
+    updateMarketStatusImportantNews(source);
     const oldHero = document.getElementById('important-news-hero');
     if (!source) {
       if (oldHero) oldHero.remove();
