@@ -63,7 +63,7 @@
     const panel = document.getElementById('market-status-panel'); if (!panel) return null;
     let box = document.getElementById('pre-news-direction-status'); if (box) return box;
     box = document.createElement('div'); box.id = 'pre-news-direction-status';
-    box.innerHTML = '<div class="ins-heading">🔮 আসন্ন নিউজ — Pre-News Direction</div><div class="ins-list"><div class="ins-empty">মার্কেট নির্বাচন করলে শুধু সবচেয়ে কাছের High/Medium/Low নিউজের সম্ভাব্য দিক ও confidence দেখা যাবে।</div></div>';
+    box.innerHTML = '<div class="ins-heading">🔮 আসন্ন নিউজ — Pre-News Direction</div><div class="ins-list"><div class="ins-empty">সব মার্কেটের মধ্যে সবচেয়ে কাছের আসন্ন নিউজের Market, সময়, Direction ও Percentage এখানে দেখানো হবে।</div></div>';
     const note = panel.querySelector('.status-note'); panel.insertBefore(box, note || null); return box;
   }
   function esc(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
@@ -72,19 +72,20 @@
     const box = ensurePreNewsStatusBox(); if (!box || !pair() || statusDirectionBusy) return;
     statusDirectionBusy = true;
     try {
-      const response = await nativeFetch('/news-direction', {credentials:'same-origin', cache:'no-store', headers:{'Accept':'application/json'}});
+      const response = await nativeFetch('/market-status', {credentials:'same-origin', cache:'no-store', headers:{'Accept':'application/json'}});
       const data = await response.json(); const list = box.querySelector('.ins-list');
-      if (!data?.ok || !Array.isArray(data.events) || !data.events.length) { list.innerHTML = '<div class="ins-empty">এই মার্কেটের সামনে কোনো High/Medium/Low Impact নিউজ পাওয়া যায়নি।</div>'; return; }
-      const event = data.events[0];
-      const dir = String(event.direction || 'WAIT').toUpperCase();
-      const confidence = Number(event.confidence_pct);
+      const item = data?.pre_news_direction;
+      if (!data?.ok || !item?.available || !item?.market || !item?.event_time_utc) {
+        list.innerHTML = '<div class="ins-empty">আসন্ন নিউজ পাওয়া যাচ্ছে না।</div>';
+        return;
+      }
+      const confidence = Number(item.confidence_pct);
       const confidenceText = Number.isFinite(confidence) ? `${Math.max(0, Math.min(100, Math.round(confidence)))}%` : '—';
-      const confidenceLabel = esc(event.confidence_label_bn || 'কম');
-      const dirText = dir === 'UP' ? `⬆ UP — উপরে (${confidenceText})` : dir === 'DOWN' ? `⬇ DOWN — নিচে (${confidenceText})` : `⏸ WAIT — নিশ্চিত নয় (${confidenceText})`;
-      const dirClass = dir === 'UP' ? 'ins-up' : dir === 'DOWN' ? 'ins-down' : 'ins-wait';
-      const mins = Number(event.minutes_to_event); const countdown = Number.isFinite(mins) ? (mins < 60 ? `${mins.toFixed(1)} মিনিট পরে` : `${(mins/60).toFixed(1)} ঘণ্টা পরে`) : 'আসন্ন';
-      list.innerHTML = `<div class="ins-item ${dirClass}"><div class="ins-top"><strong>${esc(event.currency || '')}</strong><span>${esc(String(event.impact || 'HIGH').toUpperCase())} • Confidence: ${confidenceText}</span></div><div class="ins-title">${esc(event.title_bn || event.title || 'Economic News')}</div><div class="ins-time">🕒 ${esc(bdTime(event.event_time_utc))} • ${esc(countdown)}</div><div class="ins-direction">${dirText}</div><div class="ins-basis">Confidence ${confidenceText} — ${confidenceLabel}. ${esc(event.direction_basis_bn || 'Alpha Vantage sentiment ভিত্তিক সম্ভাব্য pre-news bias।')}</div></div>`;
-    } catch (_) { const list = box.querySelector('.ins-list'); if (list) list.innerHTML = '<div class="ins-empty">Pre-News Direction এখন পাওয়া যাচ্ছে না। পরে আবার চেষ্টা করা হবে।</div>'; }
+      const dir = String(item.direction || 'WAIT').toUpperCase();
+      const dirText = dir === 'BUY' ? '🟢 BUY' : dir === 'SELL' ? '🔴 SELL' : '⏸ WAIT';
+      const dirClass = dir === 'BUY' ? 'ins-up' : dir === 'SELL' ? 'ins-down' : 'ins-wait';
+      list.innerHTML = `<div class="ins-item ${dirClass}"><div class="ins-row"><span>মার্কেট</span><strong>${esc(item.market)}</strong></div><div class="ins-row"><span>নিউজ সময়</span><strong>${esc(bdTime(item.event_time_utc))}</strong></div><div class="ins-row"><span>Direction</span><strong class="ins-direction">${dirText}</strong></div><div class="ins-row"><span>Percentage</span><strong>${confidenceText}</strong></div></div>`;
+    } catch (_) { const list = box.querySelector('.ins-list'); if (list) list.innerHTML = '<div class="ins-empty">Pre-News Direction এখন পাওয়া যাচ্ছে না।</div>'; }
     finally { statusDirectionBusy = false; }
   }
   function setupPreNewsDirection() {
@@ -95,17 +96,16 @@
         #pre-news-direction-status .ins-heading{font-size:15px;font-weight:900;margin-bottom:7px}
         #pre-news-direction-status .ins-list{display:grid;gap:6px}
         #pre-news-direction-status .ins-item{padding:7px 8px;border:1px solid #e2e8f0;border-radius:8px;background:#fff}
-        #pre-news-direction-status .ins-item.ins-up{border-left:4px solid #16a34a}
-        #pre-news-direction-status .ins-item.ins-down{border-left:4px solid #dc2626}
-        #pre-news-direction-status .ins-item.ins-wait{border-left:4px solid #f59e0b}
-        #pre-news-direction-status .ins-top{display:flex;justify-content:space-between;font-size:11px;color:#64748b}
-        #pre-news-direction-status .ins-title{font-size:13px;font-weight:800;margin-top:2px;line-height:1.25}
-        #pre-news-direction-status .ins-time{font-size:11px;color:#475569;margin-top:3px}
-        #pre-news-direction-status .ins-direction{font-size:18px;font-weight:900;margin-top:4px}
+        #pre-news-direction-status .ins-up{border-left:4px solid #16a34a}
+        #pre-news-direction-status .ins-down{border-left:4px solid #dc2626}
+        #pre-news-direction-status .ins-wait{border-left:4px solid #f59e0b}
+        #pre-news-direction-status .ins-row{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:12px;padding:2px 0}
+        #pre-news-direction-status .ins-row span{color:#64748b}
+        #pre-news-direction-status .ins-row strong{font-size:13px;text-align:right}
+        #pre-news-direction-status .ins-direction{font-size:18px!important;font-weight:900}
         #pre-news-direction-status .ins-up .ins-direction{color:#16803c}
         #pre-news-direction-status .ins-down .ins-direction{color:#dc2626}
         #pre-news-direction-status .ins-wait .ins-direction{color:#b7791f}
-        #pre-news-direction-status .ins-basis{font-size:10px;color:#64748b;margin-top:3px;line-height:1.3}
         #pre-news-direction-status .ins-empty{font-size:11px;color:#64748b;line-height:1.3}
       `; document.head.appendChild(style);
     }
