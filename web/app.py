@@ -1,10 +1,10 @@
-"""On-demand web UI for Real Forex and Crypto MMC signals."""
+"""Web UI for Real Forex and Crypto MMC signals."""
 from __future__ import annotations
 
 import hmac
 import os
 import time
-from flask import Flask, render_template, request, redirect, url_for, session
+from flask import Flask, jsonify, render_template, request, redirect, url_for, session
 
 from signals.get_signal import get_signal
 from data.twelve_data_forex import fetch_api_usage, get_credit_usage
@@ -109,7 +109,6 @@ def favicon():
 
 @app.route("/privacy")
 def privacy():
-    """Public privacy policy page for app-store review and users."""
     return render_template("privacy.html")
 
 
@@ -131,7 +130,6 @@ def index():
         mode = request.form.get("mode", "").strip().lower()
         pair = request.form.get("pair", "").strip().upper()
     else:
-        # Restore the last market selected by this logged-in user.
         mode = session.get("selected_mode", "")
         pair = session.get("selected_pair", "")
 
@@ -140,7 +138,6 @@ def index():
         pair = ""
 
     pairs = REAL_PAIRS if mode == "real" else CRYPTO_PAIRS if mode == "crypto" else []
-
     if pair not in pairs:
         pair = ""
 
@@ -148,8 +145,6 @@ def index():
         if not pair:
             error = "Please select a market before GET SIGNAL."
         else:
-            # Save exactly the market the user chose. It stays selected after
-            # GET SIGNAL and on the next page load until the user changes it.
             session["selected_mode"] = mode
             session["selected_pair"] = pair
             try:
@@ -168,6 +163,22 @@ def index():
         error=error,
         usage=usage,
     )
+
+
+@app.route("/auto-signal", methods=["GET"])
+def auto_signal():
+    """Generate an automatic signal only for the user's selected market."""
+    mode = session.get("selected_mode", "").strip().lower()
+    pair = session.get("selected_pair", "").strip().upper()
+    valid_pairs = REAL_PAIRS if mode == "real" else CRYPTO_PAIRS if mode == "crypto" else []
+    if pair not in valid_pairs:
+        return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
+
+    try:
+        result = get_signal(pair, mode, automatic=True)
+        return jsonify({"ok": True, "result": result})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
 
 
 if __name__ == "__main__":
