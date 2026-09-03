@@ -1,9 +1,8 @@
 (() => {
   'use strict';
 
-  // The previous persistence implementation used v3 keys and could restore a
-  // snapshot over the live News hero. Remove those legacy keys before the
-  // deferred candle_timer.js starts, so only this v4 implementation is active.
+  // Keep only the v4 persistence format. A saved important-news snapshot is a
+  // fallback, not a replacement for fresh calendar data.
   try {
     const legacy = [];
     for (let i = 0; i < localStorage.length; i += 1) {
@@ -18,7 +17,10 @@
 
   const NEWS_KEY = 'mmc_news_lkg_v4:';
   const DIR_KEY = 'mmc_news_direction_v4:';
-  const MAX_PAST_MS = 5 * 60 * 1000;
+  // Do not throw away the last known event after only five minutes. Source/API
+  // outages can last longer. It remains visibly marked as LKG by the UI while
+  // fresh data is still preferred whenever available.
+  const MAX_PAST_MS = 24 * 60 * 60 * 1000;
 
   const read = (key) => {
     try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { return null; }
@@ -69,6 +71,7 @@
     const node = holder.firstElementChild;
     if (!node) return;
     node.dataset.mmcLkg = '1';
+    node.dataset.mmcLkgSavedAt = String(snapshot.savedAt || '');
     content.innerHTML = '';
     content.appendChild(node);
   }
@@ -78,8 +81,10 @@
     if (!count) return;
     const ms = Date.parse(eventTime(node));
     if (!Number.isFinite(ms)) return;
-    const seconds = Math.max(0, Math.ceil((ms - Date.now()) / 1000));
-    count.textContent = seconds <= 0 ? '⏱ নিউজের নির্ধারিত সময় পার হয়েছে' : `⏱ আর ${Math.floor(seconds / 60)} মিনিট ${seconds % 60} সেকেন্ড`;
+    const seconds = Math.ceil((ms - Date.now()) / 1000);
+    count.textContent = seconds <= 0
+      ? '⏱ নিউজের নির্ধারিত সময় পার হয়েছে — এটি Last Known Good News'
+      : `⏱ আর ${Math.floor(seconds / 60)} মিনিট ${seconds % 60} সেকেন্ড`;
   }
 
   function saveDirection() {
@@ -115,12 +120,21 @@
     try { localStorage.removeItem(directionKey()); } catch (_) {}
   }
 
+  function markLkg(source) {
+    if (!source || source.dataset.mmcLkg !== '1') return;
+    const title = source.querySelector('strong');
+    if (title && !title.textContent.includes('Last Known Good')) {
+      title.textContent = `🟡 Last Known Good — ${title.textContent.replace(/^🚨\s*/, '')}`;
+    }
+  }
+
   function tick() {
     if (!pair()) return;
     restoreNews();
     const source = currentSource();
     if (!source) return;
     clearOldDirectionForNewEvent();
+    markLkg(source);
     countdown(source);
     saveNews();
     applyDirection();
