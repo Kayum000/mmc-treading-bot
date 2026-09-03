@@ -1,0 +1,1 @@
+.dashboard{align-items:stretch}.dashboard>.panel{height:100%;min-height:100%}.news-box{max-height:none;height:100%;overflow:auto}.signal-panel,.status-panel{height:100%}@media(max-width:1250px){.news-box{height:100%;max-height:none}}@media(max-width:850px){.dashboard>.panel{height:auto;min-height:0}.news-box{height:auto;max-height:none}}
