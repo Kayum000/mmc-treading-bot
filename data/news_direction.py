@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 
-from data.news_events import get_weekly_news_events_for_pair
+from data.news_events import (
+    get_weekly_news_events_for_pair,
+    get_news_direction_for_pair as get_cached_news_direction_for_pair,
+)
 from data.alpha_vantage_news import fetch_news_sentiment, pair_sentiment
 
 
@@ -49,15 +52,18 @@ def _entry_window(event_time_iso: str) -> tuple[str, str]:
 
 
 def get_weekly_news_overview_for_pair(market_mode: str, real_pairs: list[str], crypto_pairs: list[str], selected_pair: str) -> dict:
-    """Return calendar events for one pair and use Alpha Vantage only for direction."""
+    """Return calendar events for one pair and use Alpha Vantage only for direction.
+
+    Kept for compatibility with existing callers. The dashboard endpoint below
+    uses the event-keyed cached direction path so the same news cannot trigger
+    repeated Alpha Vantage requests.
+    """
     selected_pair = selected_pair.upper()
     data = get_weekly_news_events_for_pair(market_mode, real_pairs, crypto_pairs, selected_pair)
     enriched = []
 
     for event in data.get("events", []):
         minutes = float(event.get("minutes_to_event") or 0)
-        # Calendar display itself never calls Alpha Vantage. Only an imminent
-        # high-impact release needs sentiment/direction.
         if event.get("impact") == "high" and 0 <= minutes <= 5.0:
             sentiment_data = fetch_news_sentiment()
             sentiment = pair_sentiment(selected_pair, market_mode, sentiment_data)
@@ -104,40 +110,10 @@ def get_weekly_news_overview_for_pair(market_mode: str, real_pairs: list[str], c
 
 
 def get_news_direction_for_pair(market_mode: str, real_pairs: list[str], crypto_pairs: list[str], selected_pair: str) -> dict:
-    """Compatibility endpoint helper used by web.app.
-
-    Keep the public function name expected by the Flask route while reusing the
-    pair-specific news overview implementation above. This avoids changing the
-    existing route or signal flow.
-    """
-    data = get_weekly_news_overview_for_pair(
+    """Public Flask endpoint; delegate to the event-keyed cached implementation."""
+    return get_cached_news_direction_for_pair(
         market_mode,
         real_pairs,
         crypto_pairs,
         selected_pair,
     )
-    events = data.get("events", [])
-    imminent = next(
-        (
-            event for event in events
-            if event.get("impact") == "high"
-            and 0 <= float(event.get("minutes_to_event") or 0) <= 5.0
-        ),
-        None,
-    )
-    if imminent is None:
-        return {
-            "ok": True,
-            "needed": False,
-            "pair": str(selected_pair).upper(),
-            "events": [],
-            "note_bn": "কাছাকাছি high-impact নিউজ নেই; Alpha Vantage direction request করা হয়নি।",
-        }
-
-    return {
-        "ok": True,
-        "needed": True,
-        "pair": str(selected_pair).upper(),
-        "event": imminent,
-        "source": "Alpha Vantage NEWS_SENTIMENT" if imminent.get("news_sentiment", {}).get("available") else "News calendar",
-    }
