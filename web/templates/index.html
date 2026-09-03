@@ -9,34 +9,16 @@
 <link rel="apple-touch-icon" href="{{ url_for('static', filename='sk_bot_logo.svg') }}">
 <title>MMC Live Signal</title>
 <style>
-  body{margin:0;background:#f5f7fb;font-family:Arial,sans-serif;color:#172033}
-  main{max-width:900px;margin:0 auto;padding:20px;position:relative;padding-right:360px}
-  .brand{display:flex;align-items:center;gap:12px;margin:0 0 8px;padding-right:150px}
-  .brand img{width:70px;height:70px;object-fit:contain;border-radius:16px;flex:none}
-  h1{font-size:38px;margin:0}.intro{font-size:18px;margin-bottom:22px}
-  form{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
-  select,button{font-size:20px;padding:12px 18px;border-radius:10px;border:1px solid #cbd5e1}
-  button{background:#2563eb;color:white;border:0;font-weight:700;cursor:pointer}
-  button:disabled{opacity:.55;cursor:not-allowed}
-  .logout{position:absolute;right:20px;top:20px;font-size:13px;color:#b42318;text-decoration:none}
-  .mode-tabs{display:flex;gap:10px;margin-bottom:14px}.mode-tabs button{background:#e8edf5;color:#172033;border:1px solid #cbd5e1}.mode-tabs button.active{background:#2563eb;color:#fff;border-color:#2563eb}
-  .auto-row{display:flex;align-items:center;gap:12px;margin:0 0 22px;padding:12px 14px;background:#eef4ff;border-radius:12px;font-size:17px}
-  .auto-toggle{display:flex;align-items:center;gap:8px;font-weight:800}.auto-toggle input{width:20px;height:20px}
-  .auto-status{font-size:15px;color:#475569}
-  section{background:white;border-radius:16px;padding:22px;box-shadow:0 3px 14px rgba(0,0,0,.08)}
-  h2{font-size:38px;margin:0 0 20px}.entry-box{border:2px solid #2563eb;border-radius:16px;padding:22px;text-align:center;background:#f8fbff}
-  .entry-title{font-size:25px;font-weight:800;color:#174ea6}.entry-time{font-size:34px;font-weight:800;color:#174ea6;margin:12px 0 18px;letter-spacing:.5px}
-  .countdown-label{font-size:22px;font-weight:800;color:#174ea6}.countdown{font-size:58px;font-weight:900;color:#174ea6;line-height:1.05;margin:5px 0 18px}
-  .price-box{border:2px solid #16803c;border-radius:14px;padding:14px 10px;background:#fbfffc}.price-label{font-size:21px;font-weight:800;color:#16753a}.price{font-size:52px;font-weight:900;color:#16803c;margin-top:3px}
-  .details{margin-top:20px;font-size:18px;line-height:1.7}.source-badge{display:inline-block;padding:5px 10px;border-radius:999px;background:#eef2ff;font-weight:700}
-  .news-box{position:fixed;right:12px;top:92px;width:326px;max-height:calc(100vh - 110px);overflow:auto;z-index:2000;border:3px solid #f59e0b;border-radius:16px;padding:16px;background:#fffdf7;box-shadow:0 8px 28px rgba(0,0,0,.22)}
-  .news-head{display:flex;justify-content:space-between;align-items:center;gap:10px;position:sticky;top:0;background:#fffdf7;padding-bottom:8px;z-index:2}.news-title{font-size:24px;font-weight:900;margin:0}.news-state{font-size:13px;color:#475569;margin-bottom:8px}
-  .news-alert{margin-top:10px;padding:13px;border-radius:12px;background:#fff1d6;border:2px solid #f59e0b}.news-alert strong{font-size:18px}.news-count{font-size:21px;font-weight:900;margin:6px 0}.news-meta{font-size:14px;line-height:1.55}.news-list{margin:10px 0 0;padding-left:0;list-style:none}.news-list li{margin:8px 0;padding:10px;border-radius:10px;background:#fff;border:1px solid #e2e8f0;line-height:1.45}.news-pairs{font-weight:800;margin-top:4px}.news-prediction{font-weight:800;margin-top:5px}.news-empty{margin-top:10px;padding:12px;border-radius:12px;background:#f1f5f9;color:#475569}.news-refresh{font-size:13px;padding:7px 10px;background:#172033;flex:none}
-  .news-impact-high{border-left:5px solid #dc2626!important}.news-impact-medium{border-left:5px solid #f59e0b!important}.news-impact-low{border-left:5px solid #94a3b8!important}
-  .download-app{position:fixed;right:12px;bottom:12px;z-index:1000;text-decoration:none;background:#2563eb;color:#fff;font-size:16px;font-weight:700;padding:12px 16px;border-radius:999px;box-shadow:0 4px 14px rgba(0,0,0,.2);display:flex;align-items:center;gap:7px}
-  .download-app:hover{background:#1d4ed8}
-  @media(max-width:1100px){main{padding-right:20px}.news-box{width:310px}}
-  @media(max-width:600px){main{padding-top:76px}.brand{padding-right:0}.brand img{width:58px;height:58px}h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}.news-box{left:8px;right:8px;top:68px;width:auto;max-height:55vh}.news-title{font-size:22px}}
+body{margin:0;background:#f5f7fb;font-family:Arial,sans-serif;color:#172033}
+main{max-width:980px;margin:0 auto;padding:20px;position:relative}
+.brand{display:flex;align-items:center;gap:12px;margin:0 0 8px}.brand img{width:70px;height:70px;object-fit:contain;border-radius:16px;flex:none}h1{font-size:38px;margin:0}.intro{font-size:18px;margin-bottom:22px}
+form{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}select,button{font-size:20px;padding:12px 18px;border-radius:10px;border:1px solid #cbd5e1}button{background:#2563eb;color:white;border:0;font-weight:700;cursor:pointer}button:disabled{opacity:.55;cursor:not-allowed}.logout{position:absolute;right:20px;top:20px;font-size:13px;color:#b42318;text-decoration:none}
+.mode-tabs{display:flex;gap:10px;margin-bottom:14px}.mode-tabs button{background:#e8edf5;color:#172033;border:1px solid #cbd5e1}.mode-tabs button.active{background:#2563eb;color:#fff;border-color:#2563eb}.auto-row{display:flex;align-items:center;gap:12px;margin:0 0 22px;padding:12px 14px;background:#eef4ff;border-radius:12px;font-size:17px}.auto-toggle{display:flex;align-items:center;gap:8px;font-weight:800}.auto-toggle input{width:20px;height:20px}.auto-status{font-size:15px;color:#475569}
+.dashboard{display:grid;grid-template-columns:250px minmax(0,1fr) 326px;gap:16px;align-items:start}.panel{background:white;border-radius:16px;padding:16px;box-shadow:0 3px 14px rgba(0,0,0,.08)}
+.status-panel{border:3px solid #2563eb;position:sticky;top:12px}.status-title{font-size:24px;font-weight:900;margin:0 0 10px}.status-pair{font-size:14px;color:#475569;margin-bottom:12px}.status-row{padding:10px 8px;border-bottom:1px solid #e2e8f0}.status-label{font-size:13px;color:#64748b}.status-value{font-size:17px;font-weight:900;margin-top:3px}.status-recommendation{margin-top:12px;padding:12px;border-radius:12px;background:#eef6ff;font-size:17px;font-weight:900;line-height:1.4}.status-note{font-size:12px;color:#64748b;margin-top:10px;line-height:1.45}.status-high{color:#b42318}.status-medium{color:#a15c00}.status-low{color:#475569}
+.signal-panel{min-width:0}.signal-panel h2{font-size:38px;margin:0 0 20px}.entry-box{border:2px solid #2563eb;border-radius:16px;padding:22px;text-align:center;background:#f8fbff}.entry-title{font-size:25px;font-weight:800;color:#174ea6}.entry-time{font-size:34px;font-weight:800;color:#174ea6;margin:12px 0 18px;letter-spacing:.5px}.countdown-label{font-size:22px;font-weight:800;color:#174ea6}.countdown{font-size:58px;font-weight:900;color:#174ea6;line-height:1.05;margin:5px 0 18px}.price-box{border:2px solid #16803c;border-radius:14px;padding:14px 10px;background:#fbfffc}.price-label{font-size:21px;font-weight:800;color:#16753a}.price{font-size:52px;font-weight:900;color:#16803c;margin-top:3px}.details{margin-top:20px;font-size:18px;line-height:1.7}.news-box{border:3px solid #f59e0b;background:#fffdf7;max-height:calc(100vh - 110px);overflow:auto;position:sticky;top:12px}.news-head{display:flex;justify-content:space-between;align-items:center;gap:10px;position:sticky;top:0;background:#fffdf7;padding-bottom:8px;z-index:2}.news-title{font-size:22px;font-weight:900;margin:0}.news-state{font-size:12px;color:#475569;margin-bottom:8px}.news-alert{margin-top:10px;padding:13px;border-radius:12px;background:#fff1d6;border:2px solid #f59e0b}.news-alert strong{font-size:17px}.news-count{font-size:20px;font-weight:900;margin:6px 0}.news-meta{font-size:13px;line-height:1.55}.news-list{margin:10px 0 0;padding-left:0;list-style:none}.news-list li{margin:8px 0;padding:10px;border-radius:10px;background:#fff;border:1px solid #e2e8f0;line-height:1.45}.news-pairs{font-weight:800;margin-top:4px}.news-prediction{font-weight:800;margin-top:5px}.news-empty{margin-top:10px;padding:12px;border-radius:12px;background:#f1f5f9;color:#475569}.news-refresh{font-size:13px;padding:7px 10px;background:#172033;flex:none}.news-impact-high{border-left:5px solid #dc2626!important}.news-impact-medium{border-left:5px solid #f59e0b!important}.news-impact-low{border-left:5px solid #94a3b8!important}.download-app{position:fixed;right:12px;bottom:12px;z-index:1000;text-decoration:none;background:#2563eb;color:#fff;font-size:16px;font-weight:700;padding:12px 16px;border-radius:999px;box-shadow:0 4px 14px rgba(0,0,0,.2);display:flex;align-items:center;gap:7px}
+@media(max-width:1150px){main{max-width:900px}.dashboard{grid-template-columns:1fr}.status-panel,.news-box{position:relative;top:auto;max-height:none}.status-panel{order:1}.signal-panel{order:2}.news-box{order:3}}
+@media(max-width:600px){main{padding-top:76px}.brand img{width:58px;height:58px}h1{font-size:30px}.signal-panel h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}.status-title{font-size:22px}}
 </style>
 </head>
 <body>
@@ -46,161 +28,61 @@
 <p class="intro">মার্কেট নির্বাচন করুন। অটো সিগন্যাল চালু থাকলে নির্বাচিত মার্কেটেই প্রতি নতুন ১ মিনিটে স্বয়ংক্রিয়ভাবে final entry যাচাই হবে।</p>
 <form method="post" id="signal-form">
   <div style="width:100%"><strong>MARKET MODE</strong></div>
-  <div class="mode-tabs">
-    <button type="button" class="mode-btn {% if mode == 'real' %}active{% endif %}" data-mode="real">REAL</button>
-    <button type="button" class="mode-btn {% if mode == 'crypto' %}active{% endif %}" data-mode="crypto">CRYPTO</button>
-  </div>
+  <div class="mode-tabs"><button type="button" class="mode-btn {% if mode == 'real' %}active{% endif %}" data-mode="real">REAL</button><button type="button" class="mode-btn {% if mode == 'crypto' %}active{% endif %}" data-mode="crypto">CRYPTO</button></div>
   <input type="hidden" name="mode" id="mode" value="{{mode}}">
-  <label>Market
-    <select name="pair" id="pair" required>
-      <option value="" disabled {% if not pair %}selected{% endif %}>Select market</option>
-      {% for p in real_pairs %}<option data-market="real" value="{{p}}" {% if mode == 'real' and p == pair %}selected{% endif %}>{{p}}</option>{% endfor %}
-      {% for p in crypto_pairs %}<option data-market="crypto" value="{{p}}" {% if mode == 'crypto' and p == pair %}selected{% endif %}>{{p}}</option>{% endfor %}
-    </select>
-  </label>
+  <label>Market <select name="pair" id="pair" required><option value="" disabled {% if not pair %}selected{% endif %}>Select market</option>{% for p in real_pairs %}<option data-market="real" value="{{p}}" {% if mode == 'real' and p == pair %}selected{% endif %}>{{p}}</option>{% endfor %}{% for p in crypto_pairs %}<option data-market="crypto" value="{{p}}" {% if mode == 'crypto' and p == pair %}selected{% endif %}>{{p}}</option>{% endfor %}</select></label>
   <button type="submit" id="signal-button" disabled>GET SIGNAL</button>
 </form>
-<div class="auto-row">
-  <label class="auto-toggle"><input type="checkbox" id="auto-signal" checked> AUTO SIGNAL</label>
-  <span id="auto-status" class="auto-status">মার্কেট নির্বাচন করলে প্রতি নতুন ১ মিনিটের candle-এ final entry যাচাই হবে।</span>
-</div>
+<div class="auto-row"><label class="auto-toggle"><input type="checkbox" id="auto-signal" checked> AUTO SIGNAL</label><span id="auto-status" class="auto-status">মার্কেট নির্বাচন করলে প্রতি নতুন ১ মিনিটের candle-এ final entry যাচাই হবে।</span></div>
 {% if error %}<p id="server-error"><strong>Error:</strong> {{error}}</p>{% endif %}
-<div id="result-container">
-{% if result %}
-<section>
-<h2>{{result.pair}} — {{result.signal}}</h2>
-<div class="entry-box">
-  <div class="entry-title">ENTRY TIME — NEXT 1-MINUTE CANDLE</div>
-  <div class="entry-time">{{result.entry_time_bd}}</div>
-  <div class="countdown-label">ENTRY COUNTDOWN</div>
-  <div class="countdown" data-entry-timer data-entry-at="{{result.entry_time_utc}}">00:00</div>
-  <div class="price-box"><div class="price-label">ENTRY PRICE</div><div class="price">{{result.entry_price if result.entry_price is not none else 'N/A'}}</div></div>
-</div>
-<div class="details"><p><strong>Timeframe:</strong> {{result.timeframe}}</p><p><strong>Entry TF:</strong> {{result.entry_timeframe}}</p><p><strong>Buy score:</strong> {{result.buy_score}}</p><p><strong>Sell score:</strong> {{result.sell_score}}</p><p><strong>কারণ ও বিস্তারিত যাচাই:</strong> {{result.reason}}</p></div>
-</section>
-{% endif %}
+
+<div class="dashboard">
+  <aside class="panel status-panel" id="market-status-panel">
+    <h2 class="status-title">📊 Market Status</h2>
+    <div class="status-pair" id="status-pair">মার্কেট নির্বাচন করুন</div>
+    <div class="status-row"><div class="status-label">বর্তমান সেশন</div><div class="status-value" id="status-session">—</div></div>
+    <div class="status-row"><div class="status-label">মার্কেট অ্যাক্টিভিটি</div><div class="status-value" id="status-activity">—</div></div>
+    <div class="status-row"><div class="status-label">সেরা ট্রেডিং উইন্ডো</div><div class="status-value" id="status-window">—</div></div>
+    <div class="status-row"><div class="status-label">নিউজ রিস্ক</div><div class="status-value" id="status-news">—</div></div>
+    <div class="status-row"><div class="status-label">পরবর্তী নিউজ</div><div class="status-value" id="status-news-time">—</div></div>
+    <div class="status-recommendation" id="status-recommendation">মার্কেট নির্বাচন করলে স্ট্যাটাস দেখা যাবে।</div>
+    <div class="status-note">এটি session + scheduled-news risk ভিত্তিক নির্দেশনা। এটি BUY/SELL-এর গ্যারান্টি নয়।</div>
+  </aside>
+
+  <div class="panel signal-panel" id="result-container">
+  {% if result %}
+    <h2>{{result.pair}} — {{result.signal}}</h2><div class="entry-box"><div class="entry-title">ENTRY TIME — NEXT 1-MINUTE CANDLE</div><div class="entry-time">{{result.entry_time_bd}}</div><div class="countdown-label">ENTRY COUNTDOWN</div><div class="countdown" data-entry-timer data-entry-at="{{result.entry_time_utc}}">00:00</div><div class="price-box"><div class="price-label">ENTRY PRICE</div><div class="price">{{result.entry_price if result.entry_price is not none else 'N/A'}}</div></div></div><div class="details"><p><strong>Timeframe:</strong> {{result.timeframe}}</p><p><strong>Entry TF:</strong> {{result.entry_timeframe}}</p><p><strong>Buy score:</strong> {{result.buy_score}}</p><p><strong>Sell score:</strong> {{result.sell_score}}</p><p><strong>কারণ ও বিস্তারিত যাচাই:</strong> {{result.reason}}</p></div>
+  {% else %}<div class="news-empty">একটি মার্কেট নির্বাচন করে GET SIGNAL চাপুন।</div>{% endif %}
+  </div>
+
+  <aside class="panel news-box" id="news-panel">
+    <div class="news-head"><h2 class="news-title">📰 News Events</h2><button type="button" class="news-refresh" id="news-refresh">রিফ্রেশ</button></div>
+    <div class="news-state" id="news-state">মার্কেট নির্বাচন করলে সংশ্লিষ্ট নিউজ দেখা যাবে।</div>
+    <div id="news-content"><div class="news-empty">এখনও কোনো মার্কেট নির্বাচন করা হয়নি।</div></div>
+  </aside>
 </div>
 </main>
-
-<section class="news-box" id="news-panel">
-  <div class="news-head"><h2 class="news-title">📰 সপ্তাহের সব মার্কেট নিউজ</h2><button type="button" class="news-refresh" id="news-refresh">রিফ্রেশ</button></div>
-  <div class="news-state" id="news-state">মার্কেট নির্বাচন করলে এই পাশে সপ্তাহের সব সংশ্লিষ্ট পেয়ারের নিউজ দেখা যাবে।</div>
-  <div id="news-content"><div class="news-empty">এখনও কোনো মার্কেট নির্বাচন করা হয়নি।</div></div>
-</section>
-
 <a class="download-app" href="https://github.com/Kayum000/mmc-treading-bot/releases/download/latest/app-debug.apk" aria-label="Download App">📲 Download App</a>
 <script>
-const modeInput=document.getElementById('mode');
-const pairSelect=document.getElementById('pair');
-const signalButton=document.getElementById('signal-button');
-const autoToggle=document.getElementById('auto-signal');
-const autoStatus=document.getElementById('auto-status');
-const resultContainer=document.getElementById('result-container');
-const newsContent=document.getElementById('news-content');
-const newsState=document.getElementById('news-state');
-const newsRefresh=document.getElementById('news-refresh');
-const STORAGE_MODE='mmc_selected_mode';
-const STORAGE_REAL='mmc_selected_real_pair';
-const STORAGE_CRYPTO='mmc_selected_crypto_pair';
-const STORAGE_AUTO='mmc_auto_signal_enabled';
-let autoTimer=null;
-let autoRequestInFlight=false;
-let newsTimer=null;
-let newsRequestInFlight=false;
-
-function savedPairForMode(mode){return localStorage.getItem(mode==='crypto'?STORAGE_CRYPTO:STORAGE_REAL)||'';}
-function saveCurrentPair(){const mode=modeInput.value,pair=pairSelect.value;if(mode&&pair){localStorage.setItem(STORAGE_MODE,mode);localStorage.setItem(mode==='crypto'?STORAGE_CRYPTO:STORAGE_REAL,pair);}}
-function updateSignalButton(){signalButton.disabled=!pairSelect.value;}
-function setMode(mode,preserveSelection=true){
-  modeInput.value=mode;
-  document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
-  Array.from(pairSelect.options).forEach(o=>{o.hidden=o.dataset.market&&o.dataset.market!==mode;});
-  let target=preserveSelection&&pairSelect.value&&pairSelect.options[pairSelect.selectedIndex].dataset.market===mode?pairSelect.value:savedPairForMode(mode);
-  const matching=Array.from(pairSelect.options).find(o=>o.dataset.market===mode&&o.value===target);
-  pairSelect.value=matching?matching.value:'';
-  updateSignalButton();
-}
-
-function escapeHtml(value){return String(value??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));}
-function renderResult(r){
-  const action=escapeHtml(r.signal),pair=escapeHtml(r.pair),entry=escapeHtml(r.entry_time_bd),price=r.entry_price==null?'N/A':escapeHtml(r.entry_price),reason=escapeHtml(r.reason),tf=escapeHtml(r.timeframe),entryTf=escapeHtml(r.entry_timeframe||'1m');
-  resultContainer.innerHTML=`<section><h2>${pair} — ${action}</h2><div class="entry-box"><div class="entry-title">ENTRY TIME — NEXT 1-MINUTE CANDLE</div><div class="entry-time">${entry}</div><div class="countdown-label">ENTRY COUNTDOWN</div><div class="countdown" data-entry-timer data-entry-at="${escapeHtml(r.entry_time_utc)}">00:00</div><div class="price-box"><div class="price-label">ENTRY PRICE</div><div class="price">${price}</div></div></div><div class="details"><p><strong>Timeframe:</strong> ${tf}</p><p><strong>Entry TF:</strong> ${entryTf}</p><p><strong>Buy score:</strong> ${escapeHtml(r.buy_score)}</p><p><strong>Sell score:</strong> ${escapeHtml(r.sell_score)}</p><p><strong>কারণ ও বিস্তারিত যাচাই:</strong> ${reason}</p></div></section>`;
-}
-
-function nextAutoDelayMs(){const now=Date.now();const next=(Math.floor(now/60000)+1)*60000;return Math.max(1500,next-now+1500);}
-async function runAutoSignal(){
-  if(!autoToggle.checked||!pairSelect.value||autoRequestInFlight)return;
-  autoRequestInFlight=true;
-  autoStatus.textContent='স্বয়ংক্রিয়ভাবে নির্বাচিত মার্কেটের নতুন ১ মিনিটের ডেটা যাচাই করা হচ্ছে…';
-  try{
-    const response=await fetch('{{ url_for("auto_signal") }}',{method:'GET',cache:'no-store',headers:{'Accept':'application/json'}});
-    const data=await response.json();
-    if(data.ok){renderResult(data.result);autoStatus.textContent=`AUTO SIGNAL চালু — প্রতি ১ মিনিটে final entry যাচাই; শেষ যাচাই: ${data.result.signal_time_bd}`;}
-    else{autoStatus.textContent='অটো সিগন্যাল সাময়িকভাবে ডেটা পায়নি: '+data.error;}
-  }catch(error){autoStatus.textContent='অটো সিগন্যাল সংযোগে সমস্যা হয়েছে। পরের ১ মিনিটে আবার চেষ্টা করবে।';}
-  finally{autoRequestInFlight=false;scheduleAutoSignal();}
-}
-function scheduleAutoSignal(){if(autoTimer)clearTimeout(autoTimer);if(!autoToggle.checked||!pairSelect.value)return;autoTimer=setTimeout(runAutoSignal,nextAutoDelayMs());}
-
-function formatNewsCountdown(minutes){
-  if(minutes==null)return '';
-  let total=Math.max(0,Math.round(Number(minutes)*60));
-  const d=Math.floor(total/86400);total%=86400;
-  const h=Math.floor(total/3600);total%=3600;
-  const m=Math.floor(total/60),s=total%60;
-  if(d>0)return `${d} দিন ${h} ঘণ্টা`;
-  if(h>0)return `${h} ঘণ্টা ${m} মিনিট`;
-  return `${m} মিনিট ${String(s).padStart(2,'0')} সেকেন্ড`;
-}
-function impactBn(impact){return impact==='high'?'উচ্চ':impact==='medium'?'মাঝারি':'কম';}
-function renderNews(data){
-  if(!data.ok){newsContent.innerHTML=`<div class="news-empty">${escapeHtml(data.error||'নিউজ তথ্য পাওয়া যায়নি।')}</div>`;return;}
-  const alerts=data.alert_events||[];
-  const events=data.events||[];
-  let html='';
-  if(alerts.length){
-    html+=`<div class="news-meta"><strong>🚨 এখন ৫ মিনিটের মধ্যে:</strong></div>`;
-    alerts.forEach(e=>{
-      html+=`<div class="news-alert news-impact-${escapeHtml(e.impact||'low')}"><strong>🚨 ${escapeHtml(e.currency_bn)} — ${escapeHtml(e.title_bn)}</strong><div class="news-count">আর ${formatNewsCountdown(e.minutes_to_event)}</div><div class="news-meta">নিউজ সময় (UTC): ${escapeHtml(e.event_time_utc)}<br>প্রভাব: ${escapeHtml(impactBn(e.impact))}<br>পূর্বাভাস: ${escapeHtml(e.forecast??'N/A')} | আগের: ${escapeHtml(e.previous??'N/A')}<div class="news-pairs">প্রভাবিত পেয়ার: ${escapeHtml((e.pairs||[]).join(', '))}</div><div class="news-prediction">${escapeHtml(e.prediction_bn||'')}</div></div></div>`;
-    });
-  }
-  if(events.length){
-    html+=`<div class="news-meta" style="margin-top:12px"><strong>📅 এই সপ্তাহের সব নির্ধারিত নিউজ:</strong> ${events.length}টি ইভেন্ট</div><ul class="news-list">`;
-    events.forEach(e=>{
-      const alertClass=e.five_minute_alert?'news-impact-high':`news-impact-${escapeHtml(e.impact||'low')}`;
-      html+=`<li class="${alertClass}"><strong>${escapeHtml(e.event_time_utc)}</strong> — ${escapeHtml(e.currency_bn)} — ${escapeHtml(e.title_bn)}<br><span>আর ${formatNewsCountdown(e.minutes_to_event)} | প্রভাব: ${escapeHtml(impactBn(e.impact))}</span><div class="news-pairs">পেয়ার: ${escapeHtml((e.pairs||[]).join(', '))}</div><div class="news-prediction">${escapeHtml(e.prediction_bn||'')}</div></li>`;
-    });
-    html+='</ul>';
-  }
-  if(!html)html='<div class="news-empty">এই সপ্তাহে নির্বাচিত মার্কেটগুলোর জন্য কোনো নির্ধারিত নিউজ পাওয়া যায়নি।</div>';
-  html+=`<div class="news-empty">ℹ️ ${escapeHtml(data.note_bn||'নিউজের ৫ মিনিট আগে সতর্কতা দেখানো হবে।')}</div>`;
-  newsContent.innerHTML=html;
-  newsState.textContent=`শেষ আপডেট: ${escapeHtml(data.checked_at_utc)} UTC | ${escapeHtml(data.total_pairs)}টি পেয়ার পর্যবেক্ষণে | উৎস: ${escapeHtml(data.source)}`;
-}
-async function checkNews(){
-  if(!pairSelect.value||!modeInput.value||newsRequestInFlight)return;
-  newsRequestInFlight=true;
-  try{
-    const response=await fetch('{{ url_for("news_alert") }}',{method:'GET',cache:'no-store',headers:{'Accept':'application/json'}});
-    const data=await response.json();
-    renderNews(data);
-  }catch(error){newsContent.innerHTML='<div class="news-empty">নিউজ ক্যালেন্ডার এখন পাওয়া যাচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করা হবে।</div>';}
-  finally{newsRequestInFlight=false;}
-}
-function scheduleNews(){if(newsTimer)clearInterval(newsTimer);if(pairSelect.value&&modeInput.value){checkNews();newsTimer=setInterval(checkNews,30000);}else{newsContent.innerHTML='<div class="news-empty">এখনও কোনো মার্কেট নির্বাচন করা হয়নি।</div>';newsState.textContent='মার্কেট নির্বাচন করলে এই পাশে সপ্তাহের সব সংশ্লিষ্ট পেয়ারের নিউজ দেখা যাবে।';}}
-
-pairSelect.addEventListener('change',()=>{saveCurrentPair();updateSignalButton();if(autoToggle.checked)runAutoSignal();else scheduleAutoSignal();scheduleNews();});
-document.querySelectorAll('.mode-btn').forEach(b=>b.addEventListener('click',()=>{saveCurrentPair();setMode(b.dataset.mode,false);if(autoToggle.checked)runAutoSignal();else scheduleAutoSignal();scheduleNews();}));
-newsRefresh.addEventListener('click',checkNews);
-autoToggle.checked=localStorage.getItem(STORAGE_AUTO)!=='0';
-autoToggle.addEventListener('change',()=>{localStorage.setItem(STORAGE_AUTO,autoToggle.checked?'1':'0');if(autoToggle.checked)runAutoSignal();else{if(autoTimer)clearTimeout(autoTimer);autoStatus.textContent='AUTO SIGNAL বন্ধ আছে।';}});
-
-const serverMode=modeInput.value;
-const serverPair={{ pair|tojson }};
-const storedMode=localStorage.getItem(STORAGE_MODE);
-if(!serverMode){setMode(storedMode==='crypto'?'crypto':'real',false);}else{setMode(serverMode,true);if(serverPair&&pairSelect.value!==serverPair){const option=Array.from(pairSelect.options).find(o=>o.dataset.market===serverMode&&o.value===serverPair);if(option)pairSelect.value=serverPair;updateSignalButton();}}
-if(autoToggle.checked&&pairSelect.value){autoStatus.textContent='AUTO SIGNAL চালু — প্রতি ১ মিনিটে final entry যাচাই হবে।';runAutoSignal();}
-scheduleNews();
+const modeInput=document.getElementById('mode'),pairSelect=document.getElementById('pair'),signalButton=document.getElementById('signal-button'),autoToggle=document.getElementById('auto-signal'),autoStatus=document.getElementById('auto-status'),resultContainer=document.getElementById('result-container'),newsContent=document.getElementById('news-content'),newsState=document.getElementById('news-state'),newsRefresh=document.getElementById('news-refresh');
+const STORAGE_MODE='mmc_selected_mode',STORAGE_REAL='mmc_selected_real_pair',STORAGE_CRYPTO='mmc_selected_crypto_pair',STORAGE_AUTO='mmc_auto_signal_enabled';let autoTimer=null,autoRequestInFlight=false,newsTimer=null,newsRequestInFlight=false,statusTimer=null,statusRequestInFlight=false;
+function savedPairForMode(mode){return localStorage.getItem(mode==='crypto'?STORAGE_CRYPTO:STORAGE_REAL)||''}function saveCurrentPair(){const mode=modeInput.value,pair=pairSelect.value;if(mode&&pair){localStorage.setItem(STORAGE_MODE,mode);localStorage.setItem(mode==='crypto'?STORAGE_CRYPTO:STORAGE_REAL,pair)}}function updateSignalButton(){signalButton.disabled=!pairSelect.value}
+function setMode(mode,preserveSelection=true){modeInput.value=mode;document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));Array.from(pairSelect.options).forEach(o=>{o.hidden=o.dataset.market&&o.dataset.market!==mode});let target=preserveSelection&&pairSelect.value&&pairSelect.options[pairSelect.selectedIndex].dataset.market===mode?pairSelect.value:savedPairForMode(mode);const matching=Array.from(pairSelect.options).find(o=>o.dataset.market===mode&&o.value===target);pairSelect.value=matching?matching.value:'';updateSignalButton()}
+function escapeHtml(value){return String(value??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]))}
+function renderResult(r){resultContainer.innerHTML=`<h2>${escapeHtml(r.pair)} — ${escapeHtml(r.signal)}</h2><div class="entry-box"><div class="entry-title">ENTRY TIME — NEXT 1-MINUTE CANDLE</div><div class="entry-time">${escapeHtml(r.entry_time_bd)}</div><div class="countdown-label">ENTRY COUNTDOWN</div><div class="countdown" data-entry-timer data-entry-at="${escapeHtml(r.entry_time_utc)}">00:00</div><div class="price-box"><div class="price-label">ENTRY PRICE</div><div class="price">${r.entry_price==null?'N/A':escapeHtml(r.entry_price)}</div></div></div><div class="details"><p><strong>Timeframe:</strong> ${escapeHtml(r.timeframe)}</p><p><strong>Entry TF:</strong> ${escapeHtml(r.entry_timeframe||'1m')}</p><p><strong>Buy score:</strong> ${escapeHtml(r.buy_score)}</p><p><strong>Sell score:</strong> ${escapeHtml(r.sell_score)}</p><p><strong>কারণ ও বিস্তারিত যাচাই:</strong> ${escapeHtml(r.reason)}</p></div>`}
+function nextAutoDelayMs(){const now=Date.now(),next=(Math.floor(now/60000)+1)*60000;return Math.max(1500,next-now+1500)}
+async function runAutoSignal(){if(!autoToggle.checked||!pairSelect.value||autoRequestInFlight)return;autoRequestInFlight=true;autoStatus.textContent='নির্বাচিত মার্কেটের নতুন ১ মিনিটের ডেটা যাচাই করা হচ্ছে…';try{const response=await fetch('{{ url_for("auto_signal") }}',{method:'GET',cache:'no-store',headers:{'Accept':'application/json'}}),data=await response.json();if(data.ok){renderResult(data.result);autoStatus.textContent=`AUTO SIGNAL চালু — শেষ যাচাই: ${data.result.signal_time_bd}`}else autoStatus.textContent='অটো সিগন্যাল ডেটা পায়নি: '+data.error}catch(e){autoStatus.textContent='অটো সিগন্যাল সংযোগে সমস্যা।'}finally{autoRequestInFlight=false;scheduleAutoSignal()}}
+function scheduleAutoSignal(){if(autoTimer)clearTimeout(autoTimer);if(autoToggle.checked&&pairSelect.value)autoTimer=setTimeout(runAutoSignal,nextAutoDelayMs())}
+function formatNewsCountdown(minutes){if(minutes==null)return '';let total=Math.max(0,Math.round(Number(minutes)*60)),h=Math.floor(total/3600),m=Math.floor((total%3600)/60),s=total%60;if(h>0)return `${h} ঘণ্টা ${m} মিনিট`;return `${m} মিনিট ${String(s).padStart(2,'0')} সেকেন্ড`}
+function impactBn(i){return i==='high'?'উচ্চ':i==='medium'?'মাঝারি':'কম'}
+function renderNews(data){if(!data.ok){newsContent.innerHTML=`<div class="news-empty">${escapeHtml(data.error||'নিউজ তথ্য পাওয়া যায়নি।')}</div>`;return}const alerts=data.alert_events||[],events=data.events||[];let html='';if(alerts.length){html+='<div class="news-meta"><strong>🚨 ৫ মিনিটের মধ্যে:</strong></div>';alerts.forEach(e=>{html+=`<div class="news-alert news-impact-${escapeHtml(e.impact||'low')}"><strong>🚨 ${escapeHtml(e.currency_bn)} — ${escapeHtml(e.title_bn)}</strong><div class="news-count">আর ${formatNewsCountdown(e.minutes_to_event)}</div><div class="news-meta">নিউজ সময়: ${escapeHtml(e.event_time_utc)} UTC<br>প্রভাব: ${impactBn(e.impact)}<div class="news-pairs">পেয়ার: ${escapeHtml((e.pairs||[]).join(', '))}</div><div class="news-prediction">${escapeHtml(e.prediction_bn||'')}</div></div></div>`})}if(events.length){html+=`<div class="news-meta" style="margin-top:12px"><strong>📅 সপ্তাহের নির্ধারিত নিউজ:</strong> ${events.length}টি</div><ul class="news-list">`;events.forEach(e=>{html+=`<li class="news-impact-${escapeHtml(e.impact||'low')}"><strong>${escapeHtml(e.event_time_utc)}</strong> — ${escapeHtml(e.currency_bn)} — ${escapeHtml(e.title_bn)}<br><span>আর ${formatNewsCountdown(e.minutes_to_event)} | প্রভাব: ${impactBn(e.impact)}</span><div class="news-pairs">পেয়ার: ${escapeHtml((e.pairs||[]).join(', '))}</div><div class="news-prediction">${escapeHtml(e.prediction_bn||'')}</div></li>`});html+='</ul>'}if(!html)html='<div class="news-empty">এই মার্কেটের জন্য কোনো নির্ধারিত নিউজ পাওয়া যায়নি।</div>';html+=`<div class="news-empty">ℹ️ ${escapeHtml(data.note_bn||'নিউজের আগে সতর্কতা দেখানো হবে।')}</div>`;newsContent.innerHTML=html;newsState.textContent=`শেষ আপডেট: ${escapeHtml(data.checked_at_utc||'')} UTC`}
+async function checkNews(){if(!pairSelect.value||!modeInput.value||newsRequestInFlight)return;newsRequestInFlight=true;try{const response=await fetch('{{ url_for("news_alert") }}',{method:'GET',cache:'no-store',headers:{'Accept':'application/json'}}),data=await response.json();renderNews(data)}catch(e){newsContent.innerHTML='<div class="news-empty">নিউজ ক্যালেন্ডার এখন পাওয়া যাচ্ছে না।</div>'}finally{newsRequestInFlight=false}}
+function scheduleNews(){if(newsTimer)clearInterval(newsTimer);if(pairSelect.value&&modeInput.value){checkNews();newsTimer=setInterval(checkNews,30000)}else{newsContent.innerHTML='<div class="news-empty">এখনও কোনো মার্কেট নির্বাচন করা হয়নি।</div>';newsState.textContent='মার্কেট নির্বাচন করলে সংশ্লিষ্ট নিউজ দেখা যাবে।'}}
+function setStatusValue(id,text,cls){const el=document.getElementById(id);el.textContent=text;el.className='status-value '+(cls||'')}
+async function checkMarketStatus(){if(!pairSelect.value||!modeInput.value||statusRequestInFlight)return;statusRequestInFlight=true;try{const response=await fetch('{{ url_for("market_status") }}',{method:'GET',cache:'no-store',headers:{'Accept':'application/json'}}),d=await response.json();if(!d.ok)return;document.getElementById('status-pair').textContent=d.pair+' — '+(d.market_mode==='crypto'?'CRYPTO':'REAL');document.getElementById('status-session').textContent=d.session;setStatusValue('status-activity',d.activity_bn,d.activity==='HIGH'?'status-high':d.activity==='MEDIUM'?'status-medium':'status-low');document.getElementById('status-window').textContent=d.best_window_bn;setStatusValue('status-news',d.news_risk_bn,d.news_risk==='HIGH'?'status-high':d.news_risk==='MEDIUM'?'status-medium':'status-low');document.getElementById('status-news-time').textContent=d.next_news_time_utc?`${d.next_news_time_utc} UTC`:'কাছাকাছি নিউজ নেই';document.getElementById('status-recommendation').textContent=d.recommendation_bn}catch(e){document.getElementById('status-recommendation').textContent='স্ট্যাটাস এখন পাওয়া যাচ্ছে না।'}finally{statusRequestInFlight=false}}
+function scheduleStatus(){if(statusTimer)clearInterval(statusTimer);if(pairSelect.value&&modeInput.value){checkMarketStatus();statusTimer=setInterval(checkMarketStatus,30000)}else{document.getElementById('status-pair').textContent='মার্কেট নির্বাচন করুন';['status-session','status-activity','status-window','status-news','status-news-time'].forEach(id=>document.getElementById(id).textContent='—');document.getElementById('status-recommendation').textContent='মার্কেট নির্বাচন করলে স্ট্যাটাস দেখা যাবে।'}}
+pairSelect.addEventListener('change',()=>{saveCurrentPair();updateSignalButton();if(autoToggle.checked)runAutoSignal();else scheduleAutoSignal();scheduleNews();scheduleStatus()});document.querySelectorAll('.mode-btn').forEach(b=>b.addEventListener('click',()=>{saveCurrentPair();setMode(b.dataset.mode,false);if(autoToggle.checked)runAutoSignal();else scheduleAutoSignal();scheduleNews();scheduleStatus()}));newsRefresh.addEventListener('click',checkNews);autoToggle.checked=localStorage.getItem(STORAGE_AUTO)!=='0';autoToggle.addEventListener('change',()=>{localStorage.setItem(STORAGE_AUTO,autoToggle.checked?'1':'0');if(autoToggle.checked)runAutoSignal();else{if(autoTimer)clearTimeout(autoTimer);autoStatus.textContent='AUTO SIGNAL বন্ধ আছে।'}});
+const serverMode=modeInput.value,serverPair={{ pair|tojson }},storedMode=localStorage.getItem(STORAGE_MODE);if(!serverMode)setMode(storedMode==='crypto'?'crypto':'real',false);else{setMode(serverMode,true);if(serverPair&&pairSelect.value!==serverPair){const option=Array.from(pairSelect.options).find(o=>o.dataset.market===serverMode&&o.value===serverPair);if(option)pairSelect.value=serverPair;updateSignalButton()}}if(autoToggle.checked&&pairSelect.value){autoStatus.textContent='AUTO SIGNAL চালু — প্রতি ১ মিনিটে final entry যাচাই হবে।';runAutoSignal()}scheduleNews();scheduleStatus();
 </script>
 <script src="{{ url_for('static', filename='candle_timer.js') }}" defer></script>
 </body>
