@@ -10,7 +10,7 @@
 <title>MMC Live Signal</title>
 <style>
   body{margin:0;background:#f5f7fb;font-family:Arial,sans-serif;color:#172033}
-  main{max-width:900px;margin:0 auto;padding:20px;position:relative}
+  main{max-width:900px;margin:0 auto;padding:20px;position:relative;padding-right:360px}
   .brand{display:flex;align-items:center;gap:12px;margin:0 0 8px;padding-right:150px}
   .brand img{width:70px;height:70px;object-fit:contain;border-radius:16px;flex:none}
   h1{font-size:38px;margin:0}.intro{font-size:18px;margin-bottom:22px}
@@ -29,11 +29,14 @@
   .countdown-label{font-size:22px;font-weight:800;color:#174ea6}.countdown{font-size:58px;font-weight:900;color:#174ea6;line-height:1.05;margin:5px 0 18px}
   .price-box{border:2px solid #16803c;border-radius:14px;padding:14px 10px;background:#fbfffc}.price-label{font-size:21px;font-weight:800;color:#16753a}.price{font-size:52px;font-weight:900;color:#16803c;margin-top:3px}
   .details{margin-top:20px;font-size:18px;line-height:1.7}.source-badge{display:inline-block;padding:5px 10px;border-radius:999px;background:#eef2ff;font-weight:700}
-  .news-box{margin-top:22px;border:2px solid #f59e0b;border-radius:16px;padding:20px;background:#fffdf7}.news-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.news-title{font-size:28px;font-weight:900;margin:0}.news-state{font-size:15px;color:#475569}.news-alert{margin-top:14px;padding:16px;border-radius:12px;background:#fff1d6;border:1px solid #f59e0b}.news-alert strong{font-size:22px}.news-count{font-size:26px;font-weight:900;margin:6px 0}.news-meta{font-size:16px;line-height:1.6}.news-list{margin:12px 0 0;padding-left:22px}.news-list li{margin:8px 0;line-height:1.5}.news-empty{margin-top:14px;padding:14px;border-radius:12px;background:#f1f5f9;color:#475569}
-  .news-refresh{font-size:15px;padding:8px 12px;background:#172033}
+  .news-box{position:fixed;right:12px;top:92px;width:326px;max-height:calc(100vh - 110px);overflow:auto;z-index:2000;border:3px solid #f59e0b;border-radius:16px;padding:16px;background:#fffdf7;box-shadow:0 8px 28px rgba(0,0,0,.22)}
+  .news-head{display:flex;justify-content:space-between;align-items:center;gap:10px;position:sticky;top:0;background:#fffdf7;padding-bottom:8px;z-index:2}.news-title{font-size:24px;font-weight:900;margin:0}.news-state{font-size:13px;color:#475569;margin-bottom:8px}
+  .news-alert{margin-top:10px;padding:13px;border-radius:12px;background:#fff1d6;border:2px solid #f59e0b}.news-alert strong{font-size:18px}.news-count{font-size:21px;font-weight:900;margin:6px 0}.news-meta{font-size:14px;line-height:1.55}.news-list{margin:10px 0 0;padding-left:0;list-style:none}.news-list li{margin:8px 0;padding:10px;border-radius:10px;background:#fff;border:1px solid #e2e8f0;line-height:1.45}.news-pairs{font-weight:800;margin-top:4px}.news-prediction{font-weight:800;margin-top:5px}.news-empty{margin-top:10px;padding:12px;border-radius:12px;background:#f1f5f9;color:#475569}.news-refresh{font-size:13px;padding:7px 10px;background:#172033;flex:none}
+  .news-impact-high{border-left:5px solid #dc2626!important}.news-impact-medium{border-left:5px solid #f59e0b!important}.news-impact-low{border-left:5px solid #94a3b8!important}
   .download-app{position:fixed;right:12px;bottom:12px;z-index:1000;text-decoration:none;background:#2563eb;color:#fff;font-size:16px;font-weight:700;padding:12px 16px;border-radius:999px;box-shadow:0 4px 14px rgba(0,0,0,.2);display:flex;align-items:center;gap:7px}
   .download-app:hover{background:#1d4ed8}
-  @media(max-width:600px){main{padding-top:76px}.brand{padding-right:0}.brand img{width:58px;height:58px}h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}.news-title{font-size:24px}}
+  @media(max-width:1100px){main{padding-right:20px}.news-box{width:310px}}
+  @media(max-width:600px){main{padding-top:76px}.brand{padding-right:0}.brand img{width:58px;height:58px}h1{font-size:30px}h2{font-size:30px}.entry-time{font-size:27px}.countdown{font-size:48px}.news-box{left:8px;right:8px;top:68px;width:auto;max-height:55vh}.news-title{font-size:22px}}
 </style>
 </head>
 <body>
@@ -77,12 +80,14 @@
 </section>
 {% endif %}
 </div>
+</main>
+
 <section class="news-box" id="news-panel">
-  <div class="news-head"><h2 class="news-title">📰 নির্বাচিত মার্কেটের নিউজ অ্যালার্ট</h2><button type="button" class="news-refresh" id="news-refresh">রিফ্রেশ</button></div>
-  <div class="news-state" id="news-state">মার্কেট নির্বাচন করলে নির্ধারিত গুরুত্বপূর্ণ নিউজের সময় পর্যবেক্ষণ করা হবে।</div>
+  <div class="news-head"><h2 class="news-title">📰 সপ্তাহের সব মার্কেট নিউজ</h2><button type="button" class="news-refresh" id="news-refresh">রিফ্রেশ</button></div>
+  <div class="news-state" id="news-state">মার্কেট নির্বাচন করলে এই পাশে সপ্তাহের সব সংশ্লিষ্ট পেয়ারের নিউজ দেখা যাবে।</div>
   <div id="news-content"><div class="news-empty">এখনও কোনো মার্কেট নির্বাচন করা হয়নি।</div></div>
 </section>
-</main>
+
 <a class="download-app" href="https://github.com/Kayum000/mmc-treading-bot/releases/download/latest/app-debug.apk" aria-label="Download App">📲 Download App</a>
 <script>
 const modeInput=document.getElementById('mode');
@@ -139,27 +144,42 @@ function scheduleAutoSignal(){if(autoTimer)clearTimeout(autoTimer);if(!autoToggl
 
 function formatNewsCountdown(minutes){
   if(minutes==null)return '';
-  const total=Math.max(0,Math.round(Number(minutes)*60));
+  let total=Math.max(0,Math.round(Number(minutes)*60));
+  const d=Math.floor(total/86400);total%=86400;
+  const h=Math.floor(total/3600);total%=3600;
   const m=Math.floor(total/60),s=total%60;
+  if(d>0)return `${d} দিন ${h} ঘণ্টা`;
+  if(h>0)return `${h} ঘণ্টা ${m} মিনিট`;
   return `${m} মিনিট ${String(s).padStart(2,'0')} সেকেন্ড`;
 }
+function impactBn(impact){return impact==='high'?'উচ্চ':impact==='medium'?'মাঝারি':'কম';}
 function renderNews(data){
   if(!data.ok){newsContent.innerHTML=`<div class="news-empty">${escapeHtml(data.error||'নিউজ তথ্য পাওয়া যায়নি।')}</div>`;return;}
-  const a=data.alert;
-  if(a){
-    newsContent.innerHTML=`<div class="news-alert"><strong>🚨 ${escapeHtml(a.signal_bn)} — ${escapeHtml(a.currency_bn)}</strong><div class="news-count">${escapeHtml(a.title_bn)} — আর ${formatNewsCountdown(a.minutes_to_event)}</div><div class="news-meta">নিউজ সময় (UTC): ${escapeHtml(a.event_time_utc)}<br>প্রভাব: ${escapeHtml(a.impact||'unknown')} | পূর্বাভাস: ${escapeHtml(a.forecast??'N/A')} | আগের: ${escapeHtml(a.previous??'N/A')}<br>${escapeHtml(a.recommendation_bn)}</div></div>`;
-  }else if(data.upcoming&&data.upcoming.length){
-    const items=data.upcoming.map(e=>`<li><strong>${escapeHtml(e.title_bn)}</strong> — ${escapeHtml(e.currency_bn)} — আর ${formatNewsCountdown(e.minutes_to_event)} <span class="source-badge">${escapeHtml(e.impact||'')}</span></li>`).join('');
-    newsContent.innerHTML=`<div class="news-meta"><strong>পরবর্তী গুরুত্বপূর্ণ ইভেন্ট:</strong></div><ul class="news-list">${items}</ul>`;
-  }else{
-    newsContent.innerHTML='<div class="news-empty">নির্বাচিত মার্কেটের জন্য আগামী ৩০ মিনিটে কোনো নির্ধারিত নিউজ পাওয়া যায়নি।</div>';
+  const alerts=data.alert_events||[];
+  const events=data.events||[];
+  let html='';
+  if(alerts.length){
+    html+=`<div class="news-meta"><strong>🚨 এখন ৫ মিনিটের মধ্যে:</strong></div>`;
+    alerts.forEach(e=>{
+      html+=`<div class="news-alert news-impact-${escapeHtml(e.impact||'low')}"><strong>🚨 ${escapeHtml(e.currency_bn)} — ${escapeHtml(e.title_bn)}</strong><div class="news-count">আর ${formatNewsCountdown(e.minutes_to_event)}</div><div class="news-meta">নিউজ সময় (UTC): ${escapeHtml(e.event_time_utc)}<br>প্রভাব: ${escapeHtml(impactBn(e.impact))}<br>পূর্বাভাস: ${escapeHtml(e.forecast??'N/A')} | আগের: ${escapeHtml(e.previous??'N/A')}<div class="news-pairs">প্রভাবিত পেয়ার: ${escapeHtml((e.pairs||[]).join(', '))}</div><div class="news-prediction">${escapeHtml(e.prediction_bn||'')}</div></div></div>`;
+    });
   }
-  newsState.textContent=`নিউজ ক্যালেন্ডার শেষবার যাচাই: ${escapeHtml(data.checked_at_utc)} UTC | উৎস: ${escapeHtml(data.source)}`;
+  if(events.length){
+    html+=`<div class="news-meta" style="margin-top:12px"><strong>📅 এই সপ্তাহের সব নির্ধারিত নিউজ:</strong> ${events.length}টি ইভেন্ট</div><ul class="news-list">`;
+    events.forEach(e=>{
+      const alertClass=e.five_minute_alert?'news-impact-high':`news-impact-${escapeHtml(e.impact||'low')}`;
+      html+=`<li class="${alertClass}"><strong>${escapeHtml(e.event_time_utc)}</strong> — ${escapeHtml(e.currency_bn)} — ${escapeHtml(e.title_bn)}<br><span>আর ${formatNewsCountdown(e.minutes_to_event)} | প্রভাব: ${escapeHtml(impactBn(e.impact))}</span><div class="news-pairs">পেয়ার: ${escapeHtml((e.pairs||[]).join(', '))}</div><div class="news-prediction">${escapeHtml(e.prediction_bn||'')}</div></li>`;
+    });
+    html+='</ul>';
+  }
+  if(!html)html='<div class="news-empty">এই সপ্তাহে নির্বাচিত মার্কেটগুলোর জন্য কোনো নির্ধারিত নিউজ পাওয়া যায়নি।</div>';
+  html+=`<div class="news-empty">ℹ️ ${escapeHtml(data.note_bn||'নিউজের ৫ মিনিট আগে সতর্কতা দেখানো হবে।')}</div>`;
+  newsContent.innerHTML=html;
+  newsState.textContent=`শেষ আপডেট: ${escapeHtml(data.checked_at_utc)} UTC | ${escapeHtml(data.total_pairs)}টি পেয়ার পর্যবেক্ষণে | উৎস: ${escapeHtml(data.source)}`;
 }
 async function checkNews(){
   if(!pairSelect.value||!modeInput.value||newsRequestInFlight)return;
   newsRequestInFlight=true;
-  newsState.textContent='নির্ধারিত নিউজ ক্যালেন্ডার যাচাই করা হচ্ছে…';
   try{
     const response=await fetch('{{ url_for("news_alert") }}',{method:'GET',cache:'no-store',headers:{'Accept':'application/json'}});
     const data=await response.json();
@@ -167,7 +187,7 @@ async function checkNews(){
   }catch(error){newsContent.innerHTML='<div class="news-empty">নিউজ ক্যালেন্ডার এখন পাওয়া যাচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করা হবে।</div>';}
   finally{newsRequestInFlight=false;}
 }
-function scheduleNews(){if(newsTimer)clearInterval(newsTimer);if(pairSelect.value&&modeInput.value){checkNews();newsTimer=setInterval(checkNews,30000);}else{newsContent.innerHTML='<div class="news-empty">এখনও কোনো মার্কেট নির্বাচন করা হয়নি।</div>';newsState.textContent='মার্কেট নির্বাচন করলে নির্ধারিত গুরুত্বপূর্ণ নিউজের সময় পর্যবেক্ষণ করা হবে।';}}
+function scheduleNews(){if(newsTimer)clearInterval(newsTimer);if(pairSelect.value&&modeInput.value){checkNews();newsTimer=setInterval(checkNews,30000);}else{newsContent.innerHTML='<div class="news-empty">এখনও কোনো মার্কেট নির্বাচন করা হয়নি।</div>';newsState.textContent='মার্কেট নির্বাচন করলে এই পাশে সপ্তাহের সব সংশ্লিষ্ট পেয়ারের নিউজ দেখা যাবে।';}}
 
 pairSelect.addEventListener('change',()=>{saveCurrentPair();updateSignalButton();if(autoToggle.checked)runAutoSignal();else scheduleAutoSignal();scheduleNews();});
 document.querySelectorAll('.mode-btn').forEach(b=>b.addEventListener('click',()=>{saveCurrentPair();setMode(b.dataset.mode,false);if(autoToggle.checked)runAutoSignal();else scheduleAutoSignal();scheduleNews();}));
