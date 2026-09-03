@@ -93,7 +93,6 @@
     return String(value ?? '').replace(/[&<>\"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  // News Events are sorted by the backend. The first high/medium item is the nearest important event.
   function getImportantSource(content) {
     return content?.querySelector(':scope > .news-alert.news-impact-high, :scope > .news-list li.news-impact-high, :scope > .news-alert.news-impact-medium, :scope > .news-list li.news-impact-medium');
   }
@@ -181,9 +180,8 @@
       updateMarketStatusImportantNews(source, lastDirectionData);
       updateDirectionInYellowBox(lastDirectionData);
     } catch (e) {
-      lastDirectionData = null;
-      updateMarketStatusImportantNews(source, null);
-      updateDirectionInYellowBox(null);
+      updateMarketStatusImportantNews(source, directionForSource(source));
+      updateDirectionInYellowBox(lastDirectionData);
     } finally {
       directionRequestInFlight = false;
     }
@@ -199,7 +197,6 @@
     if (!source) {
       const oldHero = document.getElementById('important-news-hero');
       if (oldHero) oldHero.remove();
-      lastDirectionData = null;
       updateMarketStatusImportantNews(null);
       return;
     }
@@ -261,4 +258,92 @@
     });
     observer.observe(content, { childList: true, subtree: true });
   }
+})();
+
+/* Persistent browser-side Last Known Good News + Direction.
+   This is intentionally in the existing loaded JS so no template change is required. */
+(() => {
+  const content = document.getElementById('news-content');
+  if (!content) return;
+  const NEWS_KEY = 'mmc_news_lkg_v3:';
+  const DIR_KEY = 'mmc_news_direction_v3:';
+  const read = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (_) { return null; } };
+  const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} };
+  const currentKey = () => `${NEWS_KEY}${document.getElementById('mode')?.value || 'real'}:${document.getElementById('pair')?.value || ''}`;
+  const currentDirKey = () => `${DIR_KEY}${document.getElementById('mode')?.value || 'real'}:${document.getElementById('pair')?.value || ''}`;
+  const findSource = () => content.querySelector(':scope > .news-alert.news-impact-high, :scope > .news-list li.news-impact-high, :scope > .news-alert.news-impact-medium, :scope > .news-list li.news-impact-medium');
+  const timeOf = (node) => { const m = (node?.textContent || '').match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/); return m ? m[0] : ''; };
+
+  function saveNews() {
+    const source = findSource();
+    if (!source || source.dataset.mmcLkg === '1') return;
+    const t = timeOf(source);
+    if (!t) return;
+    write(currentKey(), {html: source.outerHTML, eventTime: t, savedAt: Date.now()});
+  }
+
+  function restoreNews() {
+    if (findSource()) return;
+    const snap = read(currentKey());
+    if (!snap?.html || !snap.eventTime) return;
+    const eventMs = Date.parse(snap.eventTime);
+    if (!Number.isFinite(eventMs) || eventMs < Date.now() - 5 * 60 * 1000) return;
+    const holder = document.createElement('div');
+    holder.innerHTML = snap.html;
+    const node = holder.firstElementChild;
+    if (!node) return;
+    node.dataset.mmcLkg = '1';
+    content.innerHTML = '';
+    content.appendChild(node);
+    updateCountdown(node, eventMs);
+  }
+
+  function updateCountdown(node, eventMs) {
+    const count = node?.querySelector('.news-count');
+    if (!count) return;
+    const seconds = Math.max(0, Math.ceil((eventMs - Date.now()) / 1000));
+    count.textContent = seconds <= 0 ? '⏱ নিউজের নির্ধারিত সময় পার হয়েছে' : `⏱ আর ${Math.floor(seconds / 60)} মিনিট ${seconds % 60} সেকেন্ড`;
+  }
+
+  function saveDirection() {
+    const hero = document.getElementById('important-news-hero');
+    const node = hero?.querySelector('.important-news-direction');
+    const source = findSource();
+    if (!node || !source) return;
+    const t = timeOf(source);
+    const match = (node.textContent || '').match(/\b(UP|DOWN)\b/i);
+    if (!t || !match) return;
+    write(currentDirKey(), {eventTime: t, direction: match[1].toUpperCase(), savedAt: Date.now()});
+  }
+
+  function restoreDirection() {
+    const saved = read(currentDirKey());
+    const source = findSource();
+    if (!saved?.eventTime || !saved.direction || !source || timeOf(source) !== saved.eventTime) return;
+    const text = saved.direction === 'UP' ? '⬆ UP — উপরে' : '⬇ DOWN — নিচে';
+    document.querySelectorAll('#important-news-hero .important-news-direction, #important-news-status .ins-direction').forEach((node) => {
+      node.className = node.className.replace(/\b(up|down|wait)\b/gi, '').trim() + ` ${saved.direction.toLowerCase()}`;
+      node.textContent = text;
+    });
+  }
+
+  function tick() {
+    saveNews();
+    restoreNews();
+    const source = findSource();
+    if (source) {
+      const ms = Date.parse(timeOf(source));
+      if (Number.isFinite(ms)) updateCountdown(source, ms);
+    }
+    restoreDirection();
+  }
+
+  tick();
+  window.setInterval(tick, 1000);
+  if ('MutationObserver' in window) {
+    const observer = new MutationObserver(() => window.setTimeout(tick, 30));
+    observer.observe(content, {childList: true, subtree: true});
+  }
+  document.getElementById('pair')?.addEventListener('change', () => window.setTimeout(tick, 100));
+  document.getElementById('mode')?.addEventListener('change', () => window.setTimeout(tick, 100));
 })();
