@@ -1,6 +1,7 @@
 (() => {
   const bdClock = document.querySelector('[data-bd-clock]');
   const pad = (value) => String(value).padStart(2, '0');
+  let enhancingNews = false;
 
   function renderClock() {
     if (!bdClock) return;
@@ -15,24 +16,17 @@
   function renderEntryCountdown() {
     const entryTimer = document.querySelector('[data-entry-timer]');
     if (!entryTimer) return;
-
     const entryAt = Date.parse(entryTimer.dataset.entryAt || '');
     if (!Number.isFinite(entryAt)) return;
-
     const remainingSeconds = Math.max(0, Math.ceil((entryAt - Date.now()) / 1000));
     const minutes = Math.floor(remainingSeconds / 60);
     const seconds = remainingSeconds % 60;
-
     entryTimer.textContent = remainingSeconds > 0
       ? `${pad(minutes)}:${pad(seconds)}`
       : '00:00 — ENTRY NOW';
-
-    entryTimer.setAttribute(
-      'aria-label',
-      remainingSeconds > 0
-        ? `Entry starts in ${minutes} minutes ${seconds} seconds`
-        : 'Entry time reached'
-    );
+    entryTimer.setAttribute('aria-label', remainingSeconds > 0
+      ? `Entry starts in ${minutes} minutes ${seconds} seconds`
+      : 'Entry time reached');
   }
 
   function injectNewsStyles() {
@@ -53,7 +47,6 @@
       #important-news-hero .important-news-original{margin-top:8px}
       #important-news-hero .important-news-original .news-pairs{font-size:15px}
       #important-news-hero .important-news-original .news-prediction{font-size:14px}
-      .news-important-label{font-size:14px;font-weight:900;color:#9a5b00;margin-bottom:5px}
       @media(max-width:600px){#important-news-hero{padding:13px}#important-news-hero .important-news-heading{font-size:21px}#important-news-hero .important-news-title{font-size:19px}#important-news-hero .important-news-time{font-size:17px}#important-news-hero .important-news-direction{font-size:28px}}
     `;
     document.head.appendChild(style);
@@ -85,13 +78,7 @@
     const ms = Date.parse(iso);
     if (!Number.isFinite(ms)) return '';
     const bd = new Date(ms + (6 * 60 * 60 * 1000));
-    const y = bd.getUTCFullYear();
-    const mo = pad(bd.getUTCMonth() + 1);
-    const d = pad(bd.getUTCDate());
-    const h = pad(bd.getUTCHours());
-    const m = pad(bd.getUTCMinutes());
-    const s = pad(bd.getUTCSeconds());
-    return `${y}-${mo}-${d} ${h}:${m}:${s} বাংলাদেশ সময়`;
+    return `${bd.getUTCFullYear()}-${pad(bd.getUTCMonth() + 1)}-${pad(bd.getUTCDate())} ${pad(bd.getUTCHours())}:${pad(bd.getUTCMinutes())}:${pad(bd.getUTCSeconds())} বাংলাদেশ সময়`;
   }
 
   function escapeText(value) {
@@ -101,18 +88,19 @@
   }
 
   function enhanceImportantNews() {
+    if (enhancingNews) return;
     const content = document.getElementById('news-content');
     if (!content) return;
     injectNewsStyles();
 
+    const source = content.querySelector(
+      ':scope > .news-alert.news-impact-high, :scope > .news-list li.news-impact-high, :scope > .news-alert.news-impact-medium, :scope > .news-list li.news-impact-medium'
+    );
     const oldHero = document.getElementById('important-news-hero');
-    if (oldHero) oldHero.remove();
-
-    const candidates = Array.from(content.querySelectorAll(
-      '.news-alert.news-impact-high, .news-list li.news-impact-high, .news-alert.news-impact-medium, .news-list li.news-impact-medium'
-    ));
-    const source = candidates[0];
-    if (!source) return;
+    if (!source) {
+      if (oldHero) oldHero.remove();
+      return;
+    }
 
     const direction = extractDirection(source);
     const eventTime = extractEventTime(source);
@@ -120,24 +108,29 @@
     const title = extractTitle(source);
     const countdown = source.querySelector('.news-count')?.textContent?.trim() || '';
 
-    const hero = document.createElement('div');
-    hero.id = 'important-news-hero';
-    hero.setAttribute('role', 'status');
-    hero.innerHTML = `
-      <div class="important-news-heading">🚨 গুরুত্বপূর্ণ নিউজ</div>
-      <div class="important-news-title">${escapeText(title)}</div>
-      <div class="important-news-time">🕒 REAL MARKET TIME (UTC): ${escapeText(eventTime)}</div>
-      ${bdTime ? `<div class="important-news-time">🇧🇩 বাংলাদেশ সময়: ${escapeText(bdTime)}</div>` : ''}
-      ${countdown ? `<div class="important-news-count">⏱ ${escapeText(countdown)}</div>` : ''}
-      <div class="important-news-direction ${direction.toLowerCase()}">${direction === 'UP' ? '⬆ UP — উপরে' : direction === 'DOWN' ? '⬇ DOWN — নিচে' : '⏸ WAIT — দিক নিশ্চিত নয়'}</div>
-      <div class="important-news-source">দিকটি নিউজ সেন্টিমেন্টভিত্তিক সম্ভাব্য bias; নিশ্চিত BUY/SELL নয়।</div>
-      <div class="important-news-original"></div>
-    `;
-    const original = source.cloneNode(true);
-    original.removeAttribute('id');
-    original.style.marginTop = '8px';
-    hero.querySelector('.important-news-original').appendChild(original);
-    content.insertBefore(hero, content.firstChild);
+    enhancingNews = true;
+    try {
+      if (oldHero) oldHero.remove();
+      const hero = document.createElement('div');
+      hero.id = 'important-news-hero';
+      hero.setAttribute('role', 'status');
+      hero.innerHTML = `
+        <div class="important-news-heading">🚨 গুরুত্বপূর্ণ নিউজ</div>
+        <div class="important-news-title">${escapeText(title)}</div>
+        <div class="important-news-time">🕒 REAL MARKET TIME (UTC): ${escapeText(eventTime)}</div>
+        ${bdTime ? `<div class="important-news-time">🇧🇩 বাংলাদেশ সময়: ${escapeText(bdTime)}</div>` : ''}
+        ${countdown ? `<div class="important-news-count">⏱ ${escapeText(countdown)}</div>` : ''}
+        <div class="important-news-direction ${direction.toLowerCase()}">${direction === 'UP' ? '⬆ UP — উপরে' : direction === 'DOWN' ? '⬇ DOWN — নিচে' : '⏸ WAIT — দিক নিশ্চিত নয়'}</div>
+        <div class="important-news-source">দিকটি নিউজ সেন্টিমেন্টভিত্তিক সম্ভাব্য bias; নিশ্চিত BUY/SELL নয়।</div>
+        <div class="important-news-original"></div>
+      `;
+      const original = source.cloneNode(true);
+      original.classList.add('important-news-clone');
+      hero.querySelector('.important-news-original').appendChild(original);
+      content.insertBefore(hero, content.firstChild);
+    } finally {
+      enhancingNews = false;
+    }
   }
 
   function render() {
@@ -151,8 +144,11 @@
 
   const content = document.getElementById('news-content');
   if (content && 'MutationObserver' in window) {
+    let observerTimer = null;
     const observer = new MutationObserver(() => {
-      window.setTimeout(enhanceImportantNews, 0);
+      if (enhancingNews) return;
+      window.clearTimeout(observerTimer);
+      observerTimer = window.setTimeout(enhanceImportantNews, 20);
     });
     observer.observe(content, { childList: true, subtree: true });
   }
