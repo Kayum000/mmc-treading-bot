@@ -10,6 +10,7 @@ from signals.get_signal import get_signal
 from data.twelve_data_forex import fetch_api_usage, get_credit_usage
 from data.news_direction import get_news_direction_for_pair
 from data.news_events import get_weekly_news_events_for_pair
+from data.all_news_events import get_all_news_events
 from data.market_status import get_market_status
 
 app = Flask(__name__)
@@ -199,14 +200,14 @@ def auto_signal():
 
 @app.route("/news-alert", methods=["GET"])
 def news_alert():
-    """Return scheduled calendar events only; never call Alpha Vantage."""
+    """Return scheduled news for every configured pair in chronological order."""
     mode = session.get("selected_mode", "").strip().lower()
     pair = session.get("selected_pair", "").strip().upper()
     valid_pairs = REAL_PAIRS if mode == "real" else CRYPTO_PAIRS if mode == "crypto" else []
     if pair not in valid_pairs:
         return jsonify({"ok": False, "unselected": True, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"})
     try:
-        return jsonify(get_weekly_news_events_for_pair(mode, REAL_PAIRS, CRYPTO_PAIRS, pair))
+        return jsonify(get_all_news_events(mode, REAL_PAIRS, CRYPTO_PAIRS))
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
 
