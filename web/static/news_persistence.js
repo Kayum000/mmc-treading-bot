@@ -1,86 +1,37 @@
 (() => {
   'use strict';
-
   const content = document.getElementById('news-content');
   if (!content) return;
-
   const NEWS_KEY = 'mmc_news_lkg_v5:';
   const DIR_KEY = 'mmc_news_direction_v4:';
   const MAX_PAST_MS = 24 * 60 * 60 * 1000;
   const panel = document.getElementById('news-panel');
   let savedScrollTop = panel ? panel.scrollTop : 0;
-
-  const read = (key) => {
-    try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { return null; }
-  };
-  const write = (key, value) => {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) {}
-  };
+  const read = (key) => { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { return null; } };
+  const write = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) {} };
   const mode = () => document.getElementById('mode')?.value || 'real';
   const pair = () => document.getElementById('pair')?.value || '';
   const newsKey = () => `${NEWS_KEY}${mode()}:${pair()}`;
   const directionKey = () => `${DIR_KEY}${mode()}:${pair()}`;
-
-  const timeOf = (node) => {
-    const m = (node?.textContent || '').match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/);
-    return m ? m[0] : '';
-  };
-
-  const allNews = () => Array.from(content.querySelectorAll(':scope > .news-alert, :scope > .news-list li'))
-    .filter(node => !node.closest('#important-news-hero'))
-    .map(node => ({node, ms: Date.parse(timeOf(node))}))
-    .filter(x => Number.isFinite(x.ms) && x.ms >= Date.now() - 60 * 1000)
-    .sort((a, b) => a.ms - b.ms);
-
+  const timeOf = (node) => { const m = (node?.textContent || '').match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/); return m ? m[0] : ''; };
+  const allNews = () => Array.from(content.querySelectorAll(':scope > .news-alert, :scope > .news-list li')).filter(node => !node.closest('#important-news-hero')).map(node => ({node, ms: Date.parse(timeOf(node))})).filter(x => Number.isFinite(x.ms) && x.ms >= Date.now() - 60 * 1000).sort((a, b) => a.ms - b.ms);
   const importantNews = () => allNews().filter(x => x.node.classList.contains('news-impact-high') || x.node.classList.contains('news-impact-medium'));
-
-  function currentSource() {
-    return importantNews()[0]?.node || null;
-  }
-
-  // The candle timer can react to its own DOM updates. Cache the real
-  // /news-direction response for 30 seconds, keyed by the actual event,
-  // so repeated observer calls never hammer the backend or lose a real UP/DOWN result.
+  function currentSource() { return importantNews()[0]?.node || null; }
   const nativeFetch = window.fetch.bind(window);
   let directionCache = null;
   let directionInFlight = null;
-
-  function directionRequestKey(url) {
-    const source = currentSource();
-    return `${url}|${mode()}|${pair()}|${source ? timeOf(source) : ''}`;
-  }
-
+  function directionRequestKey(url) { const source = currentSource(); return `${url}|${mode()}|${pair()}|${source ? timeOf(source) : ''}`; }
   window.fetch = function(input, init) {
     const url = typeof input === 'string' ? input : (input?.url || '');
     if (!url.includes('/news-direction')) return nativeFetch(input, init);
-
-    const key = directionRequestKey(url);
-    const now = Date.now();
-    if (directionCache && directionCache.key === key && now - directionCache.at < 30000) {
-      return Promise.resolve(new Response(JSON.stringify(directionCache.data), {
-        status: 200,
-        headers: {'Content-Type': 'application/json'}
-      }));
-    }
+    const key = directionRequestKey(url), now = Date.now();
+    if (directionCache && directionCache.key === key && now - directionCache.at < 30000) return Promise.resolve(new Response(JSON.stringify(directionCache.data), {status: 200, headers: {'Content-Type': 'application/json'}}));
     if (directionInFlight && directionCache?.key === key) return directionInFlight;
-
-    directionInFlight = nativeFetch(input, init)
-      .then(async response => {
-        let data = null;
-        try { data = await response.clone().json(); } catch (_) {}
-        if (data) directionCache = {key, at: Date.now(), data};
-        return response;
-      })
-      .finally(() => { directionInFlight = null; });
+    directionInFlight = nativeFetch(input, init).then(async response => { let data = null; try { data = await response.clone().json(); } catch (_) {} if (data) directionCache = {key, at: Date.now(), data}; return response; }).finally(() => { directionInFlight = null; });
     return directionInFlight;
   };
-
-  // Keep the yellow nearest-news box compact. The normal News Events list
-  // remains underneath, so USD pairs can show every upcoming USD event.
   if (!document.getElementById('news-compact-stability')) {
-    const compactStyle = document.createElement('style');
-    compactStyle.id = 'news-compact-stability';
-    compactStyle.textContent = `
+    const compactStyle = document.createElement('style'); compactStyle.id = 'news-compact-stability'; compactStyle.textContent = `
       #important-news-hero{padding:7px 9px!important;margin-bottom:7px!important}
       #important-news-hero .important-news-heading{font-size:17px!important;margin-bottom:3px!important}
       #important-news-hero .important-news-title{font-size:15px!important;margin:3px 0!important}
@@ -93,145 +44,75 @@
       #important-news-hero .important-news-queue-item strong{font-size:10px!important;margin-bottom:1px!important}
       #important-news-hero .important-news-queue-item span{font-size:10px!important;margin-top:1px!important}
       #important-news-hero .important-news-source{font-size:10px!important;margin-top:2px!important}
-    `;
-    document.head.appendChild(compactStyle);
+    `; document.head.appendChild(compactStyle);
   }
-
-  // renderNews() runs every 30 seconds. If the event timestamps did not change,
-  // ignore the innerHTML assignment so the list does not visibly jump.
   const nativeInnerHTML = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
-  const eventSignature = (html) => {
-    const text = String(html || '');
-    const matches = text.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/g) || [];
-    return matches.join('|');
-  };
+  const eventSignature = (html) => { const text = String(html || ''); const matches = text.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/g) || []; return matches.join('|'); };
   let lastRenderedSignature = eventSignature(content.innerHTML);
-  if (nativeInnerHTML?.get && nativeInnerHTML?.set) {
+  if (nativeInnerHTML?.get && nativeInnerHTML?.set) { try { Object.defineProperty(content, 'innerHTML', {configurable:true, get() { return nativeInnerHTML.get.call(content); }, set(value) { const nextSignature = eventSignature(value); if (nextSignature && nextSignature === lastRenderedSignature) return; lastRenderedSignature = nextSignature; nativeInnerHTML.set.call(content, value); }}); } catch (_) {} }
+  function saveNews() { const newsNodes = Array.from(content.querySelectorAll(':scope > .news-alert, :scope > .news-list')).filter(node => !node.closest('#important-news-hero')); if (!newsNodes.length || !pair()) return; const times = allNews().map(x => timeOf(x.node)).filter(Boolean); if (!times.length) return; write(newsKey(), {html: newsNodes.map(node => node.outerHTML).join(''), eventTimes: times, savedAt: Date.now()}); }
+  function restoreNews() { if (allNews().length || !pair()) return; const snapshot = read(newsKey()); if (!snapshot?.html || !Array.isArray(snapshot.eventTimes) || !snapshot.eventTimes.length) return; const newest = Math.max(...snapshot.eventTimes.map(Date.parse).filter(Number.isFinite)); if (!Number.isFinite(newest) || newest < Date.now() - MAX_PAST_MS) return; const holder = document.createElement('div'); holder.innerHTML = snapshot.html; Array.from(holder.children).forEach(node => { node.dataset.mmcLkg = '1'; node.dataset.mmcLkgSavedAt = String(snapshot.savedAt || ''); content.appendChild(node); }); }
+  function saveDirection() { const source = currentSource(); if (!source || !pair()) return; const time = timeOf(source); const directionNodes = document.querySelectorAll('#important-news-hero .important-news-direction, #important-news-status .ins-direction'); let direction = ''; directionNodes.forEach(node => { const m = (node.textContent || '').match(/\b(UP|DOWN)\b/i); if (m) direction = m[1].toUpperCase(); }); if (!direction || !time) return; write(directionKey(), {eventTime: time, direction, savedAt: Date.now()}); }
+  function applyDirection() { const source = currentSource(); const saved = read(directionKey()); if (!source || !saved?.eventTime || !saved.direction || timeOf(source) !== saved.eventTime) return; const direction = saved.direction === 'UP' ? 'UP' : saved.direction === 'DOWN' ? 'DOWN' : ''; if (!direction) return; const text = direction === 'UP' ? '⬆ UP — উপরে' : '⬇ DOWN — নিচে'; document.querySelectorAll('#important-news-hero .important-news-direction, #important-news-status .ins-direction').forEach(node => { const classes = node.className.replace(/\b(up|down|wait)\b/gi, '').trim(); const cls = `${classes} ${direction.toLowerCase()}`.trim(); if (node.className !== cls) node.className = cls; if (node.textContent !== text) node.textContent = text; }); }
+  function clearOldDirectionForNewEvent() { const source = currentSource(); const saved = read(directionKey()); if (!source || !saved?.eventTime || timeOf(source) === saved.eventTime) return; try { localStorage.removeItem(directionKey()); } catch (_) {} }
+  function markLkgNodes() { Array.from(content.querySelectorAll(':scope > .news-alert, :scope > .news-list li')).filter(node => node.dataset.mmcLkg === '1').forEach(node => { const title = node.querySelector('strong'); if (title && !title.textContent.includes('Last Known Good')) title.textContent = `🟡 Last Known Good — ${title.textContent.replace(/^🚨\s*/, '')}`; }); }
+  function restorePanelScroll() { if (!panel) return; requestAnimationFrame(() => { if (Math.abs(panel.scrollTop - savedScrollTop) > 1) panel.scrollTop = savedScrollTop; }); }
+
+  let statusDirectionTimer = null, statusDirectionBusy = false;
+  function ensurePreNewsStatusBox() {
+    const panel = document.getElementById('market-status-panel'); if (!panel) return null;
+    let box = document.getElementById('pre-news-direction-status'); if (box) return box;
+    box = document.createElement('div'); box.id = 'pre-news-direction-status';
+    box.innerHTML = '<div class="ins-heading">🔮 আসন্ন বড় নিউজ — Pre-News Direction</div><div class="ins-list"><div class="ins-empty">মার্কেট নির্বাচন করলে আসন্ন বড় নিউজের সম্ভাব্য দিক দেখা যাবে।</div></div>';
+    const note = panel.querySelector('.status-note'); panel.insertBefore(box, note || null); return box;
+  }
+  function esc(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+  function bdTime(iso) { const d = new Date(iso); if (!Number.isFinite(d.getTime())) return 'সময় পাওয়া যায়নি'; return new Intl.DateTimeFormat('bn-BD', {timeZone:'Asia/Dhaka', dateStyle:'short', timeStyle:'short'}).format(d); }
+  async function refreshPreNewsDirection() {
+    const box = ensurePreNewsStatusBox(); if (!box || !pair() || statusDirectionBusy) return;
+    statusDirectionBusy = true;
     try {
-      Object.defineProperty(content, 'innerHTML', {
-        configurable: true,
-        get() { return nativeInnerHTML.get.call(content); },
-        set(value) {
-          const nextSignature = eventSignature(value);
-          if (nextSignature && nextSignature === lastRenderedSignature) return;
-          lastRenderedSignature = nextSignature;
-          nativeInnerHTML.set.call(content, value);
-        },
-      });
-    } catch (_) {}
+      const response = await nativeFetch('/news-direction', {credentials:'same-origin', cache:'no-store', headers:{'Accept':'application/json'}});
+      const data = await response.json(); const list = box.querySelector('.ins-list');
+      if (!data?.ok || !Array.isArray(data.events) || !data.events.length) { list.innerHTML = '<div class="ins-empty">এই মার্কেটের সামনে কোনো High Impact নিউজ পাওয়া যায়নি।</div>'; return; }
+      list.innerHTML = data.events.map(event => {
+        const dir = String(event.direction || 'WAIT').toUpperCase();
+        const dirText = dir === 'UP' ? '⬆ UP — উপরে' : dir === 'DOWN' ? '⬇ DOWN — নিচে' : '⏸ WAIT — নিশ্চিত নয়';
+        const dirClass = dir === 'UP' ? 'ins-up' : dir === 'DOWN' ? 'ins-down' : 'ins-wait';
+        const mins = Number(event.minutes_to_event); const countdown = Number.isFinite(mins) ? (mins < 60 ? `${mins.toFixed(1)} মিনিট পরে` : `${(mins/60).toFixed(1)} ঘণ্টা পরে`) : 'আসন্ন';
+        return `<div class="ins-item ${dirClass}"><div class="ins-top"><strong>${esc(event.currency || '')}</strong><span>${esc(String(event.impact || 'HIGH').toUpperCase())}</span></div><div class="ins-title">${esc(event.title_bn || event.title || 'High Impact News')}</div><div class="ins-time">🕒 ${esc(bdTime(event.event_time_utc))} • ${esc(countdown)}</div><div class="ins-direction">${dirText}</div><div class="ins-basis">${esc(event.direction_basis_bn || 'Alpha Vantage sentiment ভিত্তিক সম্ভাব্য pre-news bias।')}</div></div>`;
+      }).join('');
+    } catch (_) { const list = box.querySelector('.ins-list'); if (list) list.innerHTML = '<div class="ins-empty">Pre-News Direction এখন পাওয়া যাচ্ছে না। পরে আবার চেষ্টা করা হবে।</div>'; }
+    finally { statusDirectionBusy = false; }
   }
-
-  function saveNews() {
-    const newsNodes = Array.from(content.querySelectorAll(':scope > .news-alert, :scope > .news-list'))
-      .filter(node => !node.closest('#important-news-hero'));
-    if (!newsNodes.length || !pair()) return;
-    const times = allNews().map(x => timeOf(x.node)).filter(Boolean);
-    if (!times.length) return;
-    write(newsKey(), {
-      html: newsNodes.map(node => node.outerHTML).join(''),
-      eventTimes: times,
-      savedAt: Date.now()
-    });
+  function setupPreNewsDirection() {
+    ensurePreNewsStatusBox();
+    if (!document.getElementById('pre-news-direction-style')) {
+      const style = document.createElement('style'); style.id = 'pre-news-direction-style'; style.textContent = `
+        #pre-news-direction-status{margin-top:10px;padding:9px;border:1px solid #f3b72c;border-radius:10px;background:#fffdf8}
+        #pre-news-direction-status .ins-heading{font-size:15px;font-weight:900;margin-bottom:7px}
+        #pre-news-direction-status .ins-list{display:grid;gap:6px}
+        #pre-news-direction-status .ins-item{padding:7px 8px;border:1px solid #e2e8f0;border-radius:8px;background:#fff}
+        #pre-news-direction-status .ins-item.ins-up{border-left:4px solid #16a34a}
+        #pre-news-direction-status .ins-item.ins-down{border-left:4px solid #dc2626}
+        #pre-news-direction-status .ins-item.ins-wait{border-left:4px solid #f59e0b}
+        #pre-news-direction-status .ins-top{display:flex;justify-content:space-between;font-size:11px;color:#64748b}
+        #pre-news-direction-status .ins-title{font-size:13px;font-weight:800;margin-top:2px;line-height:1.25}
+        #pre-news-direction-status .ins-time{font-size:11px;color:#475569;margin-top:3px}
+        #pre-news-direction-status .ins-direction{font-size:18px;font-weight:900;margin-top:4px}
+        #pre-news-direction-status .ins-up .ins-direction{color:#16803c}
+        #pre-news-direction-status .ins-down .ins-direction{color:#dc2626}
+        #pre-news-direction-status .ins-wait .ins-direction{color:#b7791f}
+        #pre-news-direction-status .ins-basis{font-size:10px;color:#64748b;margin-top:3px;line-height:1.3}
+        #pre-news-direction-status .ins-empty{font-size:11px;color:#64748b;line-height:1.3}
+      `; document.head.appendChild(style);
+    }
+    clearInterval(statusDirectionTimer); refreshPreNewsDirection(); statusDirectionTimer = setInterval(refreshPreNewsDirection, 30000);
   }
-
-  function restoreNews() {
-    // Never replace a fresh, complete list with an old snapshot.
-    if (allNews().length) return;
-    if (!pair()) return;
-    const snapshot = read(newsKey());
-    if (!snapshot?.html || !Array.isArray(snapshot.eventTimes) || !snapshot.eventTimes.length) return;
-    const newest = Math.max(...snapshot.eventTimes.map(Date.parse).filter(Number.isFinite));
-    if (!Number.isFinite(newest) || newest < Date.now() - MAX_PAST_MS) return;
-
-    const holder = document.createElement('div');
-    holder.innerHTML = snapshot.html;
-    Array.from(holder.children).forEach(node => {
-      node.dataset.mmcLkg = '1';
-      node.dataset.mmcLkgSavedAt = String(snapshot.savedAt || '');
-      content.appendChild(node);
-    });
-  }
-
-  function saveDirection() {
-    const source = currentSource();
-    if (!source || !pair()) return;
-    const time = timeOf(source);
-    const directionNodes = document.querySelectorAll('#important-news-hero .important-news-direction, #important-news-status .ins-direction');
-    let direction = '';
-    directionNodes.forEach(node => {
-      const m = (node.textContent || '').match(/\b(UP|DOWN)\b/i);
-      if (m) direction = m[1].toUpperCase();
-    });
-    if (!direction || !time) return;
-    write(directionKey(), {eventTime: time, direction, savedAt: Date.now()});
-  }
-
-  function applyDirection() {
-    const source = currentSource();
-    const saved = read(directionKey());
-    if (!source || !saved?.eventTime || !saved.direction || timeOf(source) !== saved.eventTime) return;
-    const direction = saved.direction === 'UP' ? 'UP' : saved.direction === 'DOWN' ? 'DOWN' : '';
-    if (!direction) return;
-    const text = direction === 'UP' ? '⬆ UP — উপরে' : '⬇ DOWN — নিচে';
-    document.querySelectorAll('#important-news-hero .important-news-direction, #important-news-status .ins-direction').forEach(node => {
-      const classes = node.className.replace(/\b(up|down|wait)\b/gi, '').trim();
-      const cls = `${classes} ${direction.toLowerCase()}`.trim();
-      if (node.className !== cls) node.className = cls;
-      if (node.textContent !== text) node.textContent = text;
-    });
-  }
-
-  function clearOldDirectionForNewEvent() {
-    const source = currentSource();
-    const saved = read(directionKey());
-    if (!source || !saved?.eventTime || timeOf(source) === saved.eventTime) return;
-    try { localStorage.removeItem(directionKey()); } catch (_) {}
-  }
-
-  function markLkgNodes() {
-    Array.from(content.querySelectorAll(':scope > .news-alert, :scope > .news-list li'))
-      .filter(node => node.dataset.mmcLkg === '1')
-      .forEach(node => {
-        const title = node.querySelector('strong');
-        if (title && !title.textContent.includes('Last Known Good')) {
-          title.textContent = `🟡 Last Known Good — ${title.textContent.replace(/^🚨\s*/, '')}`;
-        }
-      });
-  }
-
-  function restorePanelScroll() {
-    if (!panel) return;
-    requestAnimationFrame(() => {
-      if (Math.abs(panel.scrollTop - savedScrollTop) > 1) panel.scrollTop = savedScrollTop;
-    });
-  }
-
-  function tick() {
-    if (!pair()) return;
-    restoreNews();
-    const source = currentSource();
-    if (!source) return;
-    clearOldDirectionForNewEvent();
-    markLkgNodes();
-    saveNews();
-    applyDirection();
-    saveDirection();
-    restorePanelScroll();
-  }
-
+  function tick() { if (!pair()) return; restoreNews(); const source = currentSource(); if (!source) return; clearOldDirectionForNewEvent(); markLkgNodes(); saveNews(); applyDirection(); saveDirection(); restorePanelScroll(); }
   if (panel) panel.addEventListener('scroll', () => { savedScrollTop = panel.scrollTop; }, {passive:true});
-
-  tick();
-  window.setInterval(tick, 1000);
-  if ('MutationObserver' in window) {
-    let timer = null;
-    const observer = new MutationObserver(() => {
-      window.clearTimeout(timer);
-      window.requestAnimationFrame(() => { if (panel) panel.scrollTop = savedScrollTop; });
-      timer = window.setTimeout(tick, 80);
-    });
-    observer.observe(content, {childList: true, subtree: true});
-  }
-  document.getElementById('pair')?.addEventListener('change', () => window.setTimeout(tick, 100));
-  document.getElementById('mode')?.addEventListener('change', () => window.setTimeout(tick, 100));
+  setupPreNewsDirection(); tick(); window.setInterval(tick, 1000);
+  if ('MutationObserver' in window) { let timer = null; const observer = new MutationObserver(() => { window.clearTimeout(timer); window.requestAnimationFrame(() => { if (panel) panel.scrollTop = savedScrollTop; }); timer = window.setTimeout(tick, 80); }); observer.observe(content, {childList:true, subtree:true}); }
+  document.getElementById('pair')?.addEventListener('change', () => { window.setTimeout(tick, 100); window.setTimeout(refreshPreNewsDirection, 250); });
+  document.getElementById('mode')?.addEventListener('change', () => { window.setTimeout(tick, 100); window.setTimeout(refreshPreNewsDirection, 250); });
 })();

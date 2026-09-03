@@ -2,8 +2,8 @@
 
 Calendar data is kept separate from Alpha Vantage. The live Forex Factory
 calendar is preferred because the public weekly export can lag; the weekly
-export remains a backup. Alpha Vantage is only queried for a high-impact event
-within five minutes, and the resulting direction is cached per mode/pair/event.
+export remains a backup. Alpha Vantage is used for high-impact pre-news
+sentiment and the resulting direction is cached per mode/pair/event.
 """
 from __future__ import annotations
 
@@ -79,26 +79,17 @@ def _live_html_calendar() -> list[dict]:
     if cached and now.timestamp() - cached_at < LIVE_CACHE_TTL_SECONDS:
         return cached
 
-    last_error = None
     html = ""
     for url in LIVE_CALENDAR_URLS:
         try:
-            req = Request(
-                url,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (compatible; mmc-signal-bot/1.0)",
-                    "Accept": "text/html,application/xhtml+xml",
-                    "Cache-Control": "no-cache",
-                },
-            )
+            req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; mmc-signal-bot/1.0)", "Accept": "text/html,application/xhtml+xml", "Cache-Control": "no-cache"})
             with urlopen(req, timeout=12) as response:
                 html = response.read().decode("utf-8", errors="replace")
             parser = _CalendarParser()
             parser.feed(html)
             if parser.rows:
                 break
-        except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
-            last_error = exc
+        except (HTTPError, URLError, TimeoutError, OSError, ValueError):
             continue
     else:
         return cached
@@ -140,17 +131,7 @@ def _live_html_calendar() -> list[dict]:
         impact = "high" if "high" in impact_text else "medium" if ("medium" in impact_text or "med" in impact_text) else "low"
         currency = row.get("currency", "").upper()
         title = row.get("event", "").strip()
-        events.append({
-            "id": f"{dt.isoformat()}|{currency}|{title}",
-            "time_utc": dt,
-            "currency": currency,
-            "title": title,
-            "title_bn": title,
-            "impact": impact,
-            "forecast": row.get("forecast", ""),
-            "previous": row.get("previous", ""),
-            "actual": row.get("actual", ""),
-        })
+        events.append({"id": f"{dt.isoformat()}|{currency}|{title}", "time_utc": dt, "currency": currency, "title": title, "title_bn": title, "impact": impact, "forecast": row.get("forecast", ""), "previous": row.get("previous", ""), "actual": row.get("actual", "")})
     events.sort(key=lambda x: x["time_utc"])
     if events:
         with _CACHE_LOCK:
@@ -168,7 +149,6 @@ def _calendar_events_current() -> tuple[list[dict], str]:
             return live, "Forex Factory live calendar"
     except (HTTPError, URLError, TimeoutError, OSError, ValueError):
         pass
-
     try:
         weekly = fetch_calendar()
     except Exception:
@@ -206,7 +186,6 @@ def get_weekly_news_events_for_pair(market_mode: str, real_pairs: list[str], cry
     source_events, source_name = _calendar_events_current()
     events = _payload_events(source_events, currencies, selected_pair, now)
     key = _lkg_key(market_mode, selected_pair)
-
     if events:
         nearest = events[0]
         with _CACHE_LOCK:
@@ -219,87 +198,55 @@ def get_weekly_news_events_for_pair(market_mode: str, real_pairs: list[str], cry
         if saved:
             events = [saved]
             source_name = "Last Known Good News (Forex Factory)"
-
     with _CACHE_LOCK:
         has_lkg = key in _LKG_NEWS
-    return {
-        "ok": True,
-        "market_mode": market_mode,
-        "selected_pair": selected_pair,
-        "checked_at_utc": now.isoformat(timespec="seconds"),
-        "alert_window_minutes": 5,
-        "alert_events": [e for e in events if e.get("five_minute_alert")],
-        "events": events,
-        "total_events": len(events),
-        "total_pairs": 1,
-        "source": source_name,
-        "alpha_vantage": {"called": False, "reason_bn": "News Events দেখানোর জন্য Alpha Vantage কল করা হয়নি।"},
-        "last_known_good": has_lkg,
-        "note_bn": "সপ্তাহের নির্ধারিত Forex/market news এখানে দেখানো হচ্ছে। সাময়িক source সমস্যা হলে Last Known Good News রাখা হবে। News Direction দরকার হলে আলাদা করে Alpha Vantage sentiment নেওয়া হবে।",
-    }
+    return {"ok": True, "market_mode": market_mode, "selected_pair": selected_pair, "checked_at_utc": now.isoformat(timespec="seconds"), "alert_window_minutes": 5, "alert_events": [e for e in events if e.get("five_minute_alert")], "events": events, "total_events": len(events), "total_pairs": 1, "source": source_name, "alpha_vantage": {"called": False, "reason_bn": "News Events দেখানোর জন্য Alpha Vantage কল করা হয়নি।"}, "last_known_good": has_lkg, "note_bn": "সপ্তাহের নির্ধারিত Forex/market news এখানে দেখানো হচ্ছে। সাময়িক source সমস্যা হলে Last Known Good News রাখা হবে। Pre-News Direction দরকার হলে Alpha Vantage sentiment আলাদা cached request হিসেবে ব্যবহার হবে।"}
+
+
+def _direction_from_sentiment(selected_pair: str, event_currency: str, sentiment: dict) -> tuple[str, str]:
+    score = float(sentiment.get("score") or 0.0)
+    if abs(score) < 0.15:
+        return "WAIT", "Alpha Vantage sentiment যথেষ্ট bullish/bearish নয়; pre-news bias নিশ্চিত নয়।"
+    parts = selected_pair.upper().split("/", 1)
+    base, quote = parts if len(parts) == 2 else (parts[0], "USD")
+    currency = str(event_currency or "").upper()
+    positive = score > 0
+    if currency == base:
+        return ("UP" if positive else "DOWN"), f"{currency} sentiment {'ইতিবাচক' if positive else 'নেতিবাচক'}; এটি pair-এর base currency।"
+    if currency == quote:
+        return ("DOWN" if positive else "UP"), f"{currency} sentiment {'ইতিবাচক' if positive else 'নেতিবাচক'}; এটি pair-এর quote currency।"
+    return "WAIT", "নিউজের currency নির্বাচিত pair-এর সঙ্গে সরাসরি মেলে না।"
 
 
 def get_news_direction_for_pair(market_mode: str, real_pairs: list[str], crypto_pairs: list[str], selected_pair: str) -> dict:
+    """Return pre-news direction for the upcoming high-impact events.
+
+    The schedule comes from the calendar and the directional bias from one
+    cached Alpha Vantage NEWS_SENTIMENT response, avoiding a request per event.
+    """
     market_mode = market_mode.lower()
     selected_pair = selected_pair.upper()
     now = datetime.now(timezone.utc)
     data = get_weekly_news_events_for_pair(market_mode, real_pairs, crypto_pairs, selected_pair)
-    direction_event = next(
-        (e for e in data.get("events", []) if e.get("impact") == "high" and 0 <= float(e.get("minutes_to_event") or 0) <= 5.0),
-        None,
-    )
-    if direction_event is None:
-        return {"ok": True, "needed": False, "pair": selected_pair, "events": []}
-
-    event_key = f"{market_mode}|{selected_pair}|{direction_event.get('event_time_utc')}"
-    with _CACHE_LOCK:
-        cached = _DIRECTION_CACHE.get(event_key)
-    if cached is not None:
-        return dict(cached)
-
+    upcoming = [e for e in data.get("events", []) if e.get("impact") == "high" and float(e.get("minutes_to_event") or 0) >= 0][:8]
+    if not upcoming:
+        return {"ok": True, "needed": False, "pair": selected_pair, "events": [], "source": "Alpha Vantage NEWS_SENTIMENT"}
     try:
         sentiment = pair_sentiment(selected_pair, market_mode, fetch_news_sentiment())
-        score = float(sentiment.get("score") or 0.0)
-        if abs(score) < 0.15:
-            direction, basis = "WAIT", "পর্যাপ্ত bullish/bearish sentiment নেই; actual result না আসা পর্যন্ত দিক নিশ্চিত নয়।"
-        else:
-            positive = score > 0
-            parts = selected_pair.split("/", 1)
-            base, quote = parts if len(parts) == 2 else (selected_pair, "USD")
-            currency = str(direction_event.get("currency", "")).upper()
-            if currency == base:
-                direction = "UP" if positive else "DOWN"
-            elif currency == quote:
-                direction = "DOWN" if positive else "UP"
-            else:
-                direction = "WAIT"
-            basis = f"{currency} sentiment {'ইতিবাচক' if positive else 'নেতিবাচক'}; নির্বাচিত pair-এর currency অবস্থান অনুযায়ী দিক নির্ধারণ করা হয়েছে।"
-        event = dict(direction_event)
-        event.update({
-            "direction": direction,
-            "direction_basis_bn": basis,
-            "news_sentiment": sentiment,
-            "selected_pair": selected_pair,
-            "checked_at_utc": now.isoformat(timespec="seconds"),
-        })
-        result = {"ok": True, "needed": True, "pair": selected_pair, "event": event, "source": "Alpha Vantage NEWS_SENTIMENT"}
     except Exception as exc:
-        event = dict(direction_event)
-        event.update({
-            "direction": "WAIT",
-            "direction_basis_bn": "Alpha Vantage সাময়িকভাবে পাওয়া যায়নি; একই নিউজের জন্য পুনরায় Alpha Vantage request করা হবে না।",
-            "selected_pair": selected_pair,
-            "checked_at_utc": now.isoformat(timespec="seconds"),
-        })
-        result = {
-            "ok": True,
-            "needed": True,
-            "pair": selected_pair,
-            "event": event,
-            "source": "Alpha Vantage NEWS_SENTIMENT",
-            "alpha_vantage_error": str(exc),
-        }
-
-    with _CACHE_LOCK:
-        _DIRECTION_CACHE[event_key] = dict(result)
-    return result
+        return {"ok": True, "needed": True, "pair": selected_pair, "events": [{**e, "direction": "WAIT", "direction_basis_bn": "Alpha Vantage সাময়িকভাবে পাওয়া যায়নি; direction নিশ্চিত নয়।"} for e in upcoming], "source": "Alpha Vantage NEWS_SENTIMENT", "alpha_vantage_error": str(exc)}
+    enriched = []
+    for event in upcoming:
+        event_key = f"{market_mode}|{selected_pair}|{event.get('event_time_utc')}|{event.get('currency')}|{event.get('title_bn')}"
+        with _CACHE_LOCK:
+            cached = _DIRECTION_CACHE.get(event_key)
+        if cached:
+            enriched.append(dict(cached))
+            continue
+        direction, basis = _direction_from_sentiment(selected_pair, event.get("currency"), sentiment)
+        enriched_event = dict(event)
+        enriched_event.update({"direction": direction, "direction_basis_bn": basis, "news_sentiment": sentiment, "selected_pair": selected_pair, "checked_at_utc": now.isoformat(timespec="seconds"), "direction_phase": "PRE-NEWS", "direction_label_bn": "⬆ UP — উপরে" if direction == "UP" else "⬇ DOWN — নিচে" if direction == "DOWN" else "⏸ WAIT — নিশ্চিত নয়"})
+        with _CACHE_LOCK:
+            _DIRECTION_CACHE[event_key] = dict(enriched_event)
+        enriched.append(enriched_event)
+    return {"ok": True, "needed": True, "pair": selected_pair, "events": enriched, "event": enriched[0], "source": "Alpha Vantage NEWS_SENTIMENT", "alpha_vantage_cached": True, "note_bn": "এগুলো PRE-NEWS সম্ভাব্য bias; actual news result/price reaction বদলে দিতে পারে।"}
