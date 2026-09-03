@@ -43,6 +43,11 @@ def get_all_news_events(market_mode: str, real_pairs: list[str], crypto_pairs: l
         events.append(payload)
 
     events.sort(key=lambda event: event.get("event_time_utc") or "")
+    for number, event in enumerate(events, start=1):
+        original_title = event.get("title_bn") or event.get("title") or "Economic News"
+        event["news_number"] = number
+        event["title_bn"] = f"{number}. {original_title}"
+
     return {
         "ok": True,
         "market_mode": mode,
@@ -54,5 +59,5 @@ def get_all_news_events(market_mode: str, real_pairs: list[str], crypto_pairs: l
         "total_pairs": len(pairs),
         "source": source_name,
         "alpha_vantage": {"called": False, "reason_bn": "News Events দেখানোর জন্য Alpha Vantage কল করা হয়নি।"},
-        "note_bn": "সব configured pair-এর upcoming Forex/market news একসাথে দেখানো হচ্ছে এবং সময় অনুযায়ী সাজানো হয়েছে। Pre-News Direction নির্বাচিত মার্কেটের জন্য আলাদা cached analysis হিসেবে থাকবে।",
+        "note_bn": "সব configured pair-এর upcoming Forex/market news একসাথে দেখানো হচ্ছে এবং সময় অনুযায়ী সাজানো হয়েছে। প্রতিটি নিউজ সময় অনুযায়ী ১, ২, ৩… নম্বরে সাজানো। Pre-News Direction নির্বাচিত মার্কেটের জন্য আলাদা cached analysis হিসেবে থাকবে।",
     }
