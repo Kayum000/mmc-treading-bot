@@ -101,3 +101,43 @@ def get_weekly_news_overview_for_pair(market_mode: str, real_pairs: list[str], c
         "শুধু high-impact release-এর ৫ মিনিটের মধ্যে direction দরকার হলে Alpha Vantage sentiment ব্যবহার হবে।"
     )
     return data
+
+
+def get_news_direction_for_pair(market_mode: str, real_pairs: list[str], crypto_pairs: list[str], selected_pair: str) -> dict:
+    """Compatibility endpoint helper used by web.app.
+
+    Keep the public function name expected by the Flask route while reusing the
+    pair-specific news overview implementation above. This avoids changing the
+    existing route or signal flow.
+    """
+    data = get_weekly_news_overview_for_pair(
+        market_mode,
+        real_pairs,
+        crypto_pairs,
+        selected_pair,
+    )
+    events = data.get("events", [])
+    imminent = next(
+        (
+            event for event in events
+            if event.get("impact") == "high"
+            and 0 <= float(event.get("minutes_to_event") or 0) <= 5.0
+        ),
+        None,
+    )
+    if imminent is None:
+        return {
+            "ok": True,
+            "needed": False,
+            "pair": str(selected_pair).upper(),
+            "events": [],
+            "note_bn": "কাছাকাছি high-impact নিউজ নেই; Alpha Vantage direction request করা হয়নি।",
+        }
+
+    return {
+        "ok": True,
+        "needed": True,
+        "pair": str(selected_pair).upper(),
+        "event": imminent,
+        "source": "Alpha Vantage NEWS_SENTIMENT" if imminent.get("news_sentiment", {}).get("available") else "News calendar",
+    }
