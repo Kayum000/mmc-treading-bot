@@ -14,7 +14,7 @@ class Signal:
 
 
 def _is_valid_setup(profile: dict, side: str) -> bool:
-    """Require score, MTF alignment, role reversal, and a 1m entry trigger."""
+    """Require score, higher-timeframe alignment, role reversal, and 5m trigger."""
     if profile["score"] < CONFIG.min_score:
         return False
     if not profile["higher_timeframe_trend"]:
@@ -27,11 +27,11 @@ def _is_valid_setup(profile: dict, side: str) -> bool:
         return False
 
     # Prevent a signal from being carried almost entirely by one timeframe.
-    if profile["15m"]["score"] < 4:
+    if profile["30m"]["score"] < 4:
         return False
-    if profile["5m"]["score"] < 3:
+    if profile["15m"]["score"] < 3:
         return False
-    if profile["1m"]["score"] < 1:
+    if profile["5m"]["score"] < 1:
         return False
     return True
 
@@ -43,13 +43,13 @@ def _diagnostic_reason(profile: dict, side: str) -> str:
 
     checks = [
         f"স্কোর সীমা: {'ঠিক আছে' if profile['score'] >= CONFIG.min_score else 'মেলেনি'} ({profile['score']}/{CONFIG.min_score})",
-        f"১৫ ও ৫ মিনিটের দিক একমত: {'ঠিক আছে' if profile['higher_timeframe_trend'] else 'মেলেনি'}",
+        f"৩০ ও ১৫ মিনিটের দিক একমত: {'ঠিক আছে' if profile['higher_timeframe_trend'] else 'মেলেনি'}",
         f"ভাঙা স্তরের পুনঃপরীক্ষা ও নতুন ভূমিকা: {'ঠিক আছে' if profile['role_reversal_confirmation'] else 'মেলেনি'}",
-        f"১ মিনিটের {direction} প্রবেশের সংকেত: {'ঠিক আছে' if profile['entry_trigger'] else 'মেলেনি'}",
+        f"৫ মিনিটের {direction} প্রবেশের সংকেত: {'ঠিক আছে' if profile['entry_trigger'] else 'মেলেনি'}",
         f"{opposite}: {'ঠিক আছে' if not profile['opposite_structure'] else 'মেলেনি'}",
-        f"১৫ মিনিটের স্কোর: {'ঠিক আছে' if profile['15m']['score'] >= 4 else 'মেলেনি'} ({profile['15m']['score']}/4 ন্যূনতম)",
-        f"৫ মিনিটের স্কোর: {'ঠিক আছে' if profile['5m']['score'] >= 3 else 'মেলেনি'} ({profile['5m']['score']}/3 ন্যূনতম)",
-        f"১ মিনিটের স্কোর: {'ঠিক আছে' if profile['1m']['score'] >= 1 else 'মেলেনি'} ({profile['1m']['score']}/1 ন্যূনতম)",
+        f"৩০ মিনিটের স্কোর: {'ঠিক আছে' if profile['30m']['score'] >= 4 else 'মেলেনি'} ({profile['30m']['score']}/4 ন্যূনতম)",
+        f"১৫ মিনিটের স্কোর: {'ঠিক আছে' if profile['15m']['score'] >= 3 else 'মেলেনি'} ({profile['15m']['score']}/3 ন্যূনতম)",
+        f"৫ মিনিটের স্কোর: {'ঠিক আছে' if profile['5m']['score'] >= 1 else 'মেলেনি'} ({profile['5m']['score']}/1 ন্যূনতম)",
     ]
     failed = [item for item in checks if "মেলেনি" in item]
     status = "সব চূড়ান্ত শর্ত পূরণ হয়েছে, কিন্তু অন্য দিকের স্কোর বেশি হওয়ায় এই দিকে সিগন্যাল দেওয়া হয়নি।" if not failed else "যে শর্তগুলোতে সমস্যা হয়েছে: " + "; ".join(failed) + "."
@@ -57,7 +57,7 @@ def _diagnostic_reason(profile: dict, side: str) -> str:
 
 
 def generate_signal(frames: dict[str, pd.DataFrame]) -> Signal:
-    required = {"15m", "5m", "1m"}
+    required = {"30m", "15m", "5m"}
     missing = required.difference(frames)
     if missing:
         raise ValueError(f"Missing timeframes: {sorted(missing)}")
@@ -75,19 +75,16 @@ def generate_signal(frames: dict[str, pd.DataFrame]) -> Signal:
             "BUY",
             buy,
             sell,
-            "বুলিশ MMC: ১৫ মিনিট ও ৫ মিনিটের বাজারের দিক ঊর্ধ্বমুখী এবং একমত। আগের প্রতিরোধের স্তর ভেঙে দাম আবার সেই স্তরে ফিরে এসে সেটিকে সমর্থন হিসেবে ধরে রেখেছে। ১ মিনিটে কেনার প্রবেশের সংকেতও নিশ্চিত হয়েছে।",
+            "বুলিশ MMC: ৩০ মিনিট ও ১৫ মিনিটের বাজারের দিক ঊর্ধ্বমুখী এবং একমত। আগের প্রতিরোধের স্তর ভেঙে দাম আবার সেই স্তরে ফিরে এসে সেটিকে সমর্থন হিসেবে ধরে রেখেছে। ৫ মিনিটে কেনার প্রবেশের সংকেতও নিশ্চিত হয়েছে।",
         )
     if sell_valid and sell > buy:
         return Signal(
             "SELL",
             buy,
             sell,
-            "বেয়ারিশ MMC: ১৫ মিনিট ও ৫ মিনিটের বাজারের দিক নিম্নমুখী এবং একমত। আগের সমর্থনের স্তর ভেঙে দাম আবার সেই স্তরে ফিরে এসে সেটিকে প্রতিরোধ হিসেবে ধরে রেখেছে। ১ মিনিটে বিক্রির প্রবেশের সংকেতও নিশ্চিত হয়েছে।",
+            "বেয়ারিশ MMC: ৩০ মিনিট ও ১৫ মিনিটের বাজারের দিক নিম্নমুখী এবং একমত। আগের সমর্থনের স্তর ভেঙে দাম আবার সেই স্তরে ফিরে এসে সেটিকে প্রতিরোধ হিসেবে ধরে রেখেছে। ৫ মিনিটে বিক্রির প্রবেশের সংকেতও নিশ্চিত হয়েছে।",
         )
     if buy >= CONFIG.min_score or sell >= CONFIG.min_score:
-        if buy >= sell:
-            diagnostic = _diagnostic_reason(buy_profile, "buy")
-        else:
-            diagnostic = _diagnostic_reason(sell_profile, "sell")
+        diagnostic = _diagnostic_reason(buy_profile, "buy") if buy >= sell else _diagnostic_reason(sell_profile, "sell")
         return Signal("NO_TRADE", buy, sell, diagnostic)
-    return Signal("NO_TRADE", buy, sell, "যথেষ্ট MMC নিশ্চিতকরণ পাওয়া যায়নি। বাজারের দিক, বাজারের গঠন এবং ১ মিনিটের প্রবেশের সংকেত এখনও যথেষ্ট শক্তিশালী নয়।")
+    return Signal("NO_TRADE", buy, sell, "যথেষ্ট MMC নিশ্চিতকরণ পাওয়া যায়নি। বাজারের দিক, বাজারের গঠন এবং ৫ মিনিটের প্রবেশের সংকেত এখনও যথেষ্ট শক্তিশালী নয়।")
