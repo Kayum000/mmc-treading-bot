@@ -1,7 +1,5 @@
 (() => {
-  const entryTimer = document.querySelector('[data-entry-timer]');
   const bdClock = document.querySelector('[data-bd-clock]');
-
   const pad = (value) => String(value).padStart(2, '0');
 
   function renderClock() {
@@ -15,6 +13,7 @@
   }
 
   function renderEntryCountdown() {
+    const entryTimer = document.querySelector('[data-entry-timer]');
     if (!entryTimer) return;
 
     const entryAt = Date.parse(entryTimer.dataset.entryAt || '');
