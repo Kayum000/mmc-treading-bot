@@ -1,14 +1,13 @@
 """Market session/status helper for the web UI.
 
-This module uses only the current UTC clock and the existing cached news helper.
-It does not fetch candle/market-data APIs, so the status panel does not add
-Twelve Data/Binance market-data requests.
+This module uses the current UTC clock and the cached scheduled-news calendar.
+It deliberately does not call Alpha Vantage or any candle/market-data API.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from data.news_direction import get_weekly_news_overview_for_pair
+from data.news_events import get_weekly_news_events_for_pair
 
 
 def _session_info(now_utc: datetime):
@@ -43,13 +42,13 @@ def _next_news(events, now_utc):
 
 
 def get_market_status(mode: str, pair: str, real_pairs, crypto_pairs):
-    """Build the left-side status panel payload for one selected market."""
+    """Build the left-side status panel payload without Alpha Vantage."""
     now = datetime.now(timezone.utc)
     session_name, activity, window = _session_info(now)
 
     news = {}
     try:
-        news = get_weekly_news_overview_for_pair(mode, real_pairs, crypto_pairs, pair) or {}
+        news = get_weekly_news_events_for_pair(mode, real_pairs, crypto_pairs, pair) or {}
     except Exception:
         news = {}
 
@@ -58,19 +57,25 @@ def get_market_status(mode: str, pair: str, real_pairs, crypto_pairs):
     news_risk_bn = "কোনো কাছের high-impact নিউজ নেই"
     minutes = None
     if event_time and event:
-        minutes = max(0, int((event_time - now).total_seconds() // 60))
+        minutes_float = max(0.0, (event_time - now).total_seconds() / 60.0)
+        minutes = round(minutes_float, 1)
         impact = str(event.get("impact", "low")).lower()
-        if impact == "high" and minutes <= 5:
+        if impact == "high" and minutes_float <= 5:
             news_risk = "HIGH"
-            news_risk_bn = f"🚨 {event.get('currency_bn', '')} — {event.get('title_bn', '')} | আর {minutes} মিনিট"
+            news_risk_bn = f"🚨 {event.get('currency_bn', '')} — {event.get('title_bn', '')} | আর {minutes:g} মিনিট"
         elif impact == "high":
             news_risk = "MEDIUM"
-            news_risk_bn = f"High-impact নিউজ {minutes} মিনিট পরে"
-        elif minutes <= 15:
+            news_risk_bn = f"High-impact নিউজ {minutes:g} মিনিট পরে"
+        elif minutes_float <= 15:
             news_risk = "MEDIUM"
-            news_risk_bn = f"গুরুত্বপূর্ণ নিউজ {minutes} মিনিট পরে"
+            news_risk_bn = f"গুরুত্বপূর্ণ নিউজ {minutes:g} মিনিট পরে"
         else:
-            news_risk_bn = f"পরবর্তী নিউজ {minutes} মিনিট পরে"
+            news_risk_bn = f"পরবর্তী নিউজ {minutes:g} মিনিট পরে"
+
+    # Alpha Vantage is needed only for a direction calculation around a
+    # high-impact release. The frontend uses this flag to decide whether to
+    # request /news-direction at all.
+    direction_needed = bool(event and str(event.get("impact", "")).lower() == "high" and minutes_float <= 5)
 
     if news_risk == "HIGH":
         recommendation = "AVOID — নিউজ রিলিজের আগে ট্রেড নয়"
@@ -98,6 +103,9 @@ def get_market_status(mode: str, pair: str, real_pairs, crypto_pairs):
         "news_risk_bn": news_risk_bn,
         "next_news_minutes": minutes,
         "next_news_time_utc": event_time.isoformat() if event_time else None,
+        "next_news_title_bn": event.get("title_bn") if event else None,
+        "next_news_currency_bn": event.get("currency_bn") if event else None,
+        "direction_needed": direction_needed,
         "recommendation": recommendation,
         "recommendation_bn": recommendation_bn,
     }
