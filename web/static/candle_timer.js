@@ -30,28 +30,28 @@
     const style = document.createElement('style');
     style.id = 'important-news-styles';
     style.textContent = `
-      #important-news-hero{margin:0 0 14px;padding:16px;border:3px solid #f59e0b;border-radius:14px;background:#fff8dc;box-shadow:0 4px 14px rgba(0,0,0,.08)}
-      #important-news-hero .important-news-heading{font-size:24px;font-weight:900;margin-bottom:10px;color:#9a5b00}
-      #important-news-hero .important-news-title{font-size:22px;font-weight:900;line-height:1.35;margin:7px 0}
-      #important-news-hero .important-news-time{font-size:19px;font-weight:900;line-height:1.4;margin:9px 0;padding:9px 10px;border-radius:9px;background:#fff;border:1px solid #f3c66b}
-      #important-news-hero .important-news-count{font-size:19px;font-weight:900;margin:7px 0}
-      #important-news-hero .important-news-direction{display:flex;align-items:center;justify-content:center;min-height:62px;margin:11px 0;padding:8px;border-radius:11px;font-size:32px;font-weight:1000;letter-spacing:1px;border:2px solid #cbd5e1;background:#f8fafc}
+      #important-news-hero{margin:0 0 8px;padding:10px;border:2px solid #f59e0b;border-radius:11px;background:#fff8dc;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+      #important-news-hero .important-news-heading{font-size:19px;font-weight:900;margin-bottom:5px;color:#9a5b00}
+      #important-news-hero .important-news-title{font-size:17px;font-weight:900;line-height:1.3;margin:4px 0}
+      #important-news-hero .important-news-time{font-size:14px;font-weight:900;line-height:1.3;margin:5px 0;padding:5px 7px;border-radius:8px;background:#fff;border:1px solid #f3c66b}
+      #important-news-hero .important-news-count{font-size:14px;font-weight:900;margin:4px 0}
+      #important-news-hero .important-news-direction{display:flex;align-items:center;justify-content:center;min-height:0;margin:5px 0;padding:5px;border-radius:9px;font-size:24px;font-weight:1000;letter-spacing:.5px;border:2px solid #cbd5e1;background:#f8fafc}
       #important-news-hero .important-news-direction.up,#important-news-status .ins-direction.up{color:#15803d;border-color:#86efac;background:#f0fdf4}
       #important-news-hero .important-news-direction.down,#important-news-status .ins-direction.down{color:#dc2626;border-color:#fca5a5;background:#fef2f2}
       #important-news-hero .important-news-direction.wait,#important-news-status .ins-direction.wait{color:#92400e;border-color:#fcd34d;background:#fffbeb}
-      #important-news-hero .important-news-source{font-size:12px;color:#64748b;margin-top:8px}
-      #important-news-hero .important-news-original{margin-top:8px}
-      #important-news-hero .important-news-original .news-pairs{font-size:15px}
-      #important-news-hero .important-news-original .news-prediction{font-size:14px}
-      #important-news-status{margin:12px 0 4px;padding:13px;border:2px solid #f59e0b;border-radius:11px;background:#fff8dc}
-      #important-news-status .ins-heading{font-size:19px;font-weight:900;color:#9a5b00;margin-bottom:7px}
-      #important-news-status .ins-title{font-size:17px;font-weight:900;line-height:1.35;margin-bottom:7px}
-      #important-news-status .ins-time{font-size:15px;font-weight:900;line-height:1.5}
-      #important-news-status .ins-count{font-size:16px;font-weight:900;margin-top:5px}
-      #important-news-status .ins-direction{font-size:25px;font-weight:1000;text-align:center;margin-top:8px;padding:7px;border-radius:9px;border:2px solid #cbd5e1;background:#fff}
+      #important-news-hero .important-news-source{font-size:11px;color:#64748b;margin-top:4px}
+      #important-news-hero .important-news-original{margin-top:5px}
+      #important-news-hero .important-news-original .news-pairs{font-size:13px}
+      #important-news-hero .important-news-original .news-prediction{font-size:12px}
+      #important-news-status{margin:8px 0 3px;padding:9px;border:2px solid #f59e0b;border-radius:9px;background:#fff8dc}
+      #important-news-status .ins-heading{font-size:17px;font-weight:900;color:#9a5b00;margin-bottom:4px}
+      #important-news-status .ins-title{font-size:15px;font-weight:900;line-height:1.3;margin-bottom:4px}
+      #important-news-status .ins-time{font-size:13px;font-weight:900;line-height:1.3}
+      #important-news-status .ins-count{font-size:14px;font-weight:900;margin-top:3px}
+      #important-news-status .ins-direction{font-size:20px;font-weight:1000;text-align:center;margin-top:5px;padding:5px;border-radius:8px;border:2px solid #cbd5e1;background:#fff}
       #important-news-status .ins-direction.up,#important-news-status .ins-direction.down,#important-news-status .ins-direction.wait{border-width:2px}
-      #important-news-status .ins-meta{font-size:12px;line-height:1.5;color:#334155;margin-top:7px}
-      @media(max-width:600px){#important-news-hero{padding:13px}#important-news-hero .important-news-heading{font-size:21px}#important-news-hero .important-news-title{font-size:19px}#important-news-hero .important-news-time{font-size:17px}#important-news-hero .important-news-direction{font-size:28px}#important-news-status .ins-heading{font-size:18px}#important-news-status .ins-direction{font-size:23px}}
+      #important-news-status .ins-meta{font-size:11px;line-height:1.3;color:#334155;margin-top:4px}
+      @media(max-width:600px){#important-news-hero{padding:9px}#important-news-hero .important-news-heading{font-size:18px}#important-news-hero .important-news-title{font-size:16px}#important-news-hero .important-news-time{font-size:13px}#important-news-hero .important-news-direction{font-size:22px}#important-news-status .ins-heading{font-size:17px}#important-news-status .ins-direction{font-size:21px}}
     `;
     document.head.appendChild(style);
   }
@@ -170,15 +170,22 @@
     if (!source || !source.classList.contains('news-impact-high') && !source.matches('.news-list li.news-impact-high')) return;
     const eventTime = extractEventTime(source);
     const key = `${eventTime}|${document.getElementById('pair')?.value || ''}`;
-    if (directionRequestInFlight || key === lastDirectionKey) return;
+    // Keep retrying the same event while it is outside the 5-minute direction
+    // window. Once Alpha Vantage returns a needed result, lock that event key.
+    if (directionRequestInFlight || (key === lastDirectionKey && lastDirectionData?.needed)) return;
     directionRequestInFlight = true;
     try {
       const response = await fetch('/news-direction', {method:'GET', cache:'no-store', headers:{'Accept':'application/json'}});
       const data = await response.json();
-      lastDirectionKey = key;
-      lastDirectionData = data?.needed ? data : null;
-      updateMarketStatusImportantNews(source, lastDirectionData);
-      updateDirectionInYellowBox(lastDirectionData);
+      if (data?.needed) {
+        lastDirectionKey = key;
+        lastDirectionData = data;
+      } else if (key !== lastDirectionKey) {
+        lastDirectionKey = '';
+        lastDirectionData = null;
+      }
+      updateMarketStatusImportantNews(source, data?.needed ? data : null);
+      updateDirectionInYellowBox(data?.needed ? data : null);
     } catch (e) {
       updateMarketStatusImportantNews(source, directionForSource(source));
       updateDirectionInYellowBox(lastDirectionData);
