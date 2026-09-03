@@ -9,5 +9,5 @@ class StrategyConfig:
     # Higher threshold because the MTF score now requires stronger confirmation.
     min_score: int = 12
 
-TIMEFRAMES = ("15m", "5m", "1m")
+TIMEFRAMES = ("30m", "15m", "5m")
 CONFIG = StrategyConfig()
