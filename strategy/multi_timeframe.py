@@ -1,7 +1,7 @@
 import pandas as pd
 
 from config import CONFIG
-from strategy.mmc import market_structure, liquidity_sweep, displacement
+from strategy.mmc import market_structure, liquidity_sweep, displacement, breakout_retest_role_reversal
 
 
 def add_ema(df: pd.DataFrame) -> pd.DataFrame:
@@ -54,7 +54,7 @@ def timeframe_components(df: pd.DataFrame, side: str) -> dict[str, bool | str | 
     """Return auditable MMC conditions for one timeframe without changing scoring."""
     df = add_ema(df)
     if df.empty:
-        return {"score": 0, "trend": False, "structure": "neutral", "sweep": "none", "displacement": "none", "trigger": False, "structure_ok": False, "sweep_ok": False, "displacement_ok": False}
+        return {"score": 0, "trend": False, "structure": "neutral", "sweep": "none", "displacement": "none", "trigger": False, "structure_ok": False, "sweep_ok": False, "displacement_ok": False, "role_reversal": "none", "role_reversal_ok": False}
 
     close = df["close"].iloc[-1]
     fast = df["ema_fast"].iloc[-1]
@@ -62,17 +62,20 @@ def timeframe_components(df: pd.DataFrame, side: str) -> dict[str, bool | str | 
     structure = market_structure(df, CONFIG.swing_lookback)
     sweep = liquidity_sweep(df, CONFIG.sweep_lookback)
     impulse = displacement(df)
+    role_reversal = breakout_retest_role_reversal(df)
 
     if side == "buy":
         trend_ok = close > trend and fast > trend
         structure_ok = structure == "bullish_bos"
         sweep_ok = sweep == "buy_side_rejection"
         displacement_ok = impulse == "bullish"
+        role_reversal_ok = role_reversal == "bullish_role_reversal"
     else:
         trend_ok = close < trend and fast < trend
         structure_ok = structure == "bearish_bos"
         sweep_ok = sweep == "sell_side_rejection"
         displacement_ok = impulse == "bearish"
+        role_reversal_ok = role_reversal == "bearish_role_reversal"
 
     return {
         "score": score_timeframe(df, side),
@@ -84,6 +87,8 @@ def timeframe_components(df: pd.DataFrame, side: str) -> dict[str, bool | str | 
         "structure_ok": structure_ok,
         "sweep_ok": sweep_ok,
         "displacement_ok": displacement_ok,
+        "role_reversal": role_reversal,
+        "role_reversal_ok": role_reversal_ok,
     }
 
 
@@ -103,6 +108,7 @@ def confirmation_profile(frames: dict[str, pd.DataFrame], side: str) -> dict:
         "1m": parts["1m"],
         "higher_timeframe_trend": bool(parts["15m"]["trend"] and parts["5m"]["trend"]),
         "entry_trigger": bool(parts["1m"]["trigger"]),
+        "role_reversal_confirmation": bool(parts["15m"]["role_reversal_ok"] or parts["5m"]["role_reversal_ok"]),
         "opposite_structure": bool(
             parts["15m"]["structure"] == ("bearish_bos" if side == "buy" else "bullish_bos")
             or parts["5m"]["structure"] == ("bearish_bos" if side == "buy" else "bullish_bos")
