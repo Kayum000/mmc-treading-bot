@@ -14,10 +14,12 @@ class Signal:
 
 
 def _is_valid_setup(profile: dict, side: str) -> bool:
-    """Require score, higher-timeframe alignment, and a 1m entry trigger."""
+    """Require score, MTF alignment, role reversal, and a 1m entry trigger."""
     if profile["score"] < CONFIG.min_score:
         return False
     if not profile["higher_timeframe_trend"]:
+        return False
+    if not profile["role_reversal_confirmation"]:
         return False
     if not profile["entry_trigger"]:
         return False
@@ -53,20 +55,20 @@ def generate_signal(frames: dict[str, pd.DataFrame]) -> Signal:
             "BUY",
             buy,
             sell,
-            "বুলিশ MMC: 15m ও 5m ট্রেন্ড একমত, 1m এন্ট্রি ট্রিগার নিশ্চিত",
+            "বুলিশ MMC: 15m ও 5m ট্রেন্ড একমত, breakout→retest role reversal নিশ্চিত, 1m এন্ট্রি ট্রিগার নিশ্চিত",
         )
     if sell_valid and sell > buy:
         return Signal(
             "SELL",
             buy,
             sell,
-            "বেয়ারিশ MMC: 15m ও 5m ট্রেন্ড একমত, 1m এন্ট্রি ট্রিগার নিশ্চিত",
+            "বেয়ারিশ MMC: 15m ও 5m ট্রেন্ড একমত, breakout→retest role reversal নিশ্চিত, 1m এন্ট্রি ট্রিগার নিশ্চিত",
         )
     if buy >= CONFIG.min_score or sell >= CONFIG.min_score:
         return Signal(
             "NO_TRADE",
             buy,
             sell,
-            "স্কোর নির্ধারিত সীমায় পৌঁছেছে, কিন্তু MTF, এন্ট্রি ট্রিগার বা মার্কেট স্ট্রাকচারে অসঙ্গতি আছে",
+            "স্কোর নির্ধারিত সীমায় পৌঁছেছে, কিন্তু MTF, role reversal, এন্ট্রি ট্রিগার বা মার্কেট স্ট্রাকচারে অসঙ্গতি আছে",
         )
     return Signal("NO_TRADE", buy, sell, "যথেষ্ট MMC কনফার্মেশন পাওয়া যায়নি")
