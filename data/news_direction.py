@@ -7,7 +7,6 @@ from data.news_events import (
     get_weekly_news_events_for_pair,
     get_news_direction_for_pair as get_cached_news_direction_for_pair,
 )
-from data.alpha_vantage_news import fetch_news_sentiment, pair_sentiment
 
 
 def _pair_currencies(pair: str, market_mode: str) -> tuple[str, str]:
@@ -52,31 +51,52 @@ def _entry_window(event_time_iso: str) -> tuple[str, str]:
 
 
 def get_weekly_news_overview_for_pair(market_mode: str, real_pairs: list[str], crypto_pairs: list[str], selected_pair: str) -> dict:
-    """Return calendar events for one pair and use Alpha Vantage only for direction.
+    """Compatibility overview using the single event-keyed direction cache.
 
-    Kept for compatibility with existing callers. The dashboard endpoint below
-    uses the event-keyed cached direction path so the same news cannot trigger
-    repeated Alpha Vantage requests.
+    This function deliberately does not import or call Alpha Vantage directly.
+    Any imminent high-impact direction is obtained through the same cached
+    endpoint implementation used by Flask, preventing duplicate requests for
+    the same mode/pair/news event.
     """
+    market_mode = market_mode.lower()
     selected_pair = selected_pair.upper()
     data = get_weekly_news_events_for_pair(market_mode, real_pairs, crypto_pairs, selected_pair)
     enriched = []
 
+    imminent_high = next(
+        (
+            event for event in data.get("events", [])
+            if event.get("impact") == "high"
+            and 0 <= float(event.get("minutes_to_event") or 0) <= 5.0
+        ),
+        None,
+    )
+    direction_data = None
+    if imminent_high is not None:
+        direction_data = get_cached_news_direction_for_pair(
+            market_mode,
+            real_pairs,
+            crypto_pairs,
+            selected_pair,
+        )
+
+    direction_event = (direction_data or {}).get("event") if direction_data else None
+    direction_time = str((direction_event or {}).get("event_time_utc") or "")
+
     for event in data.get("events", []):
-        minutes = float(event.get("minutes_to_event") or 0)
-        if event.get("impact") == "high" and 0 <= minutes <= 5.0:
-            sentiment_data = fetch_news_sentiment()
-            sentiment = pair_sentiment(selected_pair, market_mode, sentiment_data)
-            direction, basis = _direction(selected_pair, market_mode, event.get("currency", ""), sentiment)
-            event = dict(event)
+        event = dict(event)
+        event_time = str(event.get("event_time_utc") or "")
+        if direction_event is not None and event_time == direction_time:
+            sentiment = direction_event.get("news_sentiment") or event.get("news_sentiment") or {}
+            direction = str(direction_event.get("direction") or "WAIT").upper()
+            basis = direction_event.get("direction_basis_bn") or "Alpha Vantage sentiment ভিত্তিক সম্ভাব্য bias।"
             event["news_sentiment"] = sentiment
         else:
             direction = "WAIT"
             basis = "Direction বিশ্লেষণ শুধু high-impact নিউজের ৫ মিনিটের window-তে করা হবে।"
-            event = dict(event)
 
         entry_utc, entry_window = _entry_window(event["event_time_utc"])
-        if minutes >= 0:
+        if float(event.get("minutes_to_event") or 0) >= 0:
             phase = "PRE-NEWS"
             action = "WAIT — নিউজের আগে entry নয়"
         else:
@@ -104,7 +124,7 @@ def get_weekly_news_overview_for_pair(market_mode: str, real_pairs: list[str], c
     data["alert_events"] = [e for e in enriched if e.get("five_minute_alert")]
     data["note_bn"] = (
         "NEWS প্যানেল নির্বাচিত pair অনুযায়ী দেখাবে। Calendar event দেখাতে Alpha Vantage কল করা হয় না; "
-        "শুধু high-impact release-এর ৫ মিনিটের মধ্যে direction দরকার হলে Alpha Vantage sentiment ব্যবহার হবে।"
+        "শুধু high-impact release-এর ৫ মিনিটের মধ্যে direction দরকার হলে event-keyed cached sentiment ব্যবহার হবে।"
     )
     return data
 
