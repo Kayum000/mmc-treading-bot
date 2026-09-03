@@ -29,6 +29,20 @@ The live entry architecture is **30m → 15m → 5m setup → 1m final entry**. 
 7. Final 1m entry confirmation
 8. BUY/SELL only when all mandatory confirmation gates are satisfied
 
+## Weekly news + sentiment
+
+The web panel shows the week's scheduled economic events across all supported pairs and raises a **5-minute pre-news alert**. Scheduled-event timing comes from the weekly economic calendar. When `ALPHA_VANTAGE_API_KEY` is configured, the bot also fetches Alpha Vantage `NEWS_SENTIMENT` data and adds recent published-news sentiment as context.
+
+The Alpha Vantage news request is cached for 5 minutes and is made as one broad request per cache window rather than once per market, so the 20 Forex / 10 Crypto pair list does not multiply news API calls.
+
+Set the key in the server environment (for example, Render Environment Variables):
+
+```text
+ALPHA_VANTAGE_API_KEY=your_key_here
+```
+
+If the key is not configured or the news provider is unavailable, the scheduled calendar remains available and the sentiment layer is simply omitted.
+
 ## Historical accuracy backtest
 
 `backtest/mmc_backtest.py` measures the same signal logic on historical **1-minute OHLC** data without calling the live API. It resamples the 1m candles into 5m/15m/30m frames, evaluates signals only from data available at that time, confirms the 1m entry, and evaluates the next 1-minute candle as the outcome.
