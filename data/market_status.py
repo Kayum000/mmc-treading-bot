@@ -60,13 +60,25 @@ def _global_pre_news_direction(mode: str, real_pairs: list[str], crypto_pairs: l
         if not affected_pairs:
             return {"available": False}
 
-        # The first affected pair is used only as the market label/direction
-        # reference. The event itself is globally the nearest upcoming event.
+        # Use one affected pair as the market label/direction reference while
+        # keeping the event itself fixed to the globally nearest calendar item.
         target_pair = affected_pairs[0]
         direction_data = get_news_direction_for_pair(mode, real_pairs, crypto_pairs, target_pair) or {}
-        direction_event = (direction_data.get("event") or (direction_data.get("events") or [None])[0])
+        direction_events = direction_data.get("events") or []
+        event_time = str(event.get("event_time_utc") or "")
+        event_currency = str(event.get("currency") or "").upper()
+        direction_event = next(
+            (
+                candidate for candidate in direction_events
+                if str(candidate.get("event_time_utc") or "") == event_time
+                and str(candidate.get("currency") or "").upper() == event_currency
+            ),
+            None,
+        )
+        if direction_event is None:
+            direction_event = direction_data.get("event")
         if not direction_event:
-            return {"available": False, "market": target_pair, "event_time_utc": event.get("event_time_utc")}
+            return {"available": False, "market": target_pair, "event_time_utc": event_time}
 
         raw_direction = str(direction_event.get("direction") or "WAIT").upper()
         direction = {"UP": "BUY", "DOWN": "SELL"}.get(raw_direction, "WAIT")
@@ -79,7 +91,7 @@ def _global_pre_news_direction(mode: str, real_pairs: list[str], crypto_pairs: l
         return {
             "available": True,
             "market": target_pair,
-            "event_time_utc": event.get("event_time_utc"),
+            "event_time_utc": event_time,
             "direction": direction,
             "confidence_pct": confidence,
         }
