@@ -11,9 +11,12 @@ These modes generate signals only. They do **not** submit orders.
 
 ## Timeframes
 
-- **15m:** primary trend/structure bias (highest weight)
+- **30m:** higher-timeframe trend/structure confirmation (highest weight)
+- **15m:** higher-timeframe confirmation
 - **5m:** setup confirmation
-- **1m:** entry confirmation
+- **1m:** final entry confirmation
+
+The live entry architecture is **30m → 15m → 5m setup → 1m final entry**. The 1m confirmation is not mixed into the MTF score.
 
 ## Logic
 
@@ -21,8 +24,28 @@ These modes generate signals only. They do **not** submit orders.
 2. Market-structure break (BOS)
 3. Liquidity sweep and rejection
 4. Candle displacement
-5. Weighted multi-timeframe score
-6. BUY/SELL only when the minimum score is met and the two sides are not tied
+5. Breakout/retest role reversal
+6. Weighted multi-timeframe score (30m=3, 15m=2, 5m=1)
+7. Final 1m entry confirmation
+8. BUY/SELL only when all mandatory confirmation gates are satisfied
+
+## Historical accuracy backtest
+
+`backtest/mmc_backtest.py` measures the same signal logic on historical **1-minute OHLC** data without calling the live API. It resamples the 1m candles into 5m/15m/30m frames, evaluates signals only from data available at that time, confirms the 1m entry, and evaluates the next 1-minute candle as the outcome.
+
+Example:
+
+```bash
+python -m backtest.mmc_backtest data/1m.csv --out backtest_results
+```
+
+The report creates:
+
+- `signals.csv` — every confirmed historical signal and WIN/LOSS/DRAW outcome
+- `score_report.csv` — accuracy grouped by **12–14, 15–17, 18–21, 22+** score ranges
+- `direction_report.csv` — BUY vs SELL results
+
+Accuracy is calculated as `wins / (wins + losses)`; DRAWs are reported separately. The report is for historical measurement only and is not a guarantee of future profitability.
 
 ## Data boundary
 
