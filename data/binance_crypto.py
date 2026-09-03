@@ -1,4 +1,4 @@
-"""Binance spot crypto candle adapter for on-demand MMC signals."""
+"""Binance spot crypto candle adapter for MMC signals."""
 from __future__ import annotations
 
 import json
@@ -9,11 +9,8 @@ from urllib.request import Request, urlopen
 
 import pandas as pd
 
-INTERVALS = {"1m": "1m", "5m": "5m", "15m": "15m"}
-_INTERVAL_SECONDS = {"1m": 60, "5m": 300, "15m": 900}
-# Binance documents these equivalent public API clusters. The Vision endpoint
-# also supports public /api/v3/klines and is useful when a hosting region
-# receives HTTP 451 from api.binance.com.
+INTERVALS = {"30m": "30m", "15m": "15m", "5m": "5m"}
+_INTERVAL_SECONDS = {"30m": 1800, "15m": 900, "5m": 300}
 BINANCE_BASE_URLS = (
     "https://data-api.binance.vision",
     "https://api-gcp.binance.com",
@@ -59,7 +56,7 @@ def _closed_candles(df: pd.DataFrame, interval: str) -> pd.DataFrame:
     return df.loc[df["timestamp"] <= cutoff].copy()
 
 
-def fetch_crypto_candles(symbol: str, interval: str = "1m", limit: int = 200) -> pd.DataFrame:
+def fetch_crypto_candles(symbol: str, interval: str = "5m", limit: int = 200) -> pd.DataFrame:
     if interval not in INTERVALS:
         raise ValueError(f"Unsupported interval: {interval}")
 
@@ -81,10 +78,5 @@ def fetch_crypto_candles(symbol: str, interval: str = "1m", limit: int = 200) ->
 
 
 def fetch_crypto_multi_timeframe(symbol: str) -> dict[str, pd.DataFrame]:
-    """Fetch closed 1m/5m/15m candles concurrently for the selected crypto pair."""
-    from concurrent.futures import ThreadPoolExecutor
-
-    intervals = list(INTERVALS)
-    with ThreadPoolExecutor(max_workers=len(intervals)) as executor:
-        futures = {label: executor.submit(fetch_crypto_candles, symbol, label) for label in intervals}
-        return {label: futures[label].result() for label in intervals}
+    """Fetch closed 30m/15m/5m candles for the selected crypto pair."""
+    return {label: fetch_crypto_candles(symbol, interval) for interval, label in INTERVALS.items()}
