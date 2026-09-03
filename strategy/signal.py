@@ -80,14 +80,62 @@ def generate_signal(frames: dict[str, pd.DataFrame]) -> Signal:
     return Signal("NO_TRADE", buy, sell, diagnostic)
 
 
-def confirm_1m_entry(signal: Signal, df_1m: pd.DataFrame) -> Signal:
-    """Use the latest closed 1m candle as the final entry trigger.
+def generate_1m_signal(df: pd.DataFrame) -> Signal:
+    """Pure 1-minute MMC entry strategy; higher timeframes are not required.
 
-    The 30m/15m/5m MMC score is still calculated for display, but it is not
-    used as a trade gate. A trade is only kept when the latest closed 1m
-    candle confirms the already-selected direction via a matching BOS,
-    liquidity sweep/reclaim, or displacement candle.
+    Direction comes from the 1m EMA trend. The entry needs recent structure
+    evidence (BOS or liquidity sweep) plus a live impulse/rejection trigger.
+    Scores are informational only and are never used as a gate.
     """
+    if df is None or df.empty:
+        return Signal("NO_TRADE", 0, 0, "১ মিনিটের বাজার ডেটা পাওয়া যায়নি।")
+
+    if len(df) < max(CONFIG.trend_ema, CONFIG.sweep_lookback + 1):
+        return Signal("NO_TRADE", 0, 0, "১ মিনিটের EMA ও কাঠামো যাচাই করার জন্য পর্যাপ্ত ক্যান্ডেল নেই।")
+
+    work = df.copy()
+    work["ema_fast"] = work["close"].ewm(span=CONFIG.fast_ema, adjust=False).mean()
+    work["ema_trend"] = work["close"].ewm(span=CONFIG.trend_ema, adjust=False).mean()
+
+    close = float(work["close"].iloc[-1])
+    fast = float(work["ema_fast"].iloc[-1])
+    trend = float(work["ema_trend"].iloc[-1])
+    structure = market_structure(work, CONFIG.swing_lookback)
+    sweep = liquidity_sweep(work, CONFIG.sweep_lookback)
+    impulse = displacement(work)
+
+    buy_score = int(close > trend) + int(fast > trend) + 2 * int(structure == "bullish_bos") + 2 * int(sweep == "buy_side_rejection") + int(impulse == "bullish")
+    sell_score = int(close < trend) + int(fast < trend) + 2 * int(structure == "bearish_bos") + 2 * int(sweep == "sell_side_rejection") + int(impulse == "bearish")
+
+    buy_trend = close > trend and fast > trend
+    sell_trend = close < trend and fast < trend
+    buy_structure = structure == "bullish_bos" or sweep == "buy_side_rejection"
+    sell_structure = structure == "bearish_bos" or sweep == "sell_side_rejection"
+    buy_trigger = sweep == "buy_side_rejection" or impulse == "bullish"
+    sell_trigger = sweep == "sell_side_rejection" or impulse == "bearish"
+
+    buy_valid = buy_trend and buy_structure and buy_trigger
+    sell_valid = sell_trend and sell_structure and sell_trigger
+
+    if buy_valid and not sell_valid:
+        return Signal("BUY", buy_score, sell_score, "১ মিনিটের MMC: EMA trend bullish, market structure/liquidity confirmation bullish এবং শেষ বন্ধ ১ মিনিটের ক্যান্ডেলে bullish entry trigger নিশ্চিত। MTF ৩০m/১৫m/৫m ব্যবহার করা হচ্ছে না; স্কোর শুধু তথ্য হিসেবে দেখানো হচ্ছে।")
+    if sell_valid and not buy_valid:
+        return Signal("SELL", buy_score, sell_score, "১ মিনিটের MMC: EMA trend bearish, market structure/liquidity confirmation bearish এবং শেষ বন্ধ ১ মিনিটের ক্যান্ডেলে bearish entry trigger নিশ্চিত। MTF ৩০m/১৫m/৫m ব্যবহার করা হচ্ছে না; স্কোর শুধু তথ্য হিসেবে দেখানো হচ্ছে।")
+    if buy_valid and sell_valid:
+        return Signal("NO_TRADE", buy_score, sell_score, "১ মিনিটে BUY ও SELL—দুই দিকের শর্ত একসঙ্গে বৈধ; তাই দ্ব্যর্থক অবস্থায় ট্রেড দেওয়া হয়নি।")
+
+    failed = []
+    if not (buy_trend or sell_trend):
+        failed.append("EMA trend পরিষ্কার নয়")
+    if not (buy_structure or sell_structure):
+        failed.append("BOS/liquidity confirmation নেই")
+    if not (buy_trigger or sell_trigger):
+        failed.append("displacement/rejection trigger নেই")
+    return Signal("NO_TRADE", buy_score, sell_score, "১ মিনিটের MMC-তে এখনো বৈধ setup নেই: " + "; ".join(failed) + ".")
+
+
+def confirm_1m_entry(signal: Signal, df_1m: pd.DataFrame) -> Signal:
+    """Use the latest closed 1m candle as the final entry trigger for MTF mode."""
     if signal.action not in {"BUY", "SELL"}:
         return signal
     if df_1m is None or df_1m.empty:
