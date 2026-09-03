@@ -14,8 +14,8 @@ from urllib.request import Request, urlopen
 
 import pandas as pd
 
-INTERVALS = {"30min": "30m", "15min": "15m", "5min": "5m"}
-_INTERVAL_SECONDS = {"30min": 1800, "15min": 900, "5min": 300}
+INTERVALS = {"30min": "30m", "15min": "15m", "5min": "5m", "1min": "1m"}
+_INTERVAL_SECONDS = {"30min": 1800, "15min": 900, "5min": 300, "1min": 60}
 
 _LAST_CREDIT_USAGE = {"used": None, "left": None, "limit": None}
 
@@ -68,8 +68,6 @@ def fetch_forex_candles(symbol: str, interval: str = "5min", outputsize: int = 2
     if interval not in INTERVALS:
         raise ValueError(f"Unsupported interval: {interval}")
 
-    # Twelve Data's Forex default timezone is not UTC. Request UTC explicitly
-    # so candle timestamps can be compared safely with the server clock.
     params = urlencode({
         "symbol": symbol,
         "interval": interval,
@@ -113,4 +111,5 @@ def fetch_forex_multi_timeframe(symbol: str) -> dict[str, pd.DataFrame]:
     return {
         label: fetch_forex_candles(symbol, interval)
         for interval, label in INTERVALS.items()
+        if label in {"30m", "15m", "5m"}
     }
