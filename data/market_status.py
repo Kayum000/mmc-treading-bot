@@ -56,6 +56,7 @@ def get_market_status(mode: str, pair: str, real_pairs, crypto_pairs):
     news_risk = "LOW"
     news_risk_bn = "কোনো কাছের high-impact নিউজ নেই"
     minutes = None
+    minutes_float = float("inf")
     if event_time and event:
         minutes_float = max(0.0, (event_time - now).total_seconds() / 60.0)
         minutes = round(minutes_float, 1)
@@ -72,10 +73,9 @@ def get_market_status(mode: str, pair: str, real_pairs, crypto_pairs):
         else:
             news_risk_bn = f"পরবর্তী নিউজ {minutes:g} মিনিট পরে"
 
-    # Alpha Vantage is needed only for a direction calculation around a
-    # high-impact release. The frontend uses this flag to decide whether to
-    # request /news-direction at all.
-    direction_needed = bool(event and str(event.get("impact", "")).lower() == "high" and minutes_float <= 5)
+    direction_needed = bool(
+        event and str(event.get("impact", "")).lower() == "high" and minutes_float <= 5
+    )
 
     if news_risk == "HIGH":
         recommendation = "AVOID — নিউজ রিলিজের আগে ট্রেড নয়"
