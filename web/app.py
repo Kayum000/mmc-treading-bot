@@ -9,6 +9,7 @@ from flask import Flask, jsonify, render_template, request, redirect, url_for, s
 from signals.get_signal import get_signal
 from data.twelve_data_forex import fetch_api_usage, get_credit_usage
 from data.news_calendar import get_weekly_news_overview
+from data.news_direction import get_weekly_news_overview_for_pair
 
 app = Flask(__name__)
 app.secret_key = os.getenv("APP_SECRET_KEY") or os.urandom(32)
@@ -184,14 +185,14 @@ def auto_signal():
 
 @app.route("/news-alert", methods=["GET"])
 def news_alert():
-    """Return this week's scheduled news across every supported pair in the selected mode."""
+    """Return pair-specific scheduled news timing and cautious direction guidance."""
     mode = session.get("selected_mode", "").strip().lower()
     pair = session.get("selected_pair", "").strip().upper()
     valid_pairs = REAL_PAIRS if mode == "real" else CRYPTO_PAIRS if mode == "crypto" else []
     if pair not in valid_pairs:
         return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
     try:
-        return jsonify(get_weekly_news_overview(mode, REAL_PAIRS, CRYPTO_PAIRS))
+        return jsonify(get_weekly_news_overview_for_pair(mode, REAL_PAIRS, CRYPTO_PAIRS, pair))
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
 
