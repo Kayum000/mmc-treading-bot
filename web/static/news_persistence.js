@@ -18,8 +18,6 @@
   };
   const mode = () => document.getElementById('mode')?.value || 'real';
   const pair = () => document.getElementById('pair')?.value || '';
-  const newsKey = () => `${NEWS_KEY}${mode()}:${pair()}`;
-  const directionKey = () => `${DIR_KEY}${mode()}:${pair()}`;
 
   const timeOf = (node) => {
     const m = (node?.textContent || '').match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/);
@@ -29,7 +27,7 @@
   const allNews = () => Array.from(content.querySelectorAll(':scope > .news-alert, :scope > .news-list li'))
     .filter(node => !node.closest('#important-news-hero'))
     .map(node => ({node, ms: Date.parse(timeOf(node))}))
-    .filter(x => Number.isFinite(x.ms))
+    .filter(x => Number.isFinite(x.ms) && x.ms >= Date.now() - 60 * 1000)
     .sort((a, b) => a.ms - b.ms);
 
   const importantNews = () => allNews().filter(x => x.node.classList.contains('news-impact-high') || x.node.classList.contains('news-impact-medium'));
@@ -37,6 +35,62 @@
   function currentSource() {
     return importantNews()[0]?.node || null;
   }
+
+  // Prevent the candle timer's MutationObserver from hitting /news-direction repeatedly.
+  // Cache the real server response for 30 seconds, keyed by the actual nearest event.
+  const nativeFetch = window.fetch.bind(window);
+  let directionCache = null;
+  let directionInFlight = null;
+
+  function directionRequestKey(url) {
+    const source = currentSource();
+    return `${url}|${mode()}|${pair()}|${source ? timeOf(source) : ''}`;
+  }
+
+  window.fetch = function(input, init) {
+    const url = typeof input === 'string' ? input : (input?.url || '');
+    if (!url.includes('/news-direction')) return nativeFetch(input, init);
+
+    const key = directionRequestKey(url);
+    const now = Date.now();
+    if (directionCache && directionCache.key === key && now - directionCache.at < 30000) {
+      return Promise.resolve(new Response(JSON.stringify(directionCache.data), {
+        status: 200,
+        headers: {'Content-Type': 'application/json'}
+      }));
+    }
+    if (directionInFlight && directionCache?.key === key) return directionInFlight;
+
+    directionInFlight = nativeFetch(input, init)
+      .then(async response => {
+        let data = null;
+        try { data = await response.clone().json(); } catch (_) {}
+        if (data) directionCache = {key, at: Date.now(), data};
+        return response;
+      })
+      .finally(() => { directionInFlight = null; });
+    return directionInFlight;
+  };
+
+  // The nearest-news alert must not consume the whole News Events panel.
+  // Keep the important alert compact so the complete USD/EUR/etc. event list stays visible below it.
+  const compactStyle = document.createElement('style');
+  compactStyle.id = 'news-compact-stability';
+  compactStyle.textContent = `
+    #important-news-hero{padding:7px 9px!important;margin-bottom:7px!important}
+    #important-news-hero .important-news-heading{font-size:17px!important;margin-bottom:3px!important}
+    #important-news-hero .important-news-title{font-size:15px!important;margin:3px 0!important}
+    #important-news-hero .important-news-time{font-size:12px!important;margin:3px 0!important;padding:3px 5px!important}
+    #important-news-hero .important-news-count{font-size:12px!important;margin:3px 0!important}
+    #important-news-hero .important-news-direction{font-size:19px!important;margin:3px 0!important;padding:3px!important}
+    #important-news-hero .important-news-queue-label{font-size:11px!important;margin:4px 0 2px!important}
+    #important-news-hero .important-news-queue{max-height:70px!important;gap:3px!important}
+    #important-news-hero .important-news-queue-item{padding:3px 5px!important;font-size:11px!important;line-height:1.15!important}
+    #important-news-hero .important-news-queue-item strong{font-size:10px!important;margin-bottom:1px!important}
+    #important-news-hero .important-news-queue-item span{font-size:10px!important;margin-top:1px!important}
+    #important-news-hero .important-news-source{font-size:10px!important;margin-top:2px!important}
+  `;
+  document.head.appendChild(compactStyle);
 
   // renderNews() runs every 30 seconds. If the event set did not change,
   // ignore the innerHTML assignment so the list does not visually jump.
@@ -67,14 +121,14 @@
     if (!source || !pair()) return;
     const time = timeOf(source);
     if (!time) return;
-    write(newsKey(), {html: source.outerHTML, eventTime: time, savedAt: Date.now()});
+    write(`${NEWS_KEY}${mode()}:${pair()}`, {html: source.outerHTML, eventTime: time, savedAt: Date.now()});
   }
 
   function restoreNews() {
     // Do not replace a fresh regular-news list with an old high-impact snapshot.
     if (allNews().length) return;
     if (!pair()) return;
-    const snapshot = read(newsKey());
+    const snapshot = read(`${NEWS_KEY}${mode()}:${pair()}`);
     if (!snapshot?.html || !snapshot.eventTime) return;
     const eventMs = Date.parse(snapshot.eventTime);
     if (!Number.isFinite(eventMs) || eventMs < Date.now() - MAX_PAST_MS) return;
@@ -98,12 +152,12 @@
       if (m) direction = m[1].toUpperCase();
     });
     if (!direction || !time) return;
-    write(directionKey(), {eventTime: time, direction, savedAt: Date.now()});
+    write(`${DIR_KEY}${mode()}:${pair()}`, {eventTime: time, direction, savedAt: Date.now()});
   }
 
   function applyDirection() {
     const source = currentSource();
-    const saved = read(directionKey());
+    const saved = read(`${DIR_KEY}${mode()}:${pair()}`);
     if (!source || !saved?.eventTime || !saved.direction || timeOf(source) !== saved.eventTime) return;
     const direction = saved.direction === 'UP' ? 'UP' : saved.direction === 'DOWN' ? 'DOWN' : '';
     if (!direction) return;
@@ -118,9 +172,9 @@
 
   function clearOldDirectionForNewEvent() {
     const source = currentSource();
-    const saved = read(directionKey());
+    const saved = read(`${DIR_KEY}${mode()}:${pair()}`);
     if (!source || !saved?.eventTime || timeOf(source) === saved.eventTime) return;
-    try { localStorage.removeItem(directionKey()); } catch (_) {}
+    try { localStorage.removeItem(`${DIR_KEY}${mode()}:${pair()}`); } catch (_) {}
   }
 
   function markLkg(source) {
