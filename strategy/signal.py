@@ -98,12 +98,13 @@ def generate_1m_signal(df: pd.DataFrame) -> Signal:
     impulse = displacement(work)
 
     # The old rule required BOS/sweep AND trigger on the exact last candle.
-    # That made valid setups disappear if the structure formed 1-2 candles earlier.
-    # Keep the current candle as the entry candle, but allow recent closed confirmation.
-    recent = work.tail(3)
-    recent_bos = [market_structure(recent.iloc[:i], CONFIG.swing_lookback) for i in range(1, len(recent) + 1)]
-    recent_sweeps = [liquidity_sweep(recent.iloc[:i], CONFIG.sweep_lookback) for i in range(1, len(recent) + 1)]
-    recent_moves = [displacement(recent.iloc[:i]) for i in range(1, len(recent) + 1)]
+    # Scan the latest three CLOSED candles while preserving the full history
+    # needed by the structure/sweep functions.
+    recent_start = max(0, len(work) - 3)
+    recent_indices = range(recent_start + 1, len(work) + 1)
+    recent_bos = [market_structure(work.iloc[:i], CONFIG.swing_lookback) for i in recent_indices]
+    recent_sweeps = [liquidity_sweep(work.iloc[:i], CONFIG.sweep_lookback) for i in recent_indices]
+    recent_moves = [displacement(work.iloc[:i]) for i in recent_indices]
 
     bullish_bos_recent = "bullish_bos" in recent_bos
     bearish_bos_recent = "bearish_bos" in recent_bos
