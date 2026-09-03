@@ -38,7 +38,7 @@
 <main>
 <a class="logout" href="{{ url_for('logout') }}">LOGOUT</a>
 <div class="brand"><img src="{{ url_for('static', filename='sk_bot_logo.svg') }}" alt="SK BOT"><h1>MMC Live Signal</h1></div>
-<p class="intro">মার্কেট নির্বাচন করুন। অটো সিগন্যাল চালু থাকলে নির্বাচিত মার্কেটেই স্বয়ংক্রিয়ভাবে নতুন সিগন্যাল তৈরি হবে।</p>
+<p class="intro">মার্কেট নির্বাচন করুন। অটো সিগন্যাল চালু থাকলে নির্বাচিত মার্কেটেই প্রতি নতুন ১ মিনিটে স্বয়ংক্রিয়ভাবে final entry যাচাই হবে।</p>
 <form method="post" id="signal-form">
   <div style="width:100%"><strong>MARKET MODE</strong></div>
   <div class="mode-tabs">
@@ -57,7 +57,7 @@
 </form>
 <div class="auto-row">
   <label class="auto-toggle"><input type="checkbox" id="auto-signal" checked> AUTO SIGNAL</label>
-  <span id="auto-status" class="auto-status">মার্কেট নির্বাচন করলে প্রতি নতুন ৫ মিনিটের setup-এ স্বয়ংক্রিয়ভাবে যাচাই হবে।</span>
+  <span id="auto-status" class="auto-status">মার্কেট নির্বাচন করলে প্রতি নতুন ১ মিনিটের candle-এ final entry যাচাই হবে।</span>
 </div>
 {% if error %}<p id="server-error"><strong>Error:</strong> {{error}}</p>{% endif %}
 <div id="result-container">
@@ -112,19 +112,19 @@ function renderResult(r){
 
 function nextAutoDelayMs(){
   const now=Date.now();
-  const next=(Math.floor(now/300000)+1)*300000;
-  return Math.max(3000,next-now+3000);
+  const next=(Math.floor(now/60000)+1)*60000;
+  return Math.max(1500,next-now+1500);
 }
 async function runAutoSignal(){
   if(!autoToggle.checked||!pairSelect.value||autoRequestInFlight)return;
   autoRequestInFlight=true;
-  autoStatus.textContent='স্বয়ংক্রিয়ভাবে নির্বাচিত মার্কেটের নতুন ডেটা যাচাই করা হচ্ছে…';
+  autoStatus.textContent='স্বয়ংক্রিয়ভাবে নির্বাচিত মার্কেটের নতুন ১ মিনিটের ডেটা যাচাই করা হচ্ছে…';
   try{
     const response=await fetch('{{ url_for("auto_signal") }}',{method:'GET',cache:'no-store',headers:{'Accept':'application/json'}});
     const data=await response.json();
-    if(data.ok){renderResult(data.result);autoStatus.textContent=`AUTO SIGNAL চালু — শেষ যাচাই: ${data.result.signal_time_bd}`;}
+    if(data.ok){renderResult(data.result);autoStatus.textContent=`AUTO SIGNAL চালু — প্রতি ১ মিনিটে final entry যাচাই; শেষ যাচাই: ${data.result.signal_time_bd}`;}
     else{autoStatus.textContent='অটো সিগন্যাল সাময়িকভাবে ডেটা পায়নি: '+data.error;}
-  }catch(error){autoStatus.textContent='অটো সিগন্যাল সংযোগে সমস্যা হয়েছে। পরের নির্ধারিত সময়ে আবার চেষ্টা করবে।';}
+  }catch(error){autoStatus.textContent='অটো সিগন্যাল সংযোগে সমস্যা হয়েছে। পরের ১ মিনিটে আবার চেষ্টা করবে।';}
   finally{autoRequestInFlight=false;scheduleAutoSignal();}
 }
 function scheduleAutoSignal(){
@@ -142,7 +142,7 @@ const serverMode=modeInput.value;
 const serverPair={{ pair|tojson }};
 const storedMode=localStorage.getItem(STORAGE_MODE);
 if(!serverMode){setMode(storedMode==='crypto'?'crypto':'real',false);}else{setMode(serverMode,true);if(serverPair&&pairSelect.value!==serverPair){const option=Array.from(pairSelect.options).find(o=>o.dataset.market===serverMode&&o.value===serverPair);if(option)pairSelect.value=serverPair;updateSignalButton();}}
-if(autoToggle.checked&&pairSelect.value){autoStatus.textContent='AUTO SIGNAL চালু — নির্বাচিত মার্কেটের ৫ মিনিটের setup-এ স্বয়ংক্রিয় যাচাই হবে; Entry হবে পরবর্তী ১ মিনিটের candle-এ।';runAutoSignal();}
+if(autoToggle.checked&&pairSelect.value){autoStatus.textContent='AUTO SIGNAL চালু — প্রতি ১ মিনিটে final entry যাচাই হবে। 30m/15m/5m MTF data তাদের নিজ নিজ candle close-এ refresh হবে; Entry হবে পরবর্তী ১ মিনিটের candle-এ।';runAutoSignal();}
 </script>
 <script src="{{ url_for('static', filename='candle_timer.js') }}" defer></script>
 </body>
