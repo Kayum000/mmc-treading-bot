@@ -4,6 +4,7 @@
   let enhancingNews = false;
   let directionRequestInFlight = false;
   let lastDirectionKey = '';
+  let lastDirectionData = null;
 
   function renderClock() {
     if (!bdClock) return;
@@ -92,9 +93,16 @@
     return String(value ?? '').replace(/[&<>\"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  // News Events are already sorted by the backend. The first high/medium item is the nearest important event.
+  // News Events are sorted by the backend. The first high/medium item is the nearest important event.
   function getImportantSource(content) {
     return content?.querySelector(':scope > .news-alert.news-impact-high, :scope > .news-list li.news-impact-high, :scope > .news-alert.news-impact-medium, :scope > .news-list li.news-impact-medium');
+  }
+
+  function directionForSource(source) {
+    if (!source || !lastDirectionData?.event) return null;
+    const sourceTime = extractEventTime(source);
+    const directionTime = String(lastDirectionData.event.event_time_utc || '');
+    return sourceTime === directionTime ? lastDirectionData : null;
   }
 
   function ensureMarketStatusNewsBox() {
@@ -112,12 +120,14 @@
   }
 
   function updateMarketStatusImportantNews(source, directionData = null) {
-    const box = ensureMarketStatusNewsBox();
-    if (!box) return;
+    const panel = document.getElementById('market-status-panel');
+    if (!panel) return;
+    let box = document.getElementById('important-news-status');
     if (!source) {
-      box.remove();
+      if (box) box.remove();
       return;
     }
+    box = ensureMarketStatusNewsBox();
     const eventTime = extractEventTime(source);
     const bdTime = formatBangladeshTime(eventTime);
     const title = extractTitle(source);
@@ -142,7 +152,8 @@
     const content = document.getElementById('news-content');
     const source = getImportantSource(content);
     if (!source) return;
-    updateMarketStatusImportantNews(source, data?.needed ? data : null);
+    lastDirectionData = data?.needed ? data : null;
+    updateMarketStatusImportantNews(source, directionForSource(source));
 
     const hero = document.getElementById('important-news-hero');
     if (!hero) return;
@@ -166,8 +177,12 @@
       const response = await fetch('/news-direction', {method:'GET', cache:'no-store', headers:{'Accept':'application/json'}});
       const data = await response.json();
       lastDirectionKey = key;
-      updateDirectionInYellowBox(data?.needed ? data : null);
+      lastDirectionData = data?.needed ? data : null;
+      updateMarketStatusImportantNews(source, lastDirectionData);
+      updateDirectionInYellowBox(lastDirectionData);
     } catch (e) {
+      lastDirectionData = null;
+      updateMarketStatusImportantNews(source, null);
       updateDirectionInYellowBox(null);
     } finally {
       directionRequestInFlight = false;
@@ -181,17 +196,22 @@
     injectNewsStyles();
 
     const source = getImportantSource(content);
-    updateMarketStatusImportantNews(source);
-    const oldHero = document.getElementById('important-news-hero');
     if (!source) {
+      const oldHero = document.getElementById('important-news-hero');
       if (oldHero) oldHero.remove();
+      lastDirectionData = null;
+      updateMarketStatusImportantNews(null);
       return;
     }
 
+    const sourceDirection = directionForSource(source);
+    updateMarketStatusImportantNews(source, sourceDirection);
+    const oldHero = document.getElementById('important-news-hero');
     const eventTime = extractEventTime(source);
     const bdTime = formatBangladeshTime(eventTime);
     const title = extractTitle(source);
     const countdown = source.querySelector('.news-count')?.textContent?.trim() || '';
+    const direction = String(sourceDirection?.event?.direction || 'WAIT').toUpperCase();
 
     enhancingNews = true;
     try {
@@ -205,7 +225,7 @@
         <div class="important-news-time">🕒 REAL MARKET TIME (UTC): ${escapeText(eventTime)}</div>
         ${bdTime ? `<div class="important-news-time">🇧🇩 বাংলাদেশ সময়: ${escapeText(bdTime)}</div>` : ''}
         ${countdown ? `<div class="important-news-count">⏱ ${escapeText(countdown)}</div>` : ''}
-        <div class="important-news-direction wait">⏸ WAIT — দিক এখনো নিশ্চিত নয়</div>
+        <div class="important-news-direction ${direction.toLowerCase()}">${direction === 'UP' ? '⬆ UP — উপরে' : direction === 'DOWN' ? '⬇ DOWN — নিচে' : '⏸ WAIT — দিক এখনো নিশ্চিত নয়'}</div>
         <div class="important-news-source">Calendar data আলাদা রাখা হয়েছে; high-impact নিউজ ৫ মিনিটের মধ্যে এলে Alpha Vantage শুধু Direction-এর জন্য ব্যবহার হবে।</div>
         <div class="important-news-original"></div>
       `;
