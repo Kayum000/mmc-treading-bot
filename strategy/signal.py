@@ -36,6 +36,26 @@ def _is_valid_setup(profile: dict, side: str) -> bool:
     return True
 
 
+def _diagnostic_reason(profile: dict, side: str) -> str:
+    """Explain every final gate without changing the signal decision logic."""
+    direction = "বিক্রির" if side == "sell" else "কেনার"
+    opposite = "বিপরীত ঊর্ধ্বমুখী বাজার-গঠন পাওয়া যায়নি" if side == "sell" else "বিপরীত নিম্নমুখী বাজার-গঠন পাওয়া যায়নি"
+
+    checks = [
+        f"স্কোর সীমা: {'ঠিক আছে' if profile['score'] >= CONFIG.min_score else 'মেলেনি'} ({profile['score']}/{CONFIG.min_score})",
+        f"১৫ ও ৫ মিনিটের দিক একমত: {'ঠিক আছে' if profile['higher_timeframe_trend'] else 'মেলেনি'}",
+        f"ভাঙা স্তরের পুনঃপরীক্ষা ও নতুন ভূমিকা: {'ঠিক আছে' if profile['role_reversal_confirmation'] else 'মেলেনি'}",
+        f"১ মিনিটের {direction} প্রবেশের সংকেত: {'ঠিক আছে' if profile['entry_trigger'] else 'মেলেনি'}",
+        f"{opposite}: {'ঠিক আছে' if not profile['opposite_structure'] else 'মেলেনি'}",
+        f"১৫ মিনিটের স্কোর: {'ঠিক আছে' if profile['15m']['score'] >= 4 else 'মেলেনি'} ({profile['15m']['score']}/4 ন্যূনতম)",
+        f"৫ মিনিটের স্কোর: {'ঠিক আছে' if profile['5m']['score'] >= 3 else 'মেলেনি'} ({profile['5m']['score']}/3 ন্যূনতম)",
+        f"১ মিনিটের স্কোর: {'ঠিক আছে' if profile['1m']['score'] >= 1 else 'মেলেনি'} ({profile['1m']['score']}/1 ন্যূনতম)",
+    ]
+    failed = [item for item in checks if "মেলেনি" in item]
+    status = "সব চূড়ান্ত শর্ত পূরণ হয়েছে, কিন্তু অন্য দিকের স্কোর বেশি হওয়ায় এই দিকে সিগন্যাল দেওয়া হয়নি।" if not failed else "যে শর্তগুলোতে সমস্যা হয়েছে: " + "; ".join(failed) + "."
+    return "স্কোর নির্ধারিত সীমায় পৌঁছেছে। বিস্তারিত যাচাই — " + " | ".join(checks) + "। " + status
+
+
 def generate_signal(frames: dict[str, pd.DataFrame]) -> Signal:
     required = {"15m", "5m", "1m"}
     missing = required.difference(frames)
@@ -65,10 +85,9 @@ def generate_signal(frames: dict[str, pd.DataFrame]) -> Signal:
             "বেয়ারিশ MMC: ১৫ মিনিট ও ৫ মিনিটের বাজারের দিক নিম্নমুখী এবং একমত। আগের সমর্থনের স্তর ভেঙে দাম আবার সেই স্তরে ফিরে এসে সেটিকে প্রতিরোধ হিসেবে ধরে রেখেছে। ১ মিনিটে বিক্রির প্রবেশের সংকেতও নিশ্চিত হয়েছে।",
         )
     if buy >= CONFIG.min_score or sell >= CONFIG.min_score:
-        return Signal(
-            "NO_TRADE",
-            buy,
-            sell,
-            "স্কোর নির্ধারিত সীমায় পৌঁছেছে, কিন্তু সব শর্ত একসাথে পূরণ হয়নি। ১৫ ও ৫ মিনিটের বাজারের দিক, ভাঙা স্তরের পুনঃপরীক্ষা ও নতুন ভূমিকা, ১ মিনিটের প্রবেশের সংকেত অথবা বিপরীত বাজার-গঠনের মধ্যে অন্তত একটি শর্তে মিল পাওয়া যায়নি।",
-        )
+        if buy >= sell:
+            diagnostic = _diagnostic_reason(buy_profile, "buy")
+        else:
+            diagnostic = _diagnostic_reason(sell_profile, "sell")
+        return Signal("NO_TRADE", buy, sell, diagnostic)
     return Signal("NO_TRADE", buy, sell, "যথেষ্ট MMC নিশ্চিতকরণ পাওয়া যায়নি। বাজারের দিক, বাজারের গঠন এবং ১ মিনিটের প্রবেশের সংকেত এখনও যথেষ্ট শক্তিশালী নয়।")
