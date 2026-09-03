@@ -38,6 +38,30 @@
     return importantNews()[0]?.node || null;
   }
 
+  // renderNews() runs every 30 seconds. If the event set did not change,
+  // ignore the innerHTML assignment so the list does not visually jump.
+  const nativeInnerHTML = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+  const eventSignature = (html) => {
+    const text = String(html || '');
+    const matches = text.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/g) || [];
+    return matches.join('|');
+  };
+  let lastRenderedSignature = eventSignature(content.innerHTML);
+  if (nativeInnerHTML?.get && nativeInnerHTML?.set) {
+    try {
+      Object.defineProperty(content, 'innerHTML', {
+        configurable: true,
+        get() { return nativeInnerHTML.get.call(content); },
+        set(value) {
+          const nextSignature = eventSignature(value);
+          if (nextSignature && nextSignature === lastRenderedSignature) return;
+          lastRenderedSignature = nextSignature;
+          nativeInnerHTML.set.call(content, value);
+        },
+      });
+    } catch (_) {}
+  }
+
   function saveNews() {
     const source = currentSource();
     if (!source || !pair()) return;
