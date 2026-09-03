@@ -19,9 +19,14 @@ def timeframe_bias(df: pd.DataFrame) -> str:
     fast = df["ema_fast"].iloc[-1]
     trend = df["ema_trend"].iloc[-1]
     structure = market_structure(df, CONFIG.swing_lookback)
-    if close > trend and fast > trend and structure == "bullish_bos":
+    role_reversal = breakout_retest_role_reversal(df)
+    if close > trend and fast > trend and (
+        structure == "bullish_bos" or role_reversal == "bullish_role_reversal"
+    ):
         return "bullish"
-    if close < trend and fast < trend and structure == "bearish_bos":
+    if close < trend and fast < trend and (
+        structure == "bearish_bos" or role_reversal == "bearish_role_reversal"
+    ):
         return "bearish"
     return "neutral"
 
@@ -65,17 +70,21 @@ def timeframe_components(df: pd.DataFrame, side: str) -> dict[str, bool | str | 
     role_reversal = breakout_retest_role_reversal(df)
 
     if side == "buy":
-        trend_ok = close > trend and fast > trend
+        ema_trend_ok = close > trend and fast > trend
         structure_ok = structure == "bullish_bos"
         sweep_ok = sweep == "buy_side_rejection"
         displacement_ok = impulse == "bullish"
         role_reversal_ok = role_reversal == "bullish_role_reversal"
     else:
-        trend_ok = close < trend and fast < trend
+        ema_trend_ok = close < trend and fast < trend
         structure_ok = structure == "bearish_bos"
         sweep_ok = sweep == "sell_side_rejection"
         displacement_ok = impulse == "bearish"
         role_reversal_ok = role_reversal == "bearish_role_reversal"
+
+    # A confirmed breakout/retest role reversal is itself valid structure
+    # confirmation. Do not require the retest candle to also make a fresh BOS.
+    trend_ok = ema_trend_ok and (structure_ok or role_reversal_ok)
 
     return {
         "score": score_timeframe(df, side),
