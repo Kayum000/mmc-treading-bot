@@ -240,5 +240,17 @@ def market_status():
         return jsonify({"ok": False, "error": str(exc)}), 502
 
 
+@app.after_request
+def add_panel_equalizer(response):
+    """Load the dashboard-only equal-height panel CSS without changing signal logic."""
+    if response.content_type and response.content_type.startswith("text/html"):
+        html = response.get_data(as_text=True)
+        marker = "</head>"
+        link = '<link rel="stylesheet" href="/static/panel_equalizer.css">'
+        if marker in html and link not in html:
+            response.set_data(html.replace(marker, link + marker, 1))
+    return response
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=False)
