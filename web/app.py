@@ -124,6 +124,19 @@ def require_login():
     return None
 
 
+@app.route("/select-market", methods=["POST"])
+def select_market():
+    """Store UI market selection without generating a signal or consuming market-data credits."""
+    mode = request.form.get("mode", "").strip().lower()
+    pair = request.form.get("pair", "").strip().upper()
+    valid_pairs = REAL_PAIRS if mode == "real" else CRYPTO_PAIRS if mode == "crypto" else []
+    if pair not in valid_pairs:
+        return jsonify({"ok": False, "error": "অবৈধ মার্কেট।"}), 400
+    session["selected_mode"] = mode
+    session["selected_pair"] = pair
+    return jsonify({"ok": True, "mode": mode, "pair": pair})
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     result = None
@@ -191,7 +204,6 @@ def news_alert():
     pair = session.get("selected_pair", "").strip().upper()
     valid_pairs = REAL_PAIRS if mode == "real" else CRYPTO_PAIRS if mode == "crypto" else []
     if pair not in valid_pairs:
-        # Dashboard polling before selection is a normal empty state, not a client error.
         return jsonify({"ok": False, "unselected": True, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"})
     try:
         return jsonify(get_weekly_news_events_for_pair(mode, REAL_PAIRS, CRYPTO_PAIRS, pair))
@@ -220,7 +232,6 @@ def market_status():
     pair = session.get("selected_pair", "").strip().upper()
     valid_pairs = REAL_PAIRS if mode == "real" else CRYPTO_PAIRS if mode == "crypto" else []
     if pair not in valid_pairs:
-        # Dashboard polling before selection is a normal empty state, not a client error.
         return jsonify({"ok": False, "unselected": True, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"})
     try:
         return jsonify(get_market_status(mode, pair, REAL_PAIRS, CRYPTO_PAIRS))
@@ -230,15 +241,40 @@ def market_status():
 
 @app.after_request
 def add_dashboard_assets(response):
-    """Load dashboard-only assets without changing signal logic."""
+    """Load dashboard-only assets and synchronize UI market selection with the Flask session."""
     if response.content_type and response.content_type.startswith("text/html"):
         html = response.get_data(as_text=True)
         css = '<link rel="stylesheet" href="/static/panel_equalizer.css">'
         script = '<script src="/static/news_persistence.js" defer></script>'
+        sync_script = '''<script>
+(() => {
+  const mode = document.getElementById('mode');
+  const pair = document.getElementById('pair');
+  if (!mode || !pair) return;
+  let last = `${mode.value}|${pair.value}`;
+  let timer = null;
+  async function syncSelection() {
+    const value = `${mode.value}|${pair.value}`;
+    if (!mode.value || !pair.value || value === last) return;
+    last = value;
+    try {
+      const body = new URLSearchParams({mode: mode.value, pair: pair.value});
+      await fetch('/select-market', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded', 'Accept':'application/json'}, body, credentials:'same-origin', cache:'no-store'});
+      window.location.reload();
+    } catch (_) {}
+  }
+  function schedule() {
+    clearTimeout(timer);
+    timer = setTimeout(syncSelection, 120);
+  }
+  pair.addEventListener('change', schedule);
+  document.querySelectorAll('.mode-btn').forEach((button) => button.addEventListener('click', () => setTimeout(schedule, 50)));
+})();
+</script>'''
         if "</head>" in html and css not in html:
             html = html.replace("</head>", css + "</head>", 1)
         if "</body>" in html and script not in html:
-            html = html.replace("</body>", script + "</body>", 1)
+            html = html.replace("</body>", sync_script + script + "</body>", 1)
         response.set_data(html)
     return response
 
