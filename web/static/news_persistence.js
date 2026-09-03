@@ -1,6 +1,18 @@
 (() => {
   'use strict';
 
+  // The previous persistence implementation used v3 keys and could restore a
+  // snapshot over the live News hero. Remove those legacy keys before the
+  // deferred candle_timer.js starts, so only this v4 implementation is active.
+  try {
+    const legacy = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('mmc_news_lkg_v3:') || key.startsWith('mmc_news_direction_v3:'))) legacy.push(key);
+    }
+    legacy.forEach((key) => localStorage.removeItem(key));
+  } catch (_) {}
+
   const content = document.getElementById('news-content');
   if (!content) return;
 
@@ -43,11 +55,7 @@
     if (!source || !pair()) return;
     const time = eventTime(source);
     if (!time || !Number.isFinite(Date.parse(time))) return;
-    write(newsKey(), {
-      html: source.outerHTML,
-      eventTime: time,
-      savedAt: Date.now()
-    });
+    write(newsKey(), {html: source.outerHTML, eventTime: time, savedAt: Date.now()});
   }
 
   function restoreNews() {
@@ -56,7 +64,6 @@
     if (!snapshot?.html || !snapshot.eventTime) return;
     const eventMs = Date.parse(snapshot.eventTime);
     if (!Number.isFinite(eventMs) || eventMs < Date.now() - MAX_PAST_MS) return;
-
     const holder = document.createElement('div');
     holder.innerHTML = snapshot.html;
     const node = holder.firstElementChild;
@@ -72,30 +79,26 @@
     const ms = Date.parse(eventTime(node));
     if (!Number.isFinite(ms)) return;
     const seconds = Math.max(0, Math.ceil((ms - Date.now()) / 1000));
-    count.textContent = seconds <= 0
-      ? '⏱ নিউজের নির্ধারিত সময় পার হয়েছে'
-      : `⏱ আর ${Math.floor(seconds / 60)} মিনিট ${seconds % 60} সেকেন্ড`;
+    count.textContent = seconds <= 0 ? '⏱ নিউজের নির্ধারিত সময় পার হয়েছে' : `⏱ আর ${Math.floor(seconds / 60)} মিনিট ${seconds % 60} সেকেন্ড`;
   }
 
   function saveDirection() {
     const source = currentSource();
     if (!source || !pair()) return;
     const time = eventTime(source);
-    const nodes = content.querySelectorAll('#important-news-hero .important-news-direction, #important-news-status .ins-direction');
     let direction = '';
-    nodes.forEach((node) => {
+    content.querySelectorAll('#important-news-hero .important-news-direction, #important-news-status .ins-direction').forEach((node) => {
       const match = (node.textContent || '').match(/\b(UP|DOWN)\b/i);
       if (match) direction = match[1].toUpperCase();
     });
     if (!direction || !time) return;
-    write(directionKey(), { eventTime: time, direction, savedAt: Date.now() });
+    write(directionKey(), {eventTime: time, direction, savedAt: Date.now()});
   }
 
   function applyDirection() {
     const source = currentSource();
     const saved = read(directionKey());
-    if (!source || !saved?.eventTime || !saved.direction) return;
-    if (eventTime(source) !== saved.eventTime) return;
+    if (!source || !saved?.eventTime || !saved.direction || eventTime(source) !== saved.eventTime) return;
     const direction = saved.direction === 'UP' ? 'UP' : saved.direction === 'DOWN' ? 'DOWN' : '';
     if (!direction) return;
     const text = direction === 'UP' ? '⬆ UP — উপরে' : '⬇ DOWN — নিচে';
@@ -108,8 +111,7 @@
   function clearOldDirectionForNewEvent() {
     const source = currentSource();
     const saved = read(directionKey());
-    if (!source || !saved?.eventTime) return;
-    if (eventTime(source) === saved.eventTime) return;
+    if (!source || !saved?.eventTime || eventTime(source) === saved.eventTime) return;
     try { localStorage.removeItem(directionKey()); } catch (_) {}
   }
 
@@ -133,7 +135,7 @@
       window.clearTimeout(timer);
       timer = window.setTimeout(tick, 40);
     });
-    observer.observe(content, { childList: true, subtree: true });
+    observer.observe(content, {childList: true, subtree: true});
   }
   document.getElementById('pair')?.addEventListener('change', () => window.setTimeout(tick, 100));
   document.getElementById('mode')?.addEventListener('change', () => window.setTimeout(tick, 100));
