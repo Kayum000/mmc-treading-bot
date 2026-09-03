@@ -79,14 +79,15 @@ def _load_auto_frames(pair: str, market_mode: str, now_utc: datetime) -> dict:
 
 
 def _load_1m_entry_frame(pair: str, market_mode: str, now_utc: datetime, automatic: bool):
-    """Load 1m data for final entry confirmation.
+    """Load fresh 1m data for every automatic 1-minute entry check.
 
-    Automatic mode refreshes this once per new 5m setup window, keeping the
-    extra 1m request bounded while the selected market remains the only market
-    being analyzed. Manual requests always fetch fresh 1m candles.
+    In automatic mode the 30m/15m/5m MTF frames remain cached on their own
+    candle boundaries, while the selected market's 1m frame is refreshed once
+    per 1-minute period. This keeps the MTF analysis stable while allowing a
+    new 1m entry opportunity to be checked every minute.
     """
     key = (market_mode, pair)
-    current_period = _period_start(now_utc, 300)
+    current_period = _period_start(now_utc, 60)
 
     if automatic:
         with _CACHE_LOCK:
