@@ -102,24 +102,24 @@ def timeframe_components(df: pd.DataFrame, side: str) -> dict[str, bool | str | 
 
 
 def multi_timeframe_score(frames: dict[str, pd.DataFrame], side: str) -> int:
-    """Weight higher timeframe more heavily: 15m=3, 5m=2, 1m=1."""
-    weights = {"15m": 3, "5m": 2, "1m": 1}
+    """Weight higher timeframe more heavily: 30m=3, 15m=2, 5m=1."""
+    weights = {"30m": 3, "15m": 2, "5m": 1}
     return sum(score_timeframe(df, side) * weights.get(tf, 1) for tf, df in frames.items())
 
 
 def confirmation_profile(frames: dict[str, pd.DataFrame], side: str) -> dict:
     """Build a strict but explainable confirmation profile for final signal gating."""
-    parts = {tf: timeframe_components(frames[tf], side) for tf in ("15m", "5m", "1m")}
+    parts = {tf: timeframe_components(frames[tf], side) for tf in ("30m", "15m", "5m")}
     return {
-        "score": sum(parts[tf]["score"] * {"15m": 3, "5m": 2, "1m": 1}[tf] for tf in parts),
+        "score": sum(parts[tf]["score"] * {"30m": 3, "15m": 2, "5m": 1}[tf] for tf in parts),
+        "30m": parts["30m"],
         "15m": parts["15m"],
         "5m": parts["5m"],
-        "1m": parts["1m"],
-        "higher_timeframe_trend": bool(parts["15m"]["trend"] and parts["5m"]["trend"]),
-        "entry_trigger": bool(parts["1m"]["trigger"]),
-        "role_reversal_confirmation": bool(parts["15m"]["role_reversal_ok"] or parts["5m"]["role_reversal_ok"]),
+        "higher_timeframe_trend": bool(parts["30m"]["trend"] and parts["15m"]["trend"]),
+        "entry_trigger": bool(parts["5m"]["trigger"]),
+        "role_reversal_confirmation": bool(parts["30m"]["role_reversal_ok"] or parts["15m"]["role_reversal_ok"]),
         "opposite_structure": bool(
-            parts["15m"]["structure"] == ("bearish_bos" if side == "buy" else "bullish_bos")
-            or parts["5m"]["structure"] == ("bearish_bos" if side == "buy" else "bullish_bos")
+            parts["30m"]["structure"] == ("bearish_bos" if side == "buy" else "bullish_bos")
+            or parts["15m"]["structure"] == ("bearish_bos" if side == "buy" else "bullish_bos")
         ),
     }
