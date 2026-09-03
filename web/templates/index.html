@@ -57,7 +57,7 @@
 </form>
 <div class="auto-row">
   <label class="auto-toggle"><input type="checkbox" id="auto-signal" checked> AUTO SIGNAL</label>
-  <span id="auto-status" class="auto-status">মার্কেট নির্বাচন করলে প্রতি নতুন ৫ মিনিটের ক্যান্ডেলে স্বয়ংক্রিয়ভাবে যাচাই হবে।</span>
+  <span id="auto-status" class="auto-status">মার্কেট নির্বাচন করলে প্রতি নতুন ৫ মিনিটের setup-এ স্বয়ংক্রিয়ভাবে যাচাই হবে।</span>
 </div>
 {% if error %}<p id="server-error"><strong>Error:</strong> {{error}}</p>{% endif %}
 <div id="result-container">
@@ -65,13 +65,13 @@
 <section>
 <h2>{{result.pair}} — {{result.signal}}</h2>
 <div class="entry-box">
-  <div class="entry-title">ENTRY TIME — NEXT 5-MINUTE CANDLE</div>
+  <div class="entry-title">ENTRY TIME — NEXT 1-MINUTE CANDLE</div>
   <div class="entry-time">{{result.entry_time_bd}}</div>
   <div class="countdown-label">ENTRY COUNTDOWN</div>
   <div class="countdown" data-entry-timer data-entry-at="{{result.entry_time_utc}}">00:00</div>
   <div class="price-box"><div class="price-label">ENTRY PRICE</div><div class="price">{{result.entry_price if result.entry_price is not none else 'N/A'}}</div></div>
 </div>
-<div class="details"><p><strong>Timeframe:</strong> {{result.timeframe}}</p><p><strong>Buy score:</strong> {{result.buy_score}}</p><p><strong>Sell score:</strong> {{result.sell_score}}</p><p><strong>কারণ ও বিস্তারিত যাচাই:</strong> {{result.reason}}</p></div>
+<div class="details"><p><strong>Timeframe:</strong> {{result.timeframe}}</p><p><strong>Entry TF:</strong> {{result.entry_timeframe}}</p><p><strong>Buy score:</strong> {{result.buy_score}}</p><p><strong>Sell score:</strong> {{result.sell_score}}</p><p><strong>কারণ ও বিস্তারিত যাচাই:</strong> {{result.reason}}</p></div>
 </section>
 {% endif %}
 </div>
@@ -104,10 +104,10 @@ function setMode(mode,preserveSelection=true){
   updateSignalButton();
 }
 
-function escapeHtml(value){return String(value??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+function escapeHtml(value){return String(value??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));}
 function renderResult(r){
-  const action=escapeHtml(r.signal),pair=escapeHtml(r.pair),entry=escapeHtml(r.entry_time_bd),price=r.entry_price==null?'N/A':escapeHtml(r.entry_price),reason=escapeHtml(r.reason),tf=escapeHtml(r.timeframe);
-  resultContainer.innerHTML=`<section><h2>${pair} — ${action}</h2><div class="entry-box"><div class="entry-title">ENTRY TIME — NEXT 5-MINUTE CANDLE</div><div class="entry-time">${entry}</div><div class="countdown-label">ENTRY COUNTDOWN</div><div class="countdown" data-entry-timer data-entry-at="${escapeHtml(r.entry_time_utc)}">00:00</div><div class="price-box"><div class="price-label">ENTRY PRICE</div><div class="price">${price}</div></div></div><div class="details"><p><strong>Timeframe:</strong> ${tf}</p><p><strong>Buy score:</strong> ${escapeHtml(r.buy_score)}</p><p><strong>Sell score:</strong> ${escapeHtml(r.sell_score)}</p><p><strong>কারণ ও বিস্তারিত যাচাই:</strong> ${reason}</p></div></section>`;
+  const action=escapeHtml(r.signal),pair=escapeHtml(r.pair),entry=escapeHtml(r.entry_time_bd),price=r.entry_price==null?'N/A':escapeHtml(r.entry_price),reason=escapeHtml(r.reason),tf=escapeHtml(r.timeframe),entryTf=escapeHtml(r.entry_timeframe||'1m');
+  resultContainer.innerHTML=`<section><h2>${pair} — ${action}</h2><div class="entry-box"><div class="entry-title">ENTRY TIME — NEXT 1-MINUTE CANDLE</div><div class="entry-time">${entry}</div><div class="countdown-label">ENTRY COUNTDOWN</div><div class="countdown" data-entry-timer data-entry-at="${escapeHtml(r.entry_time_utc)}">00:00</div><div class="price-box"><div class="price-label">ENTRY PRICE</div><div class="price">${price}</div></div></div><div class="details"><p><strong>Timeframe:</strong> ${tf}</p><p><strong>Entry TF:</strong> ${entryTf}</p><p><strong>Buy score:</strong> ${escapeHtml(r.buy_score)}</p><p><strong>Sell score:</strong> ${escapeHtml(r.sell_score)}</p><p><strong>কারণ ও বিস্তারিত যাচাই:</strong> ${reason}</p></div></section>`;
 }
 
 function nextAutoDelayMs(){
@@ -142,7 +142,7 @@ const serverMode=modeInput.value;
 const serverPair={{ pair|tojson }};
 const storedMode=localStorage.getItem(STORAGE_MODE);
 if(!serverMode){setMode(storedMode==='crypto'?'crypto':'real',false);}else{setMode(serverMode,true);if(serverPair&&pairSelect.value!==serverPair){const option=Array.from(pairSelect.options).find(o=>o.dataset.market===serverMode&&o.value===serverPair);if(option)pairSelect.value=serverPair;updateSignalButton();}}
-if(autoToggle.checked&&pairSelect.value){autoStatus.textContent='AUTO SIGNAL চালু — নির্বাচিত মার্কেটের পরবর্তী ৫ মিনিটের ক্যান্ডেলে স্বয়ংক্রিয় যাচাই হবে।';runAutoSignal();}
+if(autoToggle.checked&&pairSelect.value){autoStatus.textContent='AUTO SIGNAL চালু — নির্বাচিত মার্কেটের ৫ মিনিটের setup-এ স্বয়ংক্রিয় যাচাই হবে; Entry হবে পরবর্তী ১ মিনিটের candle-এ।';runAutoSignal();}
 </script>
 <script src="{{ url_for('static', filename='candle_timer.js') }}" defer></script>
 </body>
