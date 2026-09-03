@@ -14,8 +14,8 @@ from urllib.request import Request, urlopen
 
 import pandas as pd
 
-INTERVALS = {"1min": "1m", "5min": "5m", "15min": "15m"}
-_INTERVAL_SECONDS = {"1min": 60, "5min": 300, "15min": 900}
+INTERVALS = {"30min": "30m", "15min": "15m", "5min": "5m"}
+_INTERVAL_SECONDS = {"30min": 1800, "15min": 900, "5min": 300}
 
 _LAST_CREDIT_USAGE = {"used": None, "left": None, "limit": None}
 
@@ -61,7 +61,7 @@ def _closed_candles(df: pd.DataFrame, interval: str) -> pd.DataFrame:
     return df.loc[df["timestamp"] <= cutoff].copy()
 
 
-def fetch_forex_candles(symbol: str, interval: str = "1min", outputsize: int = 200) -> pd.DataFrame:
+def fetch_forex_candles(symbol: str, interval: str = "5min", outputsize: int = 200) -> pd.DataFrame:
     api_key = os.getenv("TWELVE_DATA_API_KEY")
     if not api_key:
         raise RuntimeError("Set TWELVE_DATA_API_KEY in the environment; never commit it to GitHub.")
@@ -109,11 +109,7 @@ def fetch_forex_candles(symbol: str, interval: str = "1min", outputsize: int = 2
 
 
 def fetch_forex_multi_timeframe(symbol: str) -> dict[str, pd.DataFrame]:
-    """Fetch closed 1m/5m/15m candles for the selected pair.
-
-    Requests are intentionally sequential to avoid a burst of three REST
-    requests when the user presses GET SIGNAL, reducing rate-limit pressure.
-    """
+    """Fetch closed 30m/15m/5m candles for the selected pair sequentially."""
     return {
         label: fetch_forex_candles(symbol, interval)
         for interval, label in INTERVALS.items()
