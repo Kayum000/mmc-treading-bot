@@ -3,11 +3,12 @@
 Calendar data is kept separate from Alpha Vantage. The primary calendar export is
 used when it is current; if that public export is stale/empty, a live Forex Factory
 calendar page is used as a fallback. Alpha Vantage is only queried for a high-impact
-event within five minutes, and the resulting direction is cached per event/pair.
+event within five minutes, and the resulting direction is cached per mode/pair/event.
 """
 from __future__ import annotations
 
 import re
+import threading
 from datetime import datetime, timezone, timedelta
 from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
@@ -22,6 +23,7 @@ LIVE_CACHE_TTL_SECONDS = 60
 _LIVE_CACHE = {"events": None, "at": 0.0}
 _LKG_NEWS = {}
 _DIRECTION_CACHE = {}
+_CACHE_LOCK = threading.Lock()
 
 
 class _CalendarParser(HTMLParser):
@@ -66,15 +68,26 @@ class _CalendarParser(HTMLParser):
 
 def _live_html_calendar() -> list[dict]:
     now = datetime.now(timezone.utc)
-    if _LIVE_CACHE["events"] is not None and now.timestamp() - _LIVE_CACHE["at"] < LIVE_CACHE_TTL_SECONDS:
-        return list(_LIVE_CACHE["events"])
-    req = Request(LIVE_CALENDAR_URL, headers={"User-Agent": "Mozilla/5.0 (compatible; mmc-signal-bot/1.0)", "Accept": "text/html,application/xhtml+xml"})
+    with _CACHE_LOCK:
+        cached = list(_LIVE_CACHE["events"] or [])
+        cached_at = _LIVE_CACHE["at"]
+    if cached and now.timestamp() - cached_at < LIVE_CACHE_TTL_SECONDS:
+        return cached
+
+    req = Request(
+        LIVE_CALENDAR_URL,
+        headers={
+            "User-Agent": "Mozilla/5.0 (compatible; mmc-signal-bot/1.0)",
+            "Accept": "text/html,application/xhtml+xml",
+        },
+    )
     with urlopen(req, timeout=12) as response:
         html = response.read().decode("utf-8", errors="replace")
     parser = _CalendarParser()
     parser.feed(html)
     if not parser.rows:
-        return list(_LIVE_CACHE["events"] or [])
+        return cached
+
     page_tz = ZoneInfo("Europe/London")
     current_year = now.year
     current_date = None
@@ -107,12 +120,23 @@ def _live_html_calendar() -> list[dict]:
         impact = "high" if "high" in impact_text else "medium" if ("medium" in impact_text or "med" in impact_text) else "low"
         currency = row.get("currency", "").upper()
         title = row.get("event", "").strip()
-        events.append({"id": f"{dt.isoformat()}|{currency}|{title}", "time_utc": dt, "currency": currency, "title": title, "title_bn": title, "impact": impact, "forecast": row.get("forecast", ""), "previous": row.get("previous", ""), "actual": row.get("actual", "")})
+        events.append({
+            "id": f"{dt.isoformat()}|{currency}|{title}",
+            "time_utc": dt,
+            "currency": currency,
+            "title": title,
+            "title_bn": title,
+            "impact": impact,
+            "forecast": row.get("forecast", ""),
+            "previous": row.get("previous", ""),
+            "actual": row.get("actual", ""),
+        })
     events.sort(key=lambda x: x["time_utc"])
     if events:
-        _LIVE_CACHE["events"] = list(events)
-        _LIVE_CACHE["at"] = now.timestamp()
-    return list(events or _LIVE_CACHE["events"] or [])
+        with _CACHE_LOCK:
+            _LIVE_CACHE["events"] = list(events)
+            _LIVE_CACHE["at"] = now.timestamp()
+    return list(events or cached)
 
 
 def _calendar_events_current() -> tuple[list[dict], str]:
@@ -148,8 +172,13 @@ def _payload_events(source_events: list[dict], currencies: set[str], selected_pa
     return events
 
 
+def _lkg_key(market_mode: str, selected_pair: str) -> tuple[str, str]:
+    return market_mode.lower(), selected_pair.upper()
+
+
 def get_weekly_news_events_for_pair(market_mode: str, real_pairs: list[str], crypto_pairs: list[str], selected_pair: str) -> dict:
     now = datetime.now(timezone.utc)
+    market_mode = market_mode.lower()
     selected_pair = selected_pair.upper()
     pairs = list(crypto_pairs if market_mode == "crypto" else real_pairs)
     if selected_pair not in {p.upper() for p in pairs}:
@@ -157,37 +186,55 @@ def get_weekly_news_events_for_pair(market_mode: str, real_pairs: list[str], cry
     currencies = _relevant_currencies(selected_pair, market_mode)
     source_events, source_name = _calendar_events_current()
     events = _payload_events(source_events, currencies, selected_pair, now)
+    key = _lkg_key(market_mode, selected_pair)
 
     if events:
         nearest = events[0]
-        previous = _LKG_NEWS.get(selected_pair)
-        if previous is None or nearest.get("id") != previous.get("id"):
-            _LKG_NEWS[selected_pair] = dict(nearest)
-    elif selected_pair in _LKG_NEWS:
-        events = [dict(_LKG_NEWS[selected_pair])]
-        source_name = "Last Known Good News (Forex Factory)"
+        with _CACHE_LOCK:
+            previous = _LKG_NEWS.get(key)
+            if previous is None or nearest.get("id") != previous.get("id"):
+                _LKG_NEWS[key] = dict(nearest)
+    else:
+        with _CACHE_LOCK:
+            saved = dict(_LKG_NEWS.get(key) or {})
+        if saved:
+            events = [saved]
+            source_name = "Last Known Good News (Forex Factory)"
 
+    with _CACHE_LOCK:
+        has_lkg = key in _LKG_NEWS
     return {
-        "ok": True, "market_mode": market_mode, "selected_pair": selected_pair,
-        "checked_at_utc": now.isoformat(timespec="seconds"), "alert_window_minutes": 5,
-        "alert_events": [e for e in events if e.get("five_minute_alert")], "events": events,
-        "total_events": len(events), "total_pairs": 1, "source": source_name,
+        "ok": True,
+        "market_mode": market_mode,
+        "selected_pair": selected_pair,
+        "checked_at_utc": now.isoformat(timespec="seconds"),
+        "alert_window_minutes": 5,
+        "alert_events": [e for e in events if e.get("five_minute_alert")],
+        "events": events,
+        "total_events": len(events),
+        "total_pairs": 1,
+        "source": source_name,
         "alpha_vantage": {"called": False, "reason_bn": "News Events দেখানোর জন্য Alpha Vantage কল করা হয়নি।"},
-        "last_known_good": bool(selected_pair in _LKG_NEWS),
+        "last_known_good": has_lkg,
         "note_bn": "সপ্তাহের নির্ধারিত Forex/market news এখানে দেখানো হচ্ছে। সাময়িক source সমস্যা হলে Last Known Good News রাখা হবে। News Direction দরকার হলে আলাদা করে Alpha Vantage sentiment নেওয়া হবে।",
     }
 
 
 def get_news_direction_for_pair(market_mode: str, real_pairs: list[str], crypto_pairs: list[str], selected_pair: str) -> dict:
+    market_mode = market_mode.lower()
     selected_pair = selected_pair.upper()
     now = datetime.now(timezone.utc)
     data = get_weekly_news_events_for_pair(market_mode, real_pairs, crypto_pairs, selected_pair)
-    direction_event = next((e for e in data.get("events", []) if e.get("impact") == "high" and 0 <= float(e.get("minutes_to_event") or 0) <= 5.0), None)
+    direction_event = next(
+        (e for e in data.get("events", []) if e.get("impact") == "high" and 0 <= float(e.get("minutes_to_event") or 0) <= 5.0),
+        None,
+    )
     if direction_event is None:
         return {"ok": True, "needed": False, "pair": selected_pair, "events": []}
 
-    event_key = f"{selected_pair}|{direction_event.get('event_time_utc')}"
-    cached = _DIRECTION_CACHE.get(event_key)
+    event_key = f"{market_mode}|{selected_pair}|{direction_event.get('event_time_utc')}"
+    with _CACHE_LOCK:
+        cached = _DIRECTION_CACHE.get(event_key)
     if cached is not None:
         return dict(cached)
 
@@ -209,12 +256,31 @@ def get_news_direction_for_pair(market_mode: str, real_pairs: list[str], crypto_
                 direction = "WAIT"
             basis = f"{currency} sentiment {'ইতিবাচক' if positive else 'নেতিবাচক'}; নির্বাচিত pair-এর currency অবস্থান অনুযায়ী দিক নির্ধারণ করা হয়েছে।"
         event = dict(direction_event)
-        event.update({"direction": direction, "direction_basis_bn": basis, "news_sentiment": sentiment, "selected_pair": selected_pair, "checked_at_utc": now.isoformat(timespec="seconds")})
+        event.update({
+            "direction": direction,
+            "direction_basis_bn": basis,
+            "news_sentiment": sentiment,
+            "selected_pair": selected_pair,
+            "checked_at_utc": now.isoformat(timespec="seconds"),
+        })
         result = {"ok": True, "needed": True, "pair": selected_pair, "event": event, "source": "Alpha Vantage NEWS_SENTIMENT"}
     except Exception as exc:
         event = dict(direction_event)
-        event.update({"direction": "WAIT", "direction_basis_bn": "Alpha Vantage সাময়িকভাবে পাওয়া যায়নি; একই নিউজের জন্য আবার request করা হবে না।", "selected_pair": selected_pair, "checked_at_utc": now.isoformat(timespec="seconds")})
-        result = {"ok": True, "needed": True, "pair": selected_pair, "event": event, "source": "Alpha Vantage NEWS_SENTIMENT", "alpha_vantage_error": str(exc)}
+        event.update({
+            "direction": "WAIT",
+            "direction_basis_bn": "Alpha Vantage সাময়িকভাবে পাওয়া যায়নি; একই নিউজের জন্য পুনরায় Alpha Vantage request করা হবে না।",
+            "selected_pair": selected_pair,
+            "checked_at_utc": now.isoformat(timespec="seconds"),
+        })
+        result = {
+            "ok": True,
+            "needed": True,
+            "pair": selected_pair,
+            "event": event,
+            "source": "Alpha Vantage NEWS_SENTIMENT",
+            "alpha_vantage_error": str(exc),
+        }
 
-    _DIRECTION_CACHE[event_key] = dict(result)
+    with _CACHE_LOCK:
+        _DIRECTION_CACHE[event_key] = dict(result)
     return result
