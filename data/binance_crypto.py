@@ -9,8 +9,8 @@ from urllib.request import Request, urlopen
 
 import pandas as pd
 
-INTERVALS = {"30m": "30m", "15m": "15m", "5m": "5m"}
-_INTERVAL_SECONDS = {"30m": 1800, "15m": 900, "5m": 300}
+INTERVALS = {"30m": "30m", "15m": "15m", "5m": "5m", "1m": "1m"}
+_INTERVAL_SECONDS = {"30m": 1800, "15m": 900, "5m": 300, "1m": 60}
 BINANCE_BASE_URLS = (
     "https://data-api.binance.vision",
     "https://api-gcp.binance.com",
@@ -79,4 +79,4 @@ def fetch_crypto_candles(symbol: str, interval: str = "5m", limit: int = 200) ->
 
 def fetch_crypto_multi_timeframe(symbol: str) -> dict[str, pd.DataFrame]:
     """Fetch closed 30m/15m/5m candles for the selected crypto pair."""
-    return {label: fetch_crypto_candles(symbol, interval) for interval, label in INTERVALS.items()}
+    return {label: fetch_crypto_candles(symbol, interval) for label in ("30m", "15m", "5m")}
