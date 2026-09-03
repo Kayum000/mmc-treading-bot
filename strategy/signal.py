@@ -40,7 +40,7 @@ def _diagnostic_reason(profile: dict, side: str) -> str:
     ]
     failed = [item for item in checks if "মেলেনি" in item]
     status = "সব চূড়ান্ত কাঠামোগত শর্ত পূরণ হয়েছে, কিন্তু অন্য দিকও একইভাবে বৈধ হওয়ায় দিকটি পরিষ্কার নয়।" if not failed else "যে কাঠামোগত শর্তগুলোতে সমস্যা হয়েছে: " + "; ".join(failed) + "."
-    return "MTF স্কোর গেট OFF। বিস্তারিত যাচাই — " + " | ".join(checks) + "। " + status
+    return "বহু-সময়সীমার স্কোরের বাধা বন্ধ আছে। বিস্তারিত যাচাই — " + " | ".join(checks) + "। " + status
 
 
 def generate_signal(frames: dict[str, pd.DataFrame]) -> Signal:
@@ -64,34 +64,29 @@ def generate_signal(frames: dict[str, pd.DataFrame]) -> Signal:
             "BUY",
             buy,
             sell,
-            "বুলিশ MMC: ৩০ মিনিট ও ১৫ মিনিটের বাজারের দিক ঊর্ধ্বমুখী এবং একমত। আগের প্রতিরোধের স্তর ভেঙে দাম আবার সেই স্তরে ফিরে এসে সেটিকে সমর্থন হিসেবে ধরে রেখেছে। ৫ মিনিটে কেনার প্রবেশের সংকেতও নিশ্চিত হয়েছে। MTF স্কোর গেট বর্তমানে OFF; স্কোর শুধু তথ্য হিসেবে দেখানো হচ্ছে।",
+            "বুলিশ এমএমসি: ৩০ মিনিট ও ১৫ মিনিটের বাজারের দিক ঊর্ধ্বমুখী এবং একমত। আগের প্রতিরোধের স্তর ভেঙে দাম আবার সেই স্তরে ফিরে এসে সেটিকে সমর্থন হিসেবে ধরে রেখেছে। ৫ মিনিটে কেনার প্রবেশের সংকেতও নিশ্চিত হয়েছে। বহু-সময়সীমার স্কোর এখন সিদ্ধান্তের বাধা নয়; স্কোর শুধু তথ্য হিসেবে দেখানো হচ্ছে।",
         )
     if sell_valid and not buy_valid:
         return Signal(
             "SELL",
             buy,
             sell,
-            "বেয়ারিশ MMC: ৩০ মিনিট ও ১৫ মিনিটের বাজারের দিক নিম্নমুখী এবং একমত। আগের সমর্থনের স্তর ভেঙে দাম আবার সেই স্তরে ফিরে এসে সেটিকে প্রতিরোধ হিসেবে ধরে রেখেছে। ৫ মিনিটে বিক্রির প্রবেশের সংকেতও নিশ্চিত হয়েছে। MTF স্কোর গেট বর্তমানে OFF; স্কোর শুধু তথ্য হিসেবে দেখানো হচ্ছে।",
+            "বেয়ারিশ এমএমসি: ৩০ মিনিট ও ১৫ মিনিটের বাজারের দিক নিম্নমুখী এবং একমত। আগের সমর্থনের স্তর ভেঙে দাম আবার সেই স্তরে ফিরে এসে সেটিকে প্রতিরোধ হিসেবে ধরে রেখেছে। ৫ মিনিটে বিক্রির প্রবেশের সংকেতও নিশ্চিত হয়েছে। বহু-সময়সীমার স্কোর এখন সিদ্ধান্তের বাধা নয়; স্কোর শুধু তথ্য হিসেবে দেখানো হচ্ছে।",
         )
     if buy_valid and sell_valid:
-        return Signal("NO_TRADE", buy, sell, "MTF স্কোর গেট OFF, কিন্তু BUY ও SELL—দুই দিকের কাঠামোগত শর্তই একসঙ্গে বৈধ হয়েছে; তাই দ্ব্যর্থক অবস্থায় ট্রেড দেওয়া হয়নি।")
+        return Signal("NO_TRADE", buy, sell, "বহু-সময়সীমার স্কোর সিদ্ধান্তের বাধা নয়, কিন্তু কেনা ও বিক্রি—দুই দিকের কাঠামোগত শর্তই একসঙ্গে বৈধ হয়েছে; তাই দ্ব্যর্থক অবস্থায় ট্রেড দেওয়া হয়নি।")
 
     diagnostic = _diagnostic_reason(buy_profile, "buy") if buy >= sell else _diagnostic_reason(sell_profile, "sell")
     return Signal("NO_TRADE", buy, sell, diagnostic)
 
 
 def generate_1m_signal(df: pd.DataFrame) -> Signal:
-    """Pure 1-minute MMC entry strategy; higher timeframes are not required.
-
-    Direction comes from the 1m EMA trend. The entry needs recent structure
-    evidence (BOS or liquidity sweep) plus a live impulse/rejection trigger.
-    Scores are informational only and are never used as a gate.
-    """
+    """Pure 1-minute MMC entry strategy; higher timeframes are not required."""
     if df is None or df.empty:
-        return Signal("NO_TRADE", 0, 0, "১ মিনিটের বাজার ডেটা পাওয়া যায়নি।")
+        return Signal("NO_TRADE", 0, 0, "১ মিনিটের বাজারের তথ্য পাওয়া যায়নি।")
 
     if len(df) < max(CONFIG.trend_ema, CONFIG.sweep_lookback + 1):
-        return Signal("NO_TRADE", 0, 0, "১ মিনিটের EMA ও কাঠামো যাচাই করার জন্য পর্যাপ্ত ক্যান্ডেল নেই।")
+        return Signal("NO_TRADE", 0, 0, "১ মিনিটের প্রবণতা ও বাজারের কাঠামো যাচাই করার জন্য পর্যাপ্ত ক্যান্ডেল পাওয়া যায়নি।")
 
     work = df.copy()
     work["ema_fast"] = work["close"].ewm(span=CONFIG.fast_ema, adjust=False).mean()
@@ -118,20 +113,20 @@ def generate_1m_signal(df: pd.DataFrame) -> Signal:
     sell_valid = sell_trend and sell_structure and sell_trigger
 
     if buy_valid and not sell_valid:
-        return Signal("BUY", buy_score, sell_score, "১ মিনিটের MMC: EMA trend bullish, market structure/liquidity confirmation bullish এবং শেষ বন্ধ ১ মিনিটের ক্যান্ডেলে bullish entry trigger নিশ্চিত। MTF ৩০m/১৫m/৫m ব্যবহার করা হচ্ছে না; স্কোর শুধু তথ্য হিসেবে দেখানো হচ্ছে।")
+        return Signal("BUY", buy_score, sell_score, "১ মিনিটের এমএমসি: স্বল্পমেয়াদি প্রবণতা ঊর্ধ্বমুখী, বাজারের কাঠামো বা তারল্য সংগ্রহের নিশ্চিতকরণও ঊর্ধ্বমুখী, এবং সর্বশেষ সম্পূর্ণ বন্ধ হওয়া ১ মিনিটের ক্যান্ডেলে কেনার প্রবেশ-সংকেত নিশ্চিত হয়েছে। ৩০, ১৫ ও ৫ মিনিটের তথ্য এখানে ব্যবহার করা হচ্ছে না; স্কোর শুধু তথ্য হিসেবে দেখানো হচ্ছে।")
     if sell_valid and not buy_valid:
-        return Signal("SELL", buy_score, sell_score, "১ মিনিটের MMC: EMA trend bearish, market structure/liquidity confirmation bearish এবং শেষ বন্ধ ১ মিনিটের ক্যান্ডেলে bearish entry trigger নিশ্চিত। MTF ৩০m/১৫m/৫m ব্যবহার করা হচ্ছে না; স্কোর শুধু তথ্য হিসেবে দেখানো হচ্ছে।")
+        return Signal("SELL", buy_score, sell_score, "১ মিনিটের এমএমসি: স্বল্পমেয়াদি প্রবণতা নিম্নমুখী, বাজারের কাঠামো বা তারল্য সংগ্রহের নিশ্চিতকরণও নিম্নমুখী, এবং সর্বশেষ সম্পূর্ণ বন্ধ হওয়া ১ মিনিটের ক্যান্ডেলে বিক্রির প্রবেশ-সংকেত নিশ্চিত হয়েছে। ৩০, ১৫ ও ৫ মিনিটের তথ্য এখানে ব্যবহার করা হচ্ছে না; স্কোর শুধু তথ্য হিসেবে দেখানো হচ্ছে।")
     if buy_valid and sell_valid:
-        return Signal("NO_TRADE", buy_score, sell_score, "১ মিনিটে BUY ও SELL—দুই দিকের শর্ত একসঙ্গে বৈধ; তাই দ্ব্যর্থক অবস্থায় ট্রেড দেওয়া হয়নি।")
+        return Signal("NO_TRADE", buy_score, sell_score, "১ মিনিটে কেনা ও বিক্রি—দুই দিকের শর্ত একসঙ্গে বৈধ হয়েছে; তাই দিক পরিষ্কার না হওয়ায় কোনো ট্রেড দেওয়া হয়নি।")
 
     failed = []
     if not (buy_trend or sell_trend):
-        failed.append("EMA trend পরিষ্কার নয়")
+        failed.append("স্বল্পমেয়াদি প্রবণতা পরিষ্কার নয়")
     if not (buy_structure or sell_structure):
-        failed.append("BOS/liquidity confirmation নেই")
+        failed.append("বাজারের কাঠামো বা তারল্য সংগ্রহের নিশ্চিতকরণ নেই")
     if not (buy_trigger or sell_trigger):
-        failed.append("displacement/rejection trigger নেই")
-    return Signal("NO_TRADE", buy_score, sell_score, "১ মিনিটের MMC-তে এখনো বৈধ setup নেই: " + "; ".join(failed) + ".")
+        failed.append("দাম দ্রুত সরে যাওয়া বা প্রত্যাখ্যানের প্রবেশ-সংকেত নেই")
+    return Signal("NO_TRADE", buy_score, sell_score, "১ মিনিটের এমএমসিতে এখনো বৈধ সেটআপ নেই: " + "; ".join(failed) + ".")
 
 
 def confirm_1m_entry(signal: Signal, df_1m: pd.DataFrame) -> Signal:
@@ -139,7 +134,7 @@ def confirm_1m_entry(signal: Signal, df_1m: pd.DataFrame) -> Signal:
     if signal.action not in {"BUY", "SELL"}:
         return signal
     if df_1m is None or df_1m.empty:
-        return Signal(signal.action, signal.buy_score, signal.sell_score, signal.reason + " ১ মিনিটের প্রবেশ যাচাইয়ের জন্য ডেটা পাওয়া যায়নি; ট্রেড বাতিল করা হয়েছে।")
+        return Signal(signal.action, signal.buy_score, signal.sell_score, signal.reason + " ১ মিনিটের প্রবেশ যাচাইয়ের জন্য তথ্য পাওয়া যায়নি; ট্রেড বাতিল করা হয়েছে।")
 
     side = "buy" if signal.action == "BUY" else "sell"
     bos = market_structure(df_1m, lookback=3)
@@ -155,12 +150,12 @@ def confirm_1m_entry(signal: Signal, df_1m: pd.DataFrame) -> Signal:
             signal.action,
             signal.buy_score,
             signal.sell_score,
-            signal.reason + " ১ মিনিটের শেষ বন্ধ ক্যান্ডেলেও একই দিকের প্রবেশ ট্রিগার নিশ্চিত হয়েছে; পরবর্তী ১ মিনিটের ক্যান্ডেল এন্ট্রির জন্য প্রস্তুত।",
+            signal.reason + " সর্বশেষ সম্পূর্ণ বন্ধ হওয়া ১ মিনিটের ক্যান্ডেলেও একই দিকের প্রবেশ-সংকেত নিশ্চিত হয়েছে; পরবর্তী ১ মিনিটের ক্যান্ডেলে প্রবেশের জন্য প্রস্তুত।",
         )
 
     return Signal(
         "NO_TRADE",
         signal.buy_score,
         signal.sell_score,
-        signal.reason + " ১ মিনিটের শেষ বন্ধ ক্যান্ডেলে একই দিকের BOS, liquidity sweep/reclaim বা displacement নিশ্চিত হয়নি; তাই পরবর্তী ১ মিনিটের ক্যান্ডেলে এন্ট্রি দেওয়া হয়নি।",
+        signal.reason + " সর্বশেষ সম্পূর্ণ বন্ধ হওয়া ১ মিনিটের ক্যান্ডেলে একই দিকের বাজার ভাঙন, তারল্য সংগ্রহ ও পুনরুদ্ধার, অথবা দ্রুত মূল্য-চলন নিশ্চিত হয়নি; তাই পরবর্তী ১ মিনিটের ক্যান্ডেলে প্রবেশ দেওয়া হয়নি।",
     )
