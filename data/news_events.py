@@ -2,8 +2,8 @@
 
 Calendar data is kept separate from Alpha Vantage. The live Forex Factory
 calendar is preferred because the public weekly export can lag; the weekly
-export remains a backup. Alpha Vantage is used for high-impact pre-news
-sentiment and the resulting direction is cached per mode/pair/event.
+export remains a backup. Alpha Vantage is used for pre-news sentiment and
+the resulting direction is cached per mode/pair/event.
 """
 from __future__ import annotations
 
@@ -203,38 +203,67 @@ def get_weekly_news_events_for_pair(market_mode: str, real_pairs: list[str], cry
     return {"ok": True, "market_mode": market_mode, "selected_pair": selected_pair, "checked_at_utc": now.isoformat(timespec="seconds"), "alert_window_minutes": 5, "alert_events": [e for e in events if e.get("five_minute_alert")], "events": events, "total_events": len(events), "total_pairs": 1, "source": source_name, "alpha_vantage": {"called": False, "reason_bn": "News Events দেখানোর জন্য Alpha Vantage কল করা হয়নি।"}, "last_known_good": has_lkg, "note_bn": "সপ্তাহের নির্ধারিত Forex/market news এখানে দেখানো হচ্ছে। সাময়িক source সমস্যা হলে Last Known Good News রাখা হবে। Pre-News Direction দরকার হলে Alpha Vantage sentiment আলাদা cached request হিসেবে ব্যবহার হবে।"}
 
 
-def _direction_from_sentiment(selected_pair: str, event_currency: str, sentiment: dict) -> tuple[str, str]:
+def _direction_confidence(score: float, direction: str) -> tuple[int, str]:
+    """Convert Alpha Vantage sentiment strength into a conservative confidence %."""
+    magnitude = min(abs(float(score or 0.0)), 1.0)
+    if direction == "WAIT":
+        confidence = round(max(35.0, 50.0 - magnitude * 25.0))
+        return confidence, "কম"
+    confidence = round(50.0 + magnitude * 45.0)
+    if confidence >= 80:
+        label = "উচ্চ"
+    elif confidence >= 65:
+        label = "মাঝারি"
+    else:
+        label = "কম"
+    return confidence, label
+
+
+def _direction_from_sentiment(selected_pair: str, event_currency: str, sentiment: dict) -> tuple[str, str, int, str]:
     score = float(sentiment.get("score") or 0.0)
     if abs(score) < 0.15:
-        return "WAIT", "Alpha Vantage sentiment যথেষ্ট bullish/bearish নয়; pre-news bias নিশ্চিত নয়।"
+        direction = "WAIT"
+        basis = "Alpha Vantage sentiment যথেষ্ট bullish/bearish নয়; pre-news bias নিশ্চিত নয়।"
+        confidence, label = _direction_confidence(score, direction)
+        return direction, basis, confidence, label
     parts = selected_pair.upper().split("/", 1)
     base, quote = parts if len(parts) == 2 else (parts[0], "USD")
     currency = str(event_currency or "").upper()
     positive = score > 0
     if currency == base:
-        return ("UP" if positive else "DOWN"), f"{currency} sentiment {'ইতিবাচক' if positive else 'নেতিবাচক'}; এটি pair-এর base currency।"
-    if currency == quote:
-        return ("DOWN" if positive else "UP"), f"{currency} sentiment {'ইতিবাচক' if positive else 'নেতিবাচক'}; এটি pair-এর quote currency।"
-    return "WAIT", "নিউজের currency নির্বাচিত pair-এর সঙ্গে সরাসরি মেলে না।"
+        direction = "UP" if positive else "DOWN"
+        basis = f"{currency} sentiment {'ইতিবাচক' if positive else 'নেতিবাচক'}; এটি pair-এর base currency।"
+    elif currency == quote:
+        direction = "DOWN" if positive else "UP"
+        basis = f"{currency} sentiment {'ইতিবাচক' if positive else 'নেতিবাচক'}; এটি pair-এর quote currency।"
+    else:
+        direction = "WAIT"
+        basis = "নিউজের currency নির্বাচিত pair-এর সঙ্গে সরাসরি মেলে না।"
+    confidence, label = _direction_confidence(score, direction)
+    return direction, basis, confidence, label
 
 
 def get_news_direction_for_pair(market_mode: str, real_pairs: list[str], crypto_pairs: list[str], selected_pair: str) -> dict:
-    """Return pre-news direction for the upcoming high-impact events.
+    """Return pre-news direction for upcoming High/Medium/Low impact events.
 
-    The schedule comes from the calendar and the directional bias from one
-    cached Alpha Vantage NEWS_SENTIMENT response, avoiding a request per event.
+    The event schedule/impact/time comes from the economic calendar. The
+    directional bias and confidence are derived from one cached Alpha Vantage
+    NEWS_SENTIMENT response, avoiding a request per event.
     """
     market_mode = market_mode.lower()
     selected_pair = selected_pair.upper()
     now = datetime.now(timezone.utc)
     data = get_weekly_news_events_for_pair(market_mode, real_pairs, crypto_pairs, selected_pair)
-    upcoming = [e for e in data.get("events", []) if e.get("impact") == "high" and float(e.get("minutes_to_event") or 0) >= 0][:8]
+    upcoming = [e for e in data.get("events", []) if e.get("impact") in {"high", "medium", "low"} and float(e.get("minutes_to_event") or 0) >= 0][:8]
     if not upcoming:
         return {"ok": True, "needed": False, "pair": selected_pair, "events": [], "source": "Alpha Vantage NEWS_SENTIMENT"}
     try:
         sentiment = pair_sentiment(selected_pair, market_mode, fetch_news_sentiment())
     except Exception as exc:
-        return {"ok": True, "needed": True, "pair": selected_pair, "events": [{**e, "direction": "WAIT", "direction_basis_bn": "Alpha Vantage সাময়িকভাবে পাওয়া যায়নি; direction নিশ্চিত নয়।"} for e in upcoming], "source": "Alpha Vantage NEWS_SENTIMENT", "alpha_vantage_error": str(exc)}
+        fallback = []
+        for event in upcoming:
+            fallback.append({**event, "direction": "WAIT", "confidence_pct": 35, "confidence_label_bn": "কম", "direction_basis_bn": "Alpha Vantage সাময়িকভাবে পাওয়া যায়নি; direction নিশ্চিত নয়।"})
+        return {"ok": True, "needed": True, "pair": selected_pair, "events": fallback, "source": "Alpha Vantage NEWS_SENTIMENT", "alpha_vantage_error": str(exc)}
     enriched = []
     for event in upcoming:
         event_key = f"{market_mode}|{selected_pair}|{event.get('event_time_utc')}|{event.get('currency')}|{event.get('title_bn')}"
@@ -243,10 +272,20 @@ def get_news_direction_for_pair(market_mode: str, real_pairs: list[str], crypto_
         if cached:
             enriched.append(dict(cached))
             continue
-        direction, basis = _direction_from_sentiment(selected_pair, event.get("currency"), sentiment)
+        direction, basis, confidence, confidence_label = _direction_from_sentiment(selected_pair, event.get("currency"), sentiment)
         enriched_event = dict(event)
-        enriched_event.update({"direction": direction, "direction_basis_bn": basis, "news_sentiment": sentiment, "selected_pair": selected_pair, "checked_at_utc": now.isoformat(timespec="seconds"), "direction_phase": "PRE-NEWS", "direction_label_bn": "⬆ UP — উপরে" if direction == "UP" else "⬇ DOWN — নিচে" if direction == "DOWN" else "⏸ WAIT — নিশ্চিত নয়"})
+        enriched_event.update({
+            "direction": direction,
+            "confidence_pct": confidence,
+            "confidence_label_bn": confidence_label,
+            "direction_basis_bn": basis,
+            "news_sentiment": sentiment,
+            "selected_pair": selected_pair,
+            "checked_at_utc": now.isoformat(timespec="seconds"),
+            "direction_phase": "PRE-NEWS",
+            "direction_label_bn": f"⬆ UP — উপরে ({confidence}%)" if direction == "UP" else f"⬇ DOWN — নিচে ({confidence}%)" if direction == "DOWN" else f"⏸ WAIT — নিশ্চিত নয় ({confidence}%)",
+        })
         with _CACHE_LOCK:
             _DIRECTION_CACHE[event_key] = dict(enriched_event)
         enriched.append(enriched_event)
-    return {"ok": True, "needed": True, "pair": selected_pair, "events": enriched, "event": enriched[0], "source": "Alpha Vantage NEWS_SENTIMENT", "alpha_vantage_cached": True, "note_bn": "এগুলো PRE-NEWS সম্ভাব্য bias; actual news result/price reaction বদলে দিতে পারে।"}
+    return {"ok": True, "needed": True, "pair": selected_pair, "events": enriched, "event": enriched[0], "source": "Alpha Vantage NEWS_SENTIMENT", "alpha_vantage_cached": True, "note_bn": "Direction ও confidence Alpha Vantage news sentiment-এর strength থেকে হিসাব করা PRE-NEWS সম্ভাব্য bias; actual news result/price reaction বদলে দিতে পারে। নিউজের সময়/impact economic calendar থেকে আসে।"}
