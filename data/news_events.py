@@ -2,8 +2,8 @@
 
 Calendar data is kept separate from Alpha Vantage. The primary calendar export is
 used when it is current; if that public export is stale/empty, a live Forex Factory
-calendar page is used as a fallback. Alpha Vantage is only queried by the explicit
-news-direction helper when a high-impact event is within five minutes.
+calendar page is used as a fallback. Alpha Vantage is only queried for a high-impact
+event within five minutes, and the resulting direction is cached per event/pair.
 """
 from __future__ import annotations
 
@@ -20,6 +20,11 @@ from data.alpha_vantage_news import fetch_news_sentiment, pair_sentiment
 LIVE_CALENDAR_URL = "https://calendar.forexfactory.com/calendar"
 LIVE_CACHE_TTL_SECONDS = 60
 _LIVE_CACHE = {"events": None, "at": 0.0}
+# Last known good nearest event, keyed by selected market pair.
+_LKG_NEWS = {}
+# Direction is cached by pair + event UTC, so the same event cannot trigger
+# repeated Alpha Vantage calls during the event window.
+_DIRECTION_CACHE = {}
 
 
 class _CalendarParser(HTMLParser):
@@ -132,7 +137,7 @@ def _live_html_calendar() -> list[dict]:
 def _calendar_events_current() -> tuple[list[dict], str]:
     now = datetime.now(timezone.utc)
     try:
-        # Respect news_calendar's cache; do not force a source download on every dashboard request.
+        # Respect news_calendar's cache; do not force a source download on every request.
         events = fetch_calendar()
     except Exception:
         events = []
@@ -148,14 +153,7 @@ def _calendar_events_current() -> tuple[list[dict], str]:
     return events, "Forex Factory weekly economic calendar"
 
 
-def get_weekly_news_events_for_pair(market_mode: str, real_pairs: list[str], crypto_pairs: list[str], selected_pair: str) -> dict:
-    now = datetime.now(timezone.utc)
-    selected_pair = selected_pair.upper()
-    pairs = list(crypto_pairs if market_mode == "crypto" else real_pairs)
-    if selected_pair not in {p.upper() for p in pairs}:
-        return {"ok": False, "selected_pair": selected_pair, "events": [], "alert_events": [], "error": "অবৈধ মার্কেট।"}
-    currencies = _relevant_currencies(selected_pair, market_mode)
-    source_events, source_name = _calendar_events_current()
+def _payload_events(source_events: list[dict], currencies: set[str], selected_pair: str, now: datetime) -> list[dict]:
     events = []
     for event in source_events:
         if event["time_utc"] < now - timedelta(minutes=1) or event["currency"] not in currencies:
@@ -167,13 +165,41 @@ def get_weekly_news_events_for_pair(market_mode: str, real_pairs: list[str], cry
         payload["news_sentiment"] = {"available": False, "label_bn": "দিকের জন্য আলাদা বিশ্লেষণ প্রয়োজন", "score": 0.0, "articles": 0, "pairs": [selected_pair]}
         events.append(payload)
     events.sort(key=lambda e: e["event_time_utc"])
+    return events
+
+
+def get_weekly_news_events_for_pair(market_mode: str, real_pairs: list[str], crypto_pairs: list[str], selected_pair: str) -> dict:
+    now = datetime.now(timezone.utc)
+    selected_pair = selected_pair.upper()
+    pairs = list(crypto_pairs if market_mode == "crypto" else real_pairs)
+    if selected_pair not in {p.upper() for p in pairs}:
+        return {"ok": False, "selected_pair": selected_pair, "events": [], "alert_events": [], "error": "অবৈধ মার্কেট।"}
+
+    currencies = _relevant_currencies(selected_pair, market_mode)
+    source_events, source_name = _calendar_events_current()
+    events = _payload_events(source_events, currencies, selected_pair, now)
+
+    # Store the nearest valid event as Last Known Good. If a later request returns
+    # empty/stale data, keep this event visible instead of making the UI blank.
+    if events:
+        nearest = events[0]
+        previous = _LKG_NEWS.get(selected_pair)
+        # Only replace with a genuinely newer/different event; never downgrade a
+        # known-good event because a transient source response is empty.
+        if previous is None or nearest.get("event_time_utc") >= previous.get("event_time_utc"):
+            _LKG_NEWS[selected_pair] = dict(nearest)
+    elif selected_pair in _LKG_NEWS:
+        events = [dict(_LKG_NEWS[selected_pair])]
+        source_name = "Last Known Good News (Forex Factory)"
+
     return {
         "ok": True, "market_mode": market_mode, "selected_pair": selected_pair,
         "checked_at_utc": now.isoformat(timespec="seconds"), "alert_window_minutes": 5,
         "alert_events": [e for e in events if e.get("five_minute_alert")], "events": events,
         "total_events": len(events), "total_pairs": 1, "source": source_name,
         "alpha_vantage": {"called": False, "reason_bn": "News Events দেখানোর জন্য Alpha Vantage কল করা হয়নি।"},
-        "note_bn": "সপ্তাহের নির্ধারিত Forex/market news এখানে দেখানো হচ্ছে। News Direction দরকার হলে আলাদা করে Alpha Vantage sentiment নেওয়া হবে।",
+        "last_known_good": bool(selected_pair in _LKG_NEWS),
+        "note_bn": "সপ্তাহের নির্ধারিত Forex/market news এখানে দেখানো হচ্ছে। সাময়িক source সমস্যা হলে Last Known Good News রাখা হবে। News Direction দরকার হলে আলাদা করে Alpha Vantage sentiment নেওয়া হবে।",
     }
 
 
@@ -184,22 +210,37 @@ def get_news_direction_for_pair(market_mode: str, real_pairs: list[str], crypto_
     direction_event = next((e for e in data.get("events", []) if e.get("impact") == "high" and 0 <= float(e.get("minutes_to_event") or 0) <= 5.0), None)
     if direction_event is None:
         return {"ok": True, "needed": False, "pair": selected_pair, "events": []}
-    sentiment = pair_sentiment(selected_pair, market_mode, fetch_news_sentiment())
-    score = float(sentiment.get("score") or 0.0)
-    if abs(score) < 0.15:
-        direction, basis = "WAIT", "পর্যাপ্ত bullish/bearish sentiment নেই; actual result না আসা পর্যন্ত দিক নিশ্চিত নয়।"
-    else:
-        positive = score > 0
-        parts = selected_pair.split("/", 1)
-        base, quote = parts if len(parts) == 2 else (selected_pair, "USD")
-        currency = str(direction_event.get("currency", "")).upper()
-        if currency == base:
-            direction = "UP" if positive else "DOWN"
-        elif currency == quote:
-            direction = "DOWN" if positive else "UP"
+
+    event_key = f"{selected_pair}|{direction_event.get('event_time_utc')}"
+    cached = _DIRECTION_CACHE.get(event_key)
+    if cached is not None:
+        return dict(cached)
+
+    try:
+        sentiment = pair_sentiment(selected_pair, market_mode, fetch_news_sentiment())
+        score = float(sentiment.get("score") or 0.0)
+        if abs(score) < 0.15:
+            direction, basis = "WAIT", "পর্যাপ্ত bullish/bearish sentiment নেই; actual result না আসা পর্যন্ত দিক নিশ্চিত নয়।"
         else:
-            direction = "WAIT"
-        basis = f"{currency} sentiment {'ইতিবাচক' if positive else 'নেতিবাচক'}; নির্বাচিত pair-এর currency অবস্থান অনুযায়ী দিক নির্ধারণ করা হয়েছে।"
-    event = dict(direction_event)
-    event.update({"direction": direction, "direction_basis_bn": basis, "news_sentiment": sentiment, "selected_pair": selected_pair, "checked_at_utc": now.isoformat(timespec="seconds")})
-    return {"ok": True, "needed": True, "pair": selected_pair, "event": event, "source": "Alpha Vantage NEWS_SENTIMENT"}
+            positive = score > 0
+            parts = selected_pair.split("/", 1)
+            base, quote = parts if len(parts) == 2 else (selected_pair, "USD")
+            currency = str(direction_event.get("currency", "")).upper()
+            if currency == base:
+                direction = "UP" if positive else "DOWN"
+            elif currency == quote:
+                direction = "DOWN" if positive else "UP"
+            else:
+                direction = "WAIT"
+            basis = f"{currency} sentiment {'ইতিবাচক' if positive else 'নেতিবাচক'}; নির্বাচিত pair-এর currency অবস্থান অনুযায়ী দিক নির্ধারণ করা হয়েছে।"
+        event = dict(direction_event)
+        event.update({"direction": direction, "direction_basis_bn": basis, "news_sentiment": sentiment, "selected_pair": selected_pair, "checked_at_utc": now.isoformat(timespec="seconds")})
+        result = {"ok": True, "needed": True, "pair": selected_pair, "event": event, "source": "Alpha Vantage NEWS_SENTIMENT"}
+    except Exception as exc:
+        # Cache the failed attempt too: the same event must not hammer Alpha Vantage.
+        event = dict(direction_event)
+        event.update({"direction": "WAIT", "direction_basis_bn": "Alpha Vantage সাময়িকভাবে পাওয়া যায়নি; একই নিউজের জন্য আবার request করা হবে না।", "selected_pair": selected_pair, "checked_at_utc": now.isoformat(timespec="seconds")})
+        result = {"ok": True, "needed": True, "pair": selected_pair, "event": event, "source": "Alpha Vantage NEWS_SENTIMENT", "alpha_vantage_error": str(exc)}
+
+    _DIRECTION_CACHE[event_key] = dict(result)
+    return result
