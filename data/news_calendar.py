@@ -11,7 +11,10 @@ from urllib.request import Request, urlopen
 from data.alpha_vantage_news import fetch_news_sentiment, pair_sentiment
 
 CALENDAR_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-CACHE_TTL_SECONDS = 600
+# Keep the application cache short because this endpoint can change during the day.
+# The request itself is also cache-busted once per minute below so an upstream CDN
+# cannot keep returning an older weekly calendar indefinitely.
+CACHE_TTL_SECONDS = 60
 
 _CACHE = {"events": None, "at": 0.0}
 _LOCK = threading.Lock()
@@ -37,7 +40,20 @@ PAIR_CURRENCIES = {
 
 
 def _http_json(url: str):
-    req = Request(url, headers={"User-Agent": "mmc-signal-bot/1.0", "Accept": "application/json"})
+    # The calendar endpoint may be cached by an intermediary. A minute-level
+    # cache buster keeps the weekly calendar current without hammering the source.
+    if "ff_calendar_thisweek.json" in url:
+        separator = "&" if "?" in url else "?"
+        url = f"{url}{separator}_ts={int(time.time() // 60)}"
+    req = Request(
+        url,
+        headers={
+            "User-Agent": "mmc-signal-bot/1.0",
+            "Accept": "application/json",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        },
+    )
     with urlopen(req, timeout=10) as response:
         return json.load(response)
 
@@ -110,10 +126,18 @@ def fetch_calendar(force: bool = False) -> list[dict]:
                     "actual": item.get("actual"),
                 })
         events.sort(key=lambda x: x["time_utc"])
+
+        # Never replace known-good calendar data with an empty response. This
+        # prevents a transient upstream/API failure from making all News Events
+        # disappear from the dashboard.
+        if events:
+            with _LOCK:
+                _CACHE["events"] = events
+                _CACHE["at"] = now
+            return list(events)
+
         with _LOCK:
-            _CACHE["events"] = events
-            _CACHE["at"] = now
-        return list(events)
+            return list(_CACHE["events"] or [])
     except (HTTPError, URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError):
         with _LOCK:
             return list(_CACHE["events"] or [])
