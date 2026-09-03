@@ -7,6 +7,8 @@
   const NEWS_KEY = 'mmc_news_lkg_v4:';
   const DIR_KEY = 'mmc_news_direction_v4:';
   const MAX_PAST_MS = 24 * 60 * 60 * 1000;
+  const panel = document.getElementById('news-panel');
+  let savedScrollTop = panel ? panel.scrollTop : 0;
 
   const read = (key) => {
     try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { return null; }
@@ -45,7 +47,7 @@
   }
 
   function restoreNews() {
-    // Never replace a fresh regular-news list with an old high-impact snapshot.
+    // Do not replace a fresh regular-news list with an old high-impact snapshot.
     if (allNews().length) return;
     if (!pair()) return;
     const snapshot = read(newsKey());
@@ -105,6 +107,13 @@
     }
   }
 
+  function restorePanelScroll() {
+    if (!panel) return;
+    requestAnimationFrame(() => {
+      if (Math.abs(panel.scrollTop - savedScrollTop) > 1) panel.scrollTop = savedScrollTop;
+    });
+  }
+
   function tick() {
     if (!pair()) return;
     restoreNews();
@@ -115,7 +124,10 @@
     saveNews();
     applyDirection();
     saveDirection();
+    restorePanelScroll();
   }
+
+  if (panel) panel.addEventListener('scroll', () => { savedScrollTop = panel.scrollTop; }, {passive:true});
 
   tick();
   window.setInterval(tick, 1000);
@@ -123,6 +135,7 @@
     let timer = null;
     const observer = new MutationObserver(() => {
       window.clearTimeout(timer);
+      window.requestAnimationFrame(() => { if (panel) panel.scrollTop = savedScrollTop; });
       timer = window.setTimeout(tick, 80);
     });
     observer.observe(content, {childList: true, subtree: true});
