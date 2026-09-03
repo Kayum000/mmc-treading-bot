@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 import threading
 
+import pandas as pd
+
 from data.twelve_data_forex import fetch_forex_candles, fetch_forex_multi_timeframe
 from data.binance_crypto import fetch_crypto_candles, fetch_crypto_multi_timeframe
 from data.live_signal import build_signal
