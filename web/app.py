@@ -8,6 +8,7 @@ from flask import Flask, jsonify, render_template, request, redirect, url_for, s
 
 from signals.get_signal import get_signal
 from data.twelve_data_forex import fetch_api_usage, get_credit_usage
+from data.news_calendar import get_news_alert
 
 app = Flask(__name__)
 app.secret_key = os.getenv("APP_SECRET_KEY") or os.urandom(32)
@@ -177,6 +178,20 @@ def auto_signal():
     try:
         result = get_signal(pair, mode, automatic=True)
         return jsonify({"ok": True, "result": result})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
+
+@app.route("/news-alert", methods=["GET"])
+def news_alert():
+    """Return scheduled events relevant to the user's selected market."""
+    mode = session.get("selected_mode", "").strip().lower()
+    pair = session.get("selected_pair", "").strip().upper()
+    valid_pairs = REAL_PAIRS if mode == "real" else CRYPTO_PAIRS if mode == "crypto" else []
+    if pair not in valid_pairs:
+        return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
+    try:
+        return jsonify(get_news_alert(pair, mode, alert_minutes=5))
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
 
