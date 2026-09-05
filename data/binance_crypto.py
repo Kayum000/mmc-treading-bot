@@ -24,10 +24,7 @@ BYBIT_BASE_URL = "https://api.bybit.com"
 
 
 def _http_json(url: str) -> object:
-    req = Request(
-        url,
-        headers={"User-Agent": "mmc-signal-bot/1.0", "Accept": "application/json"},
-    )
+    req = Request(url, headers={"User-Agent": "mmc-signal-bot/1.0", "Accept": "application/json"})
     with urlopen(req, timeout=10) as response:
         return json.load(response)
 
@@ -53,12 +50,7 @@ def _fetch_binance_payload(symbol: str, interval: str, limit: int) -> list:
 def _fetch_bybit_payload(symbol: str, interval: str, limit: int) -> list:
     """Fallback public spot-candle source when Binance is unreachable."""
     bybit_interval = {"1m": "1", "5m": "5", "15m": "15", "30m": "30"}[interval]
-    params = urlencode({
-        "category": "spot",
-        "symbol": symbol.upper(),
-        "interval": bybit_interval,
-        "limit": min(limit, 1000),
-    })
+    params = urlencode({"category": "spot", "symbol": symbol.upper(), "interval": bybit_interval, "limit": min(limit, 1000)})
     payload = _http_json(f"{BYBIT_BASE_URL}/v5/market/kline?{params}")
     if not isinstance(payload, dict) or payload.get("retCode") != 0:
         message = payload.get("retMsg", "Bybit API error") if isinstance(payload, dict) else "Bybit API error"
@@ -70,20 +62,18 @@ def _fetch_bybit_payload(symbol: str, interval: str, limit: int) -> list:
 
 
 def _closed_candles(df: pd.DataFrame, interval: str) -> pd.DataFrame:
-    """Keep only candles whose full interval has already closed in UTC."""
+    """Keep only candles strictly before the current UTC candle boundary."""
     if df.empty:
         return df
     now = pd.Timestamp(datetime.now(timezone.utc))
-    cutoff = now - pd.Timedelta(seconds=_INTERVAL_SECONDS[interval])
-    return df.loc[df["timestamp"] <= cutoff].copy()
+    seconds = _INTERVAL_SECONDS[interval]
+    current_boundary = pd.Timestamp((int(now.timestamp()) // seconds) * seconds, unit="s", tz="UTC")
+    timestamps = pd.to_datetime(df["timestamp"], utc=True)
+    return df.loc[timestamps < current_boundary].copy()
 
 
 def _binance_frame(payload: list, interval: str) -> pd.DataFrame:
-    columns = [
-        "open_time", "open", "high", "low", "close", "volume",
-        "close_time", "quote_volume", "trades", "taker_buy_base",
-        "taker_buy_quote", "ignore",
-    ]
+    columns = ["open_time", "open", "high", "low", "close", "volume", "close_time", "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore"]
     df = pd.DataFrame(payload, columns=columns)
     df["timestamp"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
     for col in ("open", "high", "low", "close"):
@@ -92,7 +82,6 @@ def _binance_frame(payload: list, interval: str) -> pd.DataFrame:
 
 
 def _bybit_frame(payload: list, interval: str) -> pd.DataFrame:
-    # Bybit returns [start, open, high, low, close, volume, turnover], newest first.
     rows = [row[:5] for row in payload if isinstance(row, list) and len(row) >= 5]
     df = pd.DataFrame(rows, columns=["open_time", "open", "high", "low", "close"])
     df["timestamp"] = pd.to_datetime(pd.to_numeric(df["open_time"], errors="coerce"), unit="ms", utc=True)
@@ -104,7 +93,6 @@ def _bybit_frame(payload: list, interval: str) -> pd.DataFrame:
 def fetch_crypto_candles(symbol: str, interval: str = "5m", limit: int = 200) -> pd.DataFrame:
     if interval not in INTERVALS:
         raise ValueError(f"Unsupported interval: {interval}")
-
     symbol = symbol.strip().upper().replace("/", "")
     if not symbol:
         raise ValueError("Crypto market symbol is empty")
