@@ -53,12 +53,19 @@ def fetch_api_usage() -> dict:
 
 
 def _closed_candles(df: pd.DataFrame, interval: str) -> pd.DataFrame:
-    """Keep only candles whose full interval has already closed in UTC."""
+    """Keep only candles whose full interval has already closed in UTC.
+
+    Twelve Data timestamps represent candle start times. A candle is complete
+    once its next interval boundary has passed. Using the current interval
+    boundary avoids the old ``now - interval`` ambiguity around minute edges.
+    """
     if df.empty:
         return df
     now_utc = pd.Timestamp(datetime.now(timezone.utc))
-    cutoff = now_utc - pd.Timedelta(seconds=_INTERVAL_SECONDS[interval])
-    return df.loc[df["timestamp"] <= cutoff].copy()
+    seconds = _INTERVAL_SECONDS[interval]
+    current_boundary = pd.Timestamp((int(now_utc.timestamp()) // seconds) * seconds, unit="s", tz="UTC")
+    timestamps = pd.to_datetime(df["timestamp"], utc=True)
+    return df.loc[timestamps < current_boundary].copy()
 
 
 def fetch_forex_candles(symbol: str, interval: str = "5min", outputsize: int = 200) -> pd.DataFrame:
