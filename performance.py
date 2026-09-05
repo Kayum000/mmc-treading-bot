@@ -101,11 +101,13 @@ def record_signal(result: dict) -> None:
         return
 
 
-def _candle_for_entry(mode: str, pair: str, entry_time: datetime):
+def _frame_for_market(mode: str, pair: str):
     if mode == "crypto":
-        frame = fetch_crypto_candles(pair.replace("/", ""), "1m", limit=200)
-    else:
-        frame = fetch_forex_candles(pair, "1min", outputsize=200)
+        return fetch_crypto_candles(pair.replace("/", ""), "1m", limit=200)
+    return fetch_forex_candles(pair, "1min", outputsize=200)
+
+
+def _candle_from_frame(frame, entry_time: datetime):
     if frame is None or frame.empty:
         return None
     target = entry_time.timestamp()
@@ -117,7 +119,7 @@ def _candle_for_entry(mode: str, pair: str, entry_time: datetime):
 
 
 def settle_pending() -> None:
-    """Resolve only due signals; never guess when the entry candle is unavailable."""
+    """Resolve due signals using one 1m data request per unique pending market."""
     init_db()
     now = datetime.now(timezone.utc)
     with _connect() as conn:
@@ -131,11 +133,15 @@ def settle_pending() -> None:
             """, (now, now - RETENTION))
             rows = cur.fetchall()
 
+            frames = {}
             for row_id, mode, pair, signal, entry_time in rows:
-                try:
-                    candle = _candle_for_entry(mode, pair, _utc(entry_time))
-                except Exception:
-                    continue
+                key = (mode, pair)
+                if key not in frames:
+                    try:
+                        frames[key] = _frame_for_market(mode, pair)
+                    except Exception:
+                        frames[key] = None
+                candle = _candle_from_frame(frames[key], _utc(entry_time))
                 if candle is None:
                     continue
                 entry_price = float(candle["open"])
