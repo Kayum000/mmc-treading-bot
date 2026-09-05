@@ -124,6 +124,26 @@ def _candle_from_frame(frame, entry_time: datetime):
     return matches.iloc[-1]
 
 
+def _candle_color(candle) -> str:
+    """Classify the completed entry candle as GREEN, RED, or DOJI."""
+    candle_open = float(candle["open"])
+    candle_close = float(candle["close"])
+    if candle_close > candle_open:
+        return "GREEN"
+    if candle_close < candle_open:
+        return "RED"
+    return "DOJI"
+
+
+def _outcome_from_color(signal: str, candle_color: str) -> str | None:
+    """Determine WIN/LOSS from candle color only; DOJI stays unresolved."""
+    if candle_color == "GREEN":
+        return "WIN" if signal == "BUY" else "LOSS"
+    if candle_color == "RED":
+        return "WIN" if signal == "SELL" else "LOSS"
+    return None
+
+
 def settle_pending() -> None:
     """Resolve due signals from the exact next 1m candle's color."""
     init_db()
@@ -152,18 +172,14 @@ def settle_pending() -> None:
                 if candle is None:
                     continue
 
-                candle_open = float(candle["open"])
-                candle_close = float(candle["close"])
-                if candle_close > candle_open:
-                    candle_color = "GREEN"
-                    outcome = "WIN" if signal == "BUY" else "LOSS"
-                elif candle_close < candle_open:
-                    candle_color = "RED"
-                    outcome = "WIN" if signal == "SELL" else "LOSS"
-                else:
+                candle_color = _candle_color(candle)
+                outcome = _outcome_from_color(signal, candle_color)
+                if outcome is None:
                     # Doji has no candle color; keep it unresolved.
                     continue
 
+                candle_open = float(candle["open"])
+                candle_close = float(candle["close"])
                 cur.execute("""
                     UPDATE mmc_signal_performance
                     SET entry_price_actual=%s, result_price=%s, result=%s,
@@ -174,7 +190,7 @@ def settle_pending() -> None:
                     candle_open,
                     candle_close,
                     outcome,
-                    f" Result candle: {candle_color} (open={candle_open}, close={candle_close}).",
+                    f" Result candle color: {candle_color}.",
                     now,
                     row_id,
                 ))
