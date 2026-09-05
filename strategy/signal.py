@@ -105,13 +105,13 @@ def generate_1m_signal(df: pd.DataFrame) -> Signal:
     rejection = strong_level_rejection(work)
 
     # Scan the latest three CLOSED candles while preserving full history for
-    # each structure/sweep/rejection calculation.
+    # each structure/sweep calculation. Rejection itself must be on the latest
+    # closed candle because the entry is for the immediately next candle.
     recent_start = max(0, len(work) - 3)
     recent_indices = range(recent_start + 1, len(work) + 1)
     recent_bos = [market_structure(work.iloc[:i], CONFIG.swing_lookback) for i in recent_indices]
     recent_sweeps = [liquidity_sweep(work.iloc[:i], CONFIG.sweep_lookback) for i in recent_indices]
     recent_moves = [displacement(work.iloc[:i]) for i in recent_indices]
-    recent_rejections = [strong_level_rejection(work.iloc[:i]) for i in recent_indices]
 
     bullish_bos_recent = "bullish_bos" in recent_bos
     bearish_bos_recent = "bearish_bos" in recent_bos
@@ -119,8 +119,8 @@ def generate_1m_signal(df: pd.DataFrame) -> Signal:
     sell_sweep_recent = "sell_side_rejection" in recent_sweeps
     bullish_move_recent = "bullish" in recent_moves
     bearish_move_recent = "bearish" in recent_moves
-    buy_level_rejection_recent = "strong_support_rejection" in recent_rejections
-    sell_level_rejection_recent = "strong_resistance_rejection" in recent_rejections
+    buy_level_rejection_recent = rejection == "strong_support_rejection"
+    sell_level_rejection_recent = rejection == "strong_resistance_rejection"
 
     buy_score = (
         int(close > trend)
