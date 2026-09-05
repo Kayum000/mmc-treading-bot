@@ -1,7 +1,7 @@
 """Persistent 24-hour signal performance tracking.
 
 Only confirmed BUY/SELL signals are stored. Results are evaluated from the
-actual next 1-minute candle after that candle has fully closed.
+exact next 1-minute candle after that candle has fully closed.
 """
 from __future__ import annotations
 
@@ -37,6 +37,12 @@ def _utc(value: str | datetime) -> datetime:
     else:
         dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+
+
+def _minute_start(value: str | datetime) -> datetime:
+    """Normalize a timestamp to the exact UTC 1-minute candle start."""
+    dt = _utc(value)
+    return dt.replace(second=0, microsecond=0)
 
 
 def init_db() -> None:
@@ -91,13 +97,12 @@ def record_signal(result: dict) -> None:
                     result.get("pair", ""),
                     signal,
                     _utc(result["signal_time_utc"]),
-                    _utc(result["entry_time_utc"]),
+                    _minute_start(result["entry_time_utc"]),
                     result.get("entry_price"),
                     result.get("reason"),
                 ))
             conn.commit()
     except Exception:
-        # Performance is an add-on; DB/network problems must not break GET SIGNAL.
         return
 
 
@@ -108,11 +113,12 @@ def _frame_for_market(mode: str, pair: str):
 
 
 def _candle_from_frame(frame, entry_time: datetime):
+    """Return only the candle whose START timestamp is exactly entry_time."""
     if frame is None or frame.empty:
         return None
-    target = entry_time.timestamp()
-    stamps = frame["timestamp"].apply(lambda x: _utc(x).timestamp())
-    matches = frame.loc[(stamps - target).abs() < 1.0]
+    target = _minute_start(entry_time)
+    timestamps = frame["timestamp"].apply(_minute_start)
+    matches = frame.loc[timestamps == target]
     if matches.empty:
         return None
     return matches.iloc[-1]
@@ -141,13 +147,11 @@ def settle_pending() -> None:
                         frames[key] = _frame_for_market(mode, pair)
                     except Exception:
                         frames[key] = None
-                candle = _candle_from_frame(frames[key], _utc(entry_time))
+                entry_time = _minute_start(entry_time)
+                candle = _candle_from_frame(frames[key], entry_time)
                 if candle is None:
                     continue
 
-                # Result is determined ONLY by the color of the exact entry candle:
-                # green (close > open) = BUY/WIN, SELL/LOSS;
-                # red (close < open) = SELL/WIN, BUY/LOSS.
                 candle_open = float(candle["open"])
                 candle_close = float(candle["close"])
                 if candle_close > candle_open:
@@ -157,7 +161,7 @@ def settle_pending() -> None:
                     candle_color = "RED"
                     outcome = "WIN" if signal == "SELL" else "LOSS"
                 else:
-                    # Doji has no candle color; do not invent a WIN/LOSS.
+                    # Doji has no candle color; keep it unresolved.
                     continue
 
                 cur.execute("""
