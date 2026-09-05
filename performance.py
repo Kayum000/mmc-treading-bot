@@ -72,28 +72,33 @@ def init_db() -> None:
 
 
 def record_signal(result: dict) -> None:
+    """Persist a BUY/SELL signal without ever breaking the live signal path."""
     signal = str(result.get("signal", "")).upper()
     if signal not in {"BUY", "SELL"}:
         return
-    init_db()
-    with _connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO mmc_signal_performance
-                    (market_mode, pair, signal, signal_time_utc, entry_time_utc,
-                     entry_price_reference, reason)
-                VALUES (%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT (market_mode, pair, signal, entry_time_utc) DO NOTHING
-            """, (
-                result.get("market_mode", "real"),
-                result.get("pair", ""),
-                signal,
-                _utc(result["signal_time_utc"]),
-                _utc(result["entry_time_utc"]),
-                result.get("entry_price"),
-                result.get("reason"),
-            ))
-        conn.commit()
+    try:
+        init_db()
+        with _connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO mmc_signal_performance
+                        (market_mode, pair, signal, signal_time_utc, entry_time_utc,
+                         entry_price_reference, reason)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (market_mode, pair, signal, entry_time_utc) DO NOTHING
+                """, (
+                    result.get("market_mode", "real"),
+                    result.get("pair", ""),
+                    signal,
+                    _utc(result["signal_time_utc"]),
+                    _utc(result["entry_time_utc"]),
+                    result.get("entry_price"),
+                    result.get("reason"),
+                ))
+            conn.commit()
+    except Exception:
+        # Performance is an add-on; DB/network problems must not break GET SIGNAL.
+        return
 
 
 def _candle_for_entry(mode: str, pair: str, entry_time: datetime):
