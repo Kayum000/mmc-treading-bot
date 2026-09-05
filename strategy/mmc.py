@@ -56,6 +56,10 @@ def strong_level_rejection(df: pd.DataFrame, lookback: int = 20) -> str:
     cluster and then close decisively back below it with a meaningful upper
     wick. BUY is the inverse at support. This is an additional MMC confirmation,
     not a replacement for BOS/sweep/EMA logic.
+
+    Importantly, rejection alone is not enough to create a trade. The latest
+    rejection candle must also have an existing MMC momentum confirmation:
+    either a liquidity sweep or displacement in the same direction.
     """
     if len(df) < max(lookback + 2, 8):
         return "none"
@@ -99,9 +103,20 @@ def strong_level_rejection(df: pd.DataFrame, lookback: int = 20) -> str:
         and last_close >= last_low + candle_range * 0.55
     )
 
-    if bearish_rejection and not bullish_rejection:
+    # Do not let a level rejection become a standalone signal. Require one of
+    # the already-existing MMC confirmations on this same closed candle.
+    bearish_confirmation = (
+        liquidity_sweep(df, min(10, len(df) - 1)) == "sell_side_rejection"
+        or displacement(df) == "bearish"
+    )
+    bullish_confirmation = (
+        liquidity_sweep(df, min(10, len(df) - 1)) == "buy_side_rejection"
+        or displacement(df) == "bullish"
+    )
+
+    if bearish_rejection and bearish_confirmation and not bullish_rejection:
         return "strong_resistance_rejection"
-    if bullish_rejection and not bearish_rejection:
+    if bullish_rejection and bullish_confirmation and not bearish_rejection:
         return "strong_support_rejection"
     return "none"
 
