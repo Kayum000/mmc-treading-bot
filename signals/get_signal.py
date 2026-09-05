@@ -80,6 +80,12 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
 
     signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
     entry_bd = next_candle_utc.astimezone(timezone(timedelta(hours=6)))
+    entry_time_text = entry_bd.strftime("%d %b %Y, %H:%M:%S")
+    reason_text = (
+        f"{result.reason} Entry is for the NEXT 1-MINUTE CANDLE at "
+        f"{entry_time_text} Bangladesh time ({next_candle_utc.strftime('%H:%M:%S')} UTC), "
+        "not the currently running candle."
+    )
 
     return {
         "pair": requested_pair,
@@ -89,7 +95,7 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         "signal": result.action,
         "buy_score": result.buy_score,
         "sell_score": result.sell_score,
-        "reason": result.reason,
+        "reason": reason_text,
         "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
         "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
         "candle_time": candle_time,
@@ -97,7 +103,7 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         "entry_price": entry_price,
         "entry_price_type": "last_closed_1m_close_reference",
         "entry_time_utc": next_candle_utc.isoformat(timespec="seconds"),
-        "entry_time_bd": entry_bd.strftime("%d %b %Y, %H:%M:%S"),
+        "entry_time_bd": entry_time_text,
         "entry_delay_seconds": 0,
         "timeframe": "1m pure MMC entry",
         "entry_timeframe": "1m",
