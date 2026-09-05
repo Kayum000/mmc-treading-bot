@@ -112,14 +112,14 @@ def _candle_from_frame(frame, entry_time: datetime):
         return None
     target = entry_time.timestamp()
     stamps = frame["timestamp"].apply(lambda x: _utc(x).timestamp())
-    matches = frame.loc[(stamps - target).abs() < 0.5]
+    matches = frame.loc[(stamps - target).abs() < 1.0]
     if matches.empty:
         return None
     return matches.iloc[-1]
 
 
 def settle_pending() -> None:
-    """Resolve due signals using one 1m data request per unique pending market."""
+    """Resolve due signals from the exact next 1m candle's color."""
     init_db()
     now = datetime.now(timezone.utc)
     with _connect() as conn:
@@ -144,21 +144,36 @@ def settle_pending() -> None:
                 candle = _candle_from_frame(frames[key], _utc(entry_time))
                 if candle is None:
                     continue
-                entry_price = float(candle["open"])
-                result_price = float(candle["close"])
-                if result_price > entry_price:
+
+                # Result is determined ONLY by the color of the exact entry candle:
+                # green (close > open) = BUY/WIN, SELL/LOSS;
+                # red (close < open) = SELL/WIN, BUY/LOSS.
+                candle_open = float(candle["open"])
+                candle_close = float(candle["close"])
+                if candle_close > candle_open:
+                    candle_color = "GREEN"
                     outcome = "WIN" if signal == "BUY" else "LOSS"
-                elif result_price < entry_price:
-                    outcome = "LOSS" if signal == "BUY" else "WIN"
+                elif candle_close < candle_open:
+                    candle_color = "RED"
+                    outcome = "WIN" if signal == "SELL" else "LOSS"
                 else:
-                    # Do not invent a WIN/LOSS for an exact tie.
+                    # Doji has no candle color; do not invent a WIN/LOSS.
                     continue
+
                 cur.execute("""
                     UPDATE mmc_signal_performance
                     SET entry_price_actual=%s, result_price=%s, result=%s,
+                        reason=COALESCE(reason,'') || %s,
                         resolved_at=%s
                     WHERE id=%s AND result='PENDING'
-                """, (entry_price, result_price, outcome, now, row_id))
+                """, (
+                    candle_open,
+                    candle_close,
+                    outcome,
+                    f" Result candle: {candle_color} (open={candle_open}, close={candle_close}).",
+                    now,
+                    row_id,
+                ))
 
             cur.execute("""
                 DELETE FROM mmc_signal_performance
