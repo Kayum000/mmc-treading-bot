@@ -48,6 +48,64 @@ def displacement(df: pd.DataFrame) -> str:
     return "bullish" if last["close"] > last["open"] else "bearish"
 
 
+def strong_level_rejection(df: pd.DataFrame, lookback: int = 20) -> str:
+    """Detect strong rejection from a nearby key support/resistance level.
+
+    The level is derived only from candles before the latest closed candle.
+    A SELL rejection needs the latest high to test/sweep a prior resistance
+    cluster and then close decisively back below it with a meaningful upper
+    wick. BUY is the inverse at support. This is an additional MMC confirmation,
+    not a replacement for BOS/sweep/EMA logic.
+    """
+    if len(df) < max(lookback + 2, 8):
+        return "none"
+
+    prior = df.iloc[-lookback-1:-1].copy()
+    last = df.iloc[-1]
+    avg_range = float((prior["high"] - prior["low"]).tail(min(10, len(prior))).mean())
+    if avg_range <= 0:
+        return "none"
+
+    tolerance = max(avg_range * 0.20, 1e-12)
+    resistance = float(prior["high"].max())
+    support = float(prior["low"].min())
+
+    last_high = float(last["high"])
+    last_low = float(last["low"])
+    last_open = float(last["open"])
+    last_close = float(last["close"])
+    candle_range = max(last_high - last_low, 1e-12)
+    body = abs(last_close - last_open)
+    upper_wick = last_high - max(last_open, last_close)
+    lower_wick = min(last_open, last_close) - last_low
+
+    # Count nearby prior touches. Two or more touches make the level stronger
+    # than a single isolated extreme without requiring volume data.
+    resistance_touches = int(((prior["high"] - resistance).abs() <= tolerance).sum())
+    support_touches = int(((prior["low"] - support).abs() <= tolerance).sum())
+
+    bearish_rejection = (
+        resistance_touches >= 2
+        and last_high >= resistance - tolerance
+        and last_close < resistance
+        and upper_wick >= max(body * 1.20, candle_range * 0.25)
+        and last_close <= last_low + candle_range * 0.45
+    )
+    bullish_rejection = (
+        support_touches >= 2
+        and last_low <= support + tolerance
+        and last_close > support
+        and lower_wick >= max(body * 1.20, candle_range * 0.25)
+        and last_close >= last_low + candle_range * 0.55
+    )
+
+    if bearish_rejection and not bullish_rejection:
+        return "strong_resistance_rejection"
+    if bullish_rejection and not bearish_rejection:
+        return "strong_support_rejection"
+    return "none"
+
+
 def breakout_retest_role_reversal(df: pd.DataFrame, lookback: int = 10) -> str:
     """Detect breakout -> retest -> role-reversal confirmation.
 
