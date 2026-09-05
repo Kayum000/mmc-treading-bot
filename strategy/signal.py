@@ -3,7 +3,7 @@ import pandas as pd
 
 from config import CONFIG
 from strategy.multi_timeframe import multi_timeframe_score, confirmation_profile
-from strategy.mmc import liquidity_sweep, displacement, market_structure
+from strategy.mmc import liquidity_sweep, displacement, market_structure, strong_level_rejection
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,7 @@ def _diagnostic_reason(profile: dict, side: str) -> str:
 
     checks = [
         f"৩০ ও ১৫ মিনিটের দিক একমত: {'ঠিক আছে' if profile['higher_timeframe_trend'] else 'মেলেনি'}",
-        f"ভাঙা স্তরের পুনঃপরীক্ষা ও নতুন ভূমিকা: {'ঠিক আছে' if profile['role_reversal_confirmation'] else 'মেলেনি'}",
+        f"ভাঙা স্তরের পুনঃপরীক্ষা/রিজেকশন: {'ঠিক আছে' if profile['role_reversal_confirmation'] else 'মেলেনি'}",
         f"৫ মিনিটের {direction} প্রবেশের সংকেত: {'ঠিক আছে' if profile['entry_trigger'] else 'মেলেনি'}",
         f"{opposite}: {'ঠিক আছে' if not profile['opposite_structure'] else 'মেলেনি'}",
     ]
@@ -79,7 +79,13 @@ def generate_signal(frames: dict[str, pd.DataFrame]) -> Signal:
 
 
 def generate_1m_signal(df: pd.DataFrame) -> Signal:
-    """Pure 1-minute MMC entry using recent CLOSED candles for better signal coverage."""
+    """Pure 1-minute MMC entry using recent CLOSED candles.
+
+    Existing MMC BOS/sweep/displacement logic is preserved. A strong rejection
+    from a tested support/resistance level is added as an additional structure
+    and trigger confirmation, so a bearish rejection at strong resistance can
+    produce a SELL when the latest closed-candle trend is bearish.
+    """
     if df is None or df.empty:
         return Signal("NO_TRADE", 0, 0, "১ মিনিটের বাজারের তথ্য পাওয়া যায়নি।")
 
@@ -96,15 +102,16 @@ def generate_1m_signal(df: pd.DataFrame) -> Signal:
     structure = market_structure(work, CONFIG.swing_lookback)
     sweep = liquidity_sweep(work, CONFIG.sweep_lookback)
     impulse = displacement(work)
+    rejection = strong_level_rejection(work)
 
-    # The old rule required BOS/sweep AND trigger on the exact last candle.
-    # Scan the latest three CLOSED candles while preserving the full history
-    # needed by the structure/sweep functions.
+    # Scan the latest three CLOSED candles while preserving full history for
+    # each structure/sweep/rejection calculation.
     recent_start = max(0, len(work) - 3)
     recent_indices = range(recent_start + 1, len(work) + 1)
     recent_bos = [market_structure(work.iloc[:i], CONFIG.swing_lookback) for i in recent_indices]
     recent_sweeps = [liquidity_sweep(work.iloc[:i], CONFIG.sweep_lookback) for i in recent_indices]
     recent_moves = [displacement(work.iloc[:i]) for i in recent_indices]
+    recent_rejections = [strong_level_rejection(work.iloc[:i]) for i in recent_indices]
 
     bullish_bos_recent = "bullish_bos" in recent_bos
     bearish_bos_recent = "bearish_bos" in recent_bos
@@ -112,70 +119,49 @@ def generate_1m_signal(df: pd.DataFrame) -> Signal:
     sell_sweep_recent = "sell_side_rejection" in recent_sweeps
     bullish_move_recent = "bullish" in recent_moves
     bearish_move_recent = "bearish" in recent_moves
+    buy_level_rejection_recent = "strong_support_rejection" in recent_rejections
+    sell_level_rejection_recent = "strong_resistance_rejection" in recent_rejections
 
-    buy_score = int(close > trend) + int(fast > trend) + 2 * int(structure == "bullish_bos") + 2 * int(sweep == "buy_side_rejection") + int(impulse == "bullish")
-    sell_score = int(close < trend) + int(fast < trend) + 2 * int(structure == "bearish_bos") + 2 * int(sweep == "sell_side_rejection") + int(impulse == "bearish")
+    buy_score = (
+        int(close > trend)
+        + int(fast > trend)
+        + 2 * int(structure == "bullish_bos")
+        + 2 * int(sweep == "buy_side_rejection")
+        + int(impulse == "bullish")
+        + 2 * int(rejection == "strong_support_rejection")
+    )
+    sell_score = (
+        int(close < trend)
+        + int(fast < trend)
+        + 2 * int(structure == "bearish_bos")
+        + 2 * int(sweep == "sell_side_rejection")
+        + int(impulse == "bearish")
+        + 2 * int(rejection == "strong_resistance_rejection")
+    )
 
     # Trend remains strict on the latest closed candle.
     buy_trend = close > trend and fast > trend
     sell_trend = close < trend and fast < trend
 
-    # Structure may have appeared in the latest 3 CLOSED candles.
-    buy_structure = bullish_bos_recent or buy_sweep_recent
-    sell_structure = bearish_bos_recent or sell_sweep_recent
+    # Existing structure remains valid; strong support/resistance rejection is
+    # an additional path rather than a replacement for BOS/sweep.
+    buy_structure = bullish_bos_recent or buy_sweep_recent or buy_level_rejection_recent
+    sell_structure = bearish_bos_recent or sell_sweep_recent or sell_level_rejection_recent
 
-    # Trigger may be a recent sweep or displacement, with the latest candle
-    # still being the candle immediately before the next entry candle.
-    buy_trigger = buy_sweep_recent or bullish_move_recent
-    sell_trigger = sell_sweep_recent or bearish_move_recent
+    # A strong level rejection is also a valid entry trigger.
+    buy_trigger = buy_sweep_recent or bullish_move_recent or buy_level_rejection_recent
+    sell_trigger = sell_sweep_recent or bearish_move_recent or sell_level_rejection_recent
 
     buy_valid = buy_trend and buy_structure and buy_trigger
     sell_valid = sell_trend and sell_structure and sell_trigger
 
     if buy_valid and not sell_valid:
-        return Signal("BUY", buy_score, sell_score, "১ মিনিটের এমএমসি: সর্বশেষ বন্ধ হওয়া ক্যান্ডেলে প্রবণতা ঊর্ধ্বমুখী এবং সাম্প্রতিক ৩টি বন্ধ ক্যান্ডেলের মধ্যে বাজারের কাঠামো/তারল্য সংগ্রহ ও দ্রুত মূল্য-চলনের নিশ্চিতকরণ পাওয়া গেছে। তাই পরবর্তী ১ মিনিটের ক্যান্ডেলকে BUY entry হিসেবে ধরা হয়েছে। ৩০, ১৫ ও ৫ মিনিট ব্যবহার করা হচ্ছে না; স্কোর তথ্য হিসেবে দেখানো হচ্ছে।")
+        rejection_note = " শক্তিশালী support rejection-ও নিশ্চিত হয়েছে।" if buy_level_rejection_recent else ""
+        return Signal("BUY", buy_score, sell_score, "১ মিনিটের এমএমসি: সর্বশেষ বন্ধ হওয়া ক্যান্ডেলে প্রবণতা ঊর্ধ্বমুখী এবং সাম্প্রতিক ৩টি বন্ধ ক্যান্ডেলের মধ্যে বাজারের কাঠামো/তারল্য সংগ্রহ/দ্রুত মূল্য-চলনের নিশ্চিতকরণ পাওয়া গেছে।" + rejection_note + " তাই পরবর্তী ১ মিনিটের ক্যান্ডেলকে BUY entry হিসেবে ধরা হয়েছে। ৩০, ১৫ ও ৫ মিনিট ব্যবহার করা হচ্ছে না; স্কোর তথ্য হিসেবে দেখানো হচ্ছে।")
     if sell_valid and not buy_valid:
-        return Signal("SELL", buy_score, sell_score, "১ মিনিটের এমএমসি: সর্বশেষ বন্ধ হওয়া ক্যান্ডেলে প্রবণতা নিম্নমুখী এবং সাম্প্রতিক ৩টি বন্ধ ক্যান্ডেলের মধ্যে বাজারের কাঠামো/তারল্য সংগ্রহ ও দ্রুত মূল্য-চলনের নিশ্চিতকরণ পাওয়া গেছে। তাই পরবর্তী ১ মিনিটের ক্যান্ডেলকে SELL entry হিসেবে ধরা হয়েছে। ৩০, ১৫ ও ৫ মিনিট ব্যবহার করা হচ্ছে না; স্কোর তথ্য হিসেবে দেখানো হচ্ছে।")
+        rejection_note = " শক্তিশালী resistance rejection পাওয়া গেছে—দাম resistance level পরীক্ষা/সুইপ করে নিচে close করেছে এবং bearish upper-wick rejection নিশ্চিত হয়েছে।" if sell_level_rejection_recent else ""
+        return Signal("SELL", buy_score, sell_score, "১ মিনিটের এমএমসি: সর্বশেষ বন্ধ হওয়া ক্যান্ডেলে প্রবণতা নিম্নমুখী এবং সাম্প্রতিক ৩টি বন্ধ ক্যান্ডেলের মধ্যে বাজারের কাঠামো/তারল্য সংগ্রহ/দ্রুত মূল্য-চলনের নিশ্চিতকরণ পাওয়া গেছে।" + rejection_note + " তাই পরবর্তী ১ মিনিটের ক্যান্ডেলকে SELL entry হিসেবে ধরা হয়েছে। ৩০, ১৫ ও ৫ মিনিট ব্যবহার করা হচ্ছে না; স্কোর তথ্য হিসেবে দেখানো হচ্ছে।")
     if buy_valid and sell_valid:
-        return Signal("NO_TRADE", buy_score, sell_score, "১ মিনিটের সাম্প্রতিক ৩টি বন্ধ ক্যান্ডেলে কেনা ও বিক্রি—দুই দিকের শর্তই পাওয়া গেছে; তাই দিক পরিষ্কার না হওয়ায় কোনো entry দেওয়া হয়নি।")
+        return Signal("NO_TRADE", buy_score, sell_score, "১ মিনিটের সাম্প্রতিক ৩টি বন্ধ ক্যান্ডেলে কেনা ও বিক্রি—দুই দিকের confirmation একসঙ্গে পাওয়া গেছে; তাই দ্ব্যর্থক অবস্থায় ট্রেড দেওয়া হয়নি।")
 
-    failed = []
-    if not (buy_trend or sell_trend):
-        failed.append("সর্বশেষ বন্ধ ক্যান্ডেলের প্রবণতা পরিষ্কার নয়")
-    if not (buy_structure or sell_structure):
-        failed.append("সাম্প্রতিক ৩টি বন্ধ ক্যান্ডেলে বাজারের কাঠামো বা তারল্য সংগ্রহের নিশ্চিতকরণ নেই")
-    if not (buy_trigger or sell_trigger):
-        failed.append("সাম্প্রতিক ৩টি বন্ধ ক্যান্ডেলে দ্রুত মূল্য-চলন বা প্রত্যাখ্যানের প্রবেশ-সংকেত নেই")
-    return Signal("NO_TRADE", buy_score, sell_score, "১ মিনিটের এমএমসিতে এখনো বৈধ সেটআপ নেই: " + "; ".join(failed) + ".")
-
-
-def confirm_1m_entry(signal: Signal, df_1m: pd.DataFrame) -> Signal:
-    """Use the latest closed 1m candle as the final entry trigger for MTF mode."""
-    if signal.action not in {"BUY", "SELL"}:
-        return signal
-    if df_1m is None or df_1m.empty:
-        return Signal(signal.action, signal.buy_score, signal.sell_score, signal.reason + " ১ মিনিটের প্রবেশ যাচাইয়ের জন্য তথ্য পাওয়া যায়নি; ট্রেড বাতিল করা হয়েছে।")
-
-    side = "buy" if signal.action == "BUY" else "sell"
-    bos = market_structure(df_1m, lookback=3)
-    sweep = liquidity_sweep(df_1m, lookback=10)
-    move = displacement(df_1m)
-
-    confirmed = (
-        (side == "buy" and (bos == "bullish_bos" or sweep == "buy_side_rejection" or move == "bullish"))
-        or (side == "sell" and (bos == "bearish_bos" or sweep == "sell_side_rejection" or move == "bearish"))
-    )
-    if confirmed:
-        return Signal(
-            signal.action,
-            signal.buy_score,
-            signal.sell_score,
-            signal.reason + " সর্বশেষ সম্পূর্ণ বন্ধ হওয়া ১ মিনিটের ক্যান্ডেলেও একই দিকের প্রবেশ-সংকেত নিশ্চিত হয়েছে; পরবর্তী ১ মিনিটের ক্যান্ডেলে প্রবেশের জন্য প্রস্তুত।",
-        )
-
-    return Signal(
-        "NO_TRADE",
-        signal.buy_score,
-        signal.sell_score,
-        signal.reason + " সর্বশেষ সম্পূর্ণ বন্ধ হওয়া ১ মিনিটের ক্যান্ডেলে একই দিকের বাজার ভাঙন, তারল্য সংগ্রহ ও পুনরুদ্ধার, অথবা দ্রুত মূল্য-চলন নিশ্চিত হয়নি; তাই পরবর্তী ১ মিনিটের ক্যান্ডেলে প্রবেশ দেওয়া হয়নি।",
-    )
+    return Signal("NO_TRADE", buy_score, sell_score, "১ মিনিটের এমএমসিতে সর্বশেষ বন্ধ হওয়া ক্যান্ডেলের trend এবং structure/trigger একদিকে যথেষ্ট নিশ্চিত নয়; তাই পরবর্তী ক্যান্ডেলে entry দেওয়া হয়নি।")
