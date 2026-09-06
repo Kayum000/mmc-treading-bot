@@ -31,15 +31,25 @@ def _fetch_frame(pair: str, market_mode: str):
     return fetch_forex_candles(pair, "1min")
 
 
+def _closed_1m_frame(frame, now_utc: datetime):
+    """Drop the currently running 1m candle so strategy input is closed-only."""
+    if frame is None or frame.empty or "timestamp" not in frame.columns:
+        return frame
+    current_start = pd.Timestamp.fromtimestamp(_period_start(now_utc), tz="UTC")
+    timestamps = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
+    return frame.loc[timestamps < current_start].copy()
+
+
 def _load_frame(pair: str, market_mode: str, now_utc: datetime, automatic: bool):
-    """Load only the selected market's 1m candles; never fetch MTF data."""
+    """Load only selected-market closed 1m candles; never fetch MTF data."""
     key = (market_mode, pair)
     period = _period_start(now_utc)
     with _CACHE_LOCK:
         cached = _CACHE.get(key) if automatic else None
     if automatic and cached is not None and cached.get("period") == period:
         return cached["frame"]
-    frame = _fetch_frame(pair, market_mode)
+
+    frame = _closed_1m_frame(_fetch_frame(pair, market_mode), now_utc)
     if automatic:
         with _CACHE_LOCK:
             _CACHE[key] = {"period": period, "frame": frame}
@@ -49,8 +59,8 @@ def _load_frame(pair: str, market_mode: str, now_utc: datetime, automatic: bool)
 def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) -> dict:
     """Generate one clean-MMC next-1m-candle entry for the selected market.
 
-    Only the latest completed 1m candle is analyzed. Level touch alone never
-    produces a signal. Entry is always the next 1m candle, not the running one.
+    Only completed 1m candles are analyzed. Level touch alone never produces a
+    signal. Entry is always the next 1m candle, not the currently running one.
     """
     pair = pair.strip().upper()
     market_mode = market_mode.strip().lower()
