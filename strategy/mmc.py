@@ -104,37 +104,6 @@ def _cluster_levels(values: list[float], tolerance: float) -> list[dict]:
     return clusters
 
 
-def get_mmc_levels(df: pd.DataFrame, lookback: int = 20) -> dict | None:
-    """Return confirmed S/R clusters from closed candles only."""
-    if not _valid(df, lookback + 5):
-        return None
-    prior = df.iloc[-lookback - 1:-1].copy()
-    ranges = (prior["high"].astype(float) - prior["low"].astype(float)).clip(lower=0)
-    median_range = float(ranges.tail(10).median())
-    if median_range <= 0:
-        return None
-    tolerance = max(median_range * 0.08, 1e-12)
-    swing_highs, swing_lows = _swing_levels(prior)
-    resistance_clusters = _cluster_levels(swing_highs, tolerance)
-    support_clusters = _cluster_levels(swing_lows, tolerance)
-    if not resistance_clusters and not support_clusters:
-        return None
-    close = float(df.iloc[-1]["close"])
-    resistance_candidates = [x for x in resistance_clusters if x["price"] >= close - tolerance]
-    support_candidates = [x for x in support_clusters if x["price"] <= close + tolerance]
-    strong_resistance = [x for x in resistance_candidates if x["touches"] >= 2]
-    strong_support = [x for x in support_candidates if x["touches"] >= 2]
-    resistance = min(strong_resistance or resistance_candidates, key=lambda x: abs(x["price"] - close)) if resistance_candidates else None
-    support = min(strong_support or support_candidates, key=lambda x: abs(x["price"] - close)) if support_candidates else None
-    return {
-        "resistance": float(resistance["price"]) if resistance else None,
-        "support": float(support["price"]) if support else None,
-        "tolerance": tolerance,
-        "resistance_touches": int(resistance["touches"]) if resistance else 0,
-        "support_touches": int(support["touches"]) if support else 0,
-    }
-
-
 def _candle_body_ratio(row) -> float:
     high, low = float(row["high"]), float(row["low"])
     open_, close = float(row["open"]), float(row["close"])
@@ -174,7 +143,6 @@ def _mirror_candidate(df: pd.DataFrame, side: str, lookback: int = 20) -> dict |
             if zone["touches"] < 2 or zone["price"] < last_close - tolerance:
                 continue
             z = float(zone["price"])
-            # Find the latest confirmed swing low before a meaningful rise to z.
             for i in range(2, len(prior) - 3):
                 w = prior.iloc[i - 2:i + 3]
                 origin = float(prior.iloc[i]["low"])
@@ -188,7 +156,6 @@ def _mirror_candidate(df: pd.DataFrame, side: str, lookback: int = 20) -> dict |
                 leg_high = float(future["high"].max())
                 if leg_high < z - tolerance:
                     continue
-                # Require at least one expansion candle in the leg.
                 leg_body = future.apply(_candle_body_ratio, axis=1)
                 if float(leg_body.max()) < 0.55:
                     continue
@@ -232,7 +199,6 @@ def _mirror_candidate(df: pd.DataFrame, side: str, lookback: int = 20) -> dict |
 
     if not candidates:
         return None
-    # Prefer the most recent origin while keeping the strongest clustered zone.
     return max(candidates, key=lambda x: (x["origin_index"], x["zone_touches"]))
 
 
@@ -242,11 +208,16 @@ def get_mirror_projection(df: pd.DataFrame, side: str, lookback: int = 20) -> di
 
 
 def strong_level_rejection(df: pd.DataFrame, lookback: int = 20) -> str:
-    levels = get_mmc_levels(df, lookback)
-    if levels is None:
+    """Confirm rejection directly against the canonical Mirror MMC zone.
+
+    This intentionally does not maintain a second S/R detector. The zone,
+    tolerance and origin all come from get_mirror_projection(), so signal,
+    re-entry and loss-lock logic share one level definition.
+    """
+    last = df.iloc[-1] if df is not None and not df.empty else None
+    if last is None:
         return "none"
-    resistance, support, tolerance = levels["resistance"], levels["support"], levels["tolerance"]
-    last = df.iloc[-1]
+
     high, low = float(last["high"]), float(last["low"])
     open_, close = float(last["open"]), float(last["close"])
     candle_range = max(high - low, 1e-12)
@@ -255,8 +226,34 @@ def strong_level_rejection(df: pd.DataFrame, lookback: int = 20) -> str:
     lower_wick = min(open_, close) - low
     sweep = liquidity_sweep(df, min(10, len(df) - 1))
     impulse = displacement(df)
-    sell = resistance is not None and levels["resistance_touches"] >= 2 and high >= resistance - tolerance and close < resistance and close <= low + candle_range * 0.48 and upper_wick >= max(body * 1.25, candle_range * 0.30) and (sweep == "sell_side_rejection" or impulse == "bearish")
-    buy = support is not None and levels["support_touches"] >= 2 and low <= support + tolerance and close > support and close >= low + candle_range * 0.52 and lower_wick >= max(body * 1.25, candle_range * 0.30) and (sweep == "buy_side_rejection" or impulse == "bullish")
+
+    sell_mirror = get_mirror_projection(df, "SELL", lookback)
+    buy_mirror = get_mirror_projection(df, "BUY", lookback)
+
+    sell = False
+    if sell_mirror is not None:
+        resistance = float(sell_mirror["zone"])
+        tolerance = float(sell_mirror["tolerance"])
+        sell = (
+            high >= resistance - tolerance
+            and close < resistance
+            and close <= low + candle_range * 0.48
+            and upper_wick >= max(body * 1.25, candle_range * 0.30)
+            and (sweep == "sell_side_rejection" or impulse == "bearish")
+        )
+
+    buy = False
+    if buy_mirror is not None:
+        support = float(buy_mirror["zone"])
+        tolerance = float(buy_mirror["tolerance"])
+        buy = (
+            low <= support + tolerance
+            and close > support
+            and close >= low + candle_range * 0.52
+            and lower_wick >= max(body * 1.25, candle_range * 0.30)
+            and (sweep == "buy_side_rejection" or impulse == "bullish")
+        )
+
     if sell and not buy:
         return "strong_resistance_rejection"
     if buy and not sell:
