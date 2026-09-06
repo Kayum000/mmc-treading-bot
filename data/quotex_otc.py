@@ -6,7 +6,6 @@ from environment variables and the returned frame contains closed OHLC candles.
 from __future__ import annotations
 
 import asyncio
-import inspect
 import os
 import time
 
@@ -20,19 +19,20 @@ _PERIOD = 60
 
 
 def _run(value):
-    if inspect.isawaitable(value):
+    if asyncio.iscoroutine(value) or isinstance(value, asyncio.Future):
         return asyncio.run(value)
     return value
 
 
 def _client():
     try:
+        # quotexpy 1.40.7 exposes Quotex from the package root.
         from quotexpy import Quotex
-    except ImportError:
-        try:
-            from quotexapi.stable_api import Quotex
-        except ImportError as exc:
-            raise RuntimeError("Quotex data library is not installed on the server.") from exc
+    except Exception as exc:
+        # Do not misreport a dependency/import failure as "not installed".
+        raise RuntimeError(
+            f"Quotex data library load failed: {type(exc).__name__}: {exc}"
+        ) from exc
 
     email = os.getenv("QUOTEX_EMAIL", "").strip()
     password = os.getenv("QUOTEX_PASSWORD", "")
@@ -42,7 +42,6 @@ def _client():
 
     kwargs = {"lang": os.getenv("QUOTEX_LANG", "en")}
     if ssid:
-        # quotexpy 1.40.7 expects the session token as `ssid`.
         kwargs["ssid"] = ssid
     return Quotex(email=email, password=password, **kwargs)
 
@@ -60,6 +59,7 @@ def _normalise_rows(payload):
             ts = item.get("time", item.get("timestamp", item.get("from")))
             op, hi, lo, cl = item.get("open"), item.get("high"), item.get("low"), item.get("close")
         elif isinstance(item, (list, tuple)) and len(item) >= 5:
+            # quotexpy returns [time, open, close, high, low].
             ts, op, cl, hi, lo = item[:5]
         else:
             continue
@@ -76,16 +76,6 @@ def _normalise_rows(payload):
     return rows
 
 
-def _get_candles(client, asset: str, end_ts: float, offset: int):
-    """Support both quotexpy 1.40.x and the older stable_api signature."""
-    params = list(inspect.signature(client.get_candles).parameters.values())
-    if len(params) == 3:
-        # quotexpy: get_candles(asset, offset, period)
-        return _run(client.get_candles(asset, offset, _PERIOD))
-    # older stable_api/pyquotex style: get_candles(asset, end_time, offset, period)
-    return _run(client.get_candles(asset, end_ts, offset, _PERIOD))
-
-
 def _fetch_sync(asset: str, count: int = 200):
     client = _client()
     try:
@@ -94,12 +84,15 @@ def _fetch_sync(asset: str, count: int = 200):
         if not ok:
             reason = check[1] if isinstance(check, tuple) and len(check) > 1 else "unknown connection error"
             raise RuntimeError(f"Quotex connection failed: {reason}")
-        end_ts = time.time()
+
+        # quotexpy 1.40.7 uses the async public method:
+        # get_candles(asset, offset_seconds, period_seconds).
         offset = _PERIOD * max(count + 20, 220)
-        payload = _get_candles(client, asset, end_ts, offset)
+        payload = _run(client.get_candles(asset, offset, _PERIOD))
         rows = _normalise_rows(payload)
         if not rows:
             raise RuntimeError(f"Quotex returned no candle data for {asset}.")
+
         df = pd.DataFrame(rows).drop_duplicates(subset=["timestamp"]).sort_values("timestamp")
         boundary = pd.Timestamp((int(time.time()) // _PERIOD) * _PERIOD, unit="s", tz="UTC")
         df = df.loc[df["timestamp"] < boundary].tail(count).reset_index(drop=True)
@@ -108,7 +101,7 @@ def _fetch_sync(asset: str, count: int = 200):
         return df
     finally:
         try:
-            _run(client.close())
+            client.close()
         except Exception:
             pass
 
