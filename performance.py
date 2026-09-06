@@ -134,7 +134,7 @@ def loss_lock_reason(mode: str, pair: str, signal_action: str, frame=None, level
             return (
                 f"LOSS_LOCKED: {mode.upper()} {pair}-এ সর্বশেষ {loss_signal} entry LOSS হয়েছে "
                 f"({_minute_start(loss_entry_time).isoformat()})। নতুন strong level এবং fresh MMC confirmation "
-                "একসাথে না আসা পর্যন্ত signal OFF থাকবে।"
+                "একসাথে না আসা পর্যন্ত signal OFF থাকবে."
             )
         return None
     except Exception:
@@ -144,8 +144,10 @@ def loss_lock_reason(mode: str, pair: str, signal_action: str, frame=None, level
 
 
 def pending_trade_reason(mode: str, pair: str) -> str | None:
+    """Return a lock only while a due/active entry still genuinely needs settlement."""
     try:
         init_db()
+        now = datetime.now(timezone.utc)
         with _connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
@@ -157,9 +159,15 @@ def pending_trade_reason(mode: str, pair: str) -> str | None:
         if not row:
             return None
         signal, entry_time = row
+        entry_time = _minute_start(entry_time)
+        if entry_time > now:
+            return (
+                f"PENDING_LOCK: এই {mode.upper()} {pair} market-এ আগের {signal} entry এখনো active "
+                f"({entry_time.isoformat()})। ওই 1-minute candle শেষ না হওয়া পর্যন্ত নতুন BUY/SELL বন্ধ।"
+            )
         return (
-            f"PENDING_LOCK: এই {mode.upper()} {pair} market-এ আগের {signal} entry এখনো settle হয়নি "
-            f"({_minute_start(entry_time).isoformat()})। আগের 1-minute candle-এর WIN/LOSS নিশ্চিত না হওয়া পর্যন্ত নতুন BUY/SELL বন্ধ।"
+            f"PENDING_LOCK: এই {mode.upper()} {pair} market-এ আগের {signal} entry-এর result এখনো settle হয়নি "
+            f"({entry_time.isoformat()})। completed 1-minute candle-এর WIN/LOSS নিশ্চিত না হওয়া পর্যন্ত নতুন BUY/SELL বন্ধ।"
         )
     except Exception:
         return "PENDING_LOCK: performance state যাচাই করা যায়নি; নিরাপত্তার জন্য নতুন BUY/SELL সাময়িকভাবে বন্ধ।"
@@ -203,9 +211,6 @@ def _candle_from_frame(frame, entry_time: datetime, mode: str | None = None, pai
         matches = frame.loc[timestamps == target]
         if not matches.empty:
             return matches.iloc[-1]
-    # A pending entry can be older than the normal live-data window. Fetch only
-    # the exact historical candle needed for settlement instead of incorrectly
-    # leaving the trade PENDING forever.
     if mode == "crypto" and pair:
         try:
             historical = fetch_crypto_candle_at(pair.replace("/", ""), entry_time)
@@ -226,13 +231,21 @@ def _outcome_from_color(signal: str, candle_color: str) -> str | None:
         return "WIN" if signal == "BUY" else "LOSS"
     if candle_color == "RED":
         return "WIN" if signal == "SELL" else "LOSS"
+    if candle_color == "DOJI":
+        return "VOID"
     return None
 
 
-def settle_pending() -> None:
-    """Resolve due entries from the exact next 1m candle's completed color."""
+def settle_pending(frames_override=None) -> None:
+    """Resolve due entries from the exact next completed 1m candle.
+
+    A caller may provide already-fetched closed frames so settlement and signal
+    generation use the same market snapshot instead of making two live-data calls.
+    DOJI is resolved as VOID so it cannot leave PENDING_LOCK stuck forever.
+    """
     init_db()
     now = datetime.now(timezone.utc)
+    frames = dict(frames_override or {})
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -244,7 +257,6 @@ def settle_pending() -> None:
                 ORDER BY entry_time_utc ASC
             """, (now, now - RETENTION))
             rows = cur.fetchall()
-            frames = {}
             for row_id, mode, pair, signal, entry_time, level_type, level_price in rows:
                 key = (mode, pair)
                 if key not in frames:
@@ -256,10 +268,10 @@ def settle_pending() -> None:
                 candle = _candle_from_frame(frames[key], entry_time, mode, pair)
                 if candle is None:
                     continue
-                outcome = _outcome_from_color(signal, _candle_color(candle))
+                candle_color = _candle_color(candle)
+                outcome = _outcome_from_color(signal, candle_color)
                 if outcome is None:
                     continue
-                candle_color = _candle_color(candle)
                 cur.execute("""
                     UPDATE mmc_signal_performance
                     SET entry_price_actual=%s, result_price=%s, result=%s,
