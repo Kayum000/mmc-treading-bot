@@ -1,20 +1,18 @@
-"""Public live market feed helpers.
+"""Public 1-minute market feed helpers for the canonical MMC strategy.
 
-Uses Binance public REST klines for crypto. Forex is intentionally exposed as
-an adapter boundary because a broker/data vendor should supply its authorized
-live candles; this module never handles broker credentials or places orders.
+Uses Binance public REST klines for crypto.  This module intentionally exposes
+only completed 1-minute candles and never performs multi-timeframe analysis.
 """
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from urllib.request import Request, urlopen
-import json
 
 import pandas as pd
 
-BINANCE_INTERVALS = {"1m", "5m", "15m"}
+INTERVAL = "1m"
 
 
 @dataclass(frozen=True)
@@ -24,12 +22,12 @@ class MarketConfig:
     base_url: str = "https://api.binance.com/api/v3/klines"
 
 
-def fetch_binance_klines(config: MarketConfig, interval: str) -> pd.DataFrame:
-    if interval not in BINANCE_INTERVALS:
-        raise ValueError(f"Unsupported interval: {interval}")
+def fetch_binance_klines(config: MarketConfig, interval: str = INTERVAL) -> pd.DataFrame:
+    if interval != INTERVAL:
+        raise ValueError("Only the 1m interval is supported by the MMC feed")
     if not (50 <= config.limit <= 1000):
         raise ValueError("limit must be between 50 and 1000")
-    url = f"{config.base_url}?symbol={config.symbol.upper()}&interval={interval}&limit={config.limit}"
+    url = f"{config.base_url}?symbol={config.symbol.upper()}&interval=1m&limit={config.limit}"
     req = Request(url, headers={"User-Agent": "mmc-signal-bot/1.0"})
     with urlopen(req, timeout=10) as response:
         rows = json.load(response)
@@ -42,15 +40,16 @@ def fetch_binance_klines(config: MarketConfig, interval: str) -> pd.DataFrame:
 
 
 def fetch_multi_timeframe(config: MarketConfig) -> dict[str, pd.DataFrame]:
-    return {tf: fetch_binance_klines(config, tf) for tf in ("15m", "5m", "1m")}
+    """Return a single-key frame map for backwards compatibility; never MTF."""
+    return {INTERVAL: fetch_binance_klines(config, INTERVAL)}
 
 
 def stream_crypto(config: MarketConfig, callback, poll_seconds: int = 5) -> None:
-    """Poll public candles and invoke callback(frames) when a new 1m candle appears."""
+    """Poll public 1m candles and invoke callback(frames) when a new candle appears."""
     last_timestamp = None
     while True:
         frames = fetch_multi_timeframe(config)
-        current = frames["1m"].iloc[-1]["timestamp"]
+        current = frames[INTERVAL].iloc[-1]["timestamp"]
         if current != last_timestamp:
             callback(frames)
             last_timestamp = current
