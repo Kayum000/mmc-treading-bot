@@ -299,6 +299,23 @@ def settle_pending(frames_override=None) -> None:
         conn.commit()
 
 
+def clear_performance_history() -> dict:
+    """Clear only confirmed performance history; never remove PENDING entries or loss locks."""
+    try:
+        init_db()
+        with _connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    DELETE FROM mmc_signal_performance
+                    WHERE result IN ('WIN','LOSS','VOID')
+                """)
+                cleared = cur.rowcount
+            conn.commit()
+        return {"ok": True, "cleared": int(cleared)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 def get_performance() -> dict:
     try:
         settle_pending()
