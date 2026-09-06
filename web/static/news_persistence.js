@@ -111,10 +111,46 @@
     }
     clearInterval(statusDirectionTimer); refreshPreNewsDirection(); statusDirectionTimer = setInterval(refreshPreNewsDirection, 30000);
   }
+
+  function translatePerformance() {
+    const box = document.getElementById('performance-compact');
+    if (!box) return;
+    const toggle = document.getElementById('performance-toggle');
+    if (toggle) {
+      const spans = toggle.querySelectorAll('span');
+      if (spans[0]) spans[0].textContent = '📊 গত ২৪ ঘণ্টার ফলাফল';
+    }
+    const summary = box.querySelectorAll('.performance-summary > div');
+    const labels = ['মোট', 'জয়', 'হার', 'জয়ের হার'];
+    summary.forEach((item, i) => { const label = item.querySelector('span'); if (label && labels[i]) label.textContent = labels[i]; });
+    const subhead = box.querySelector('.performance-subhead span');
+    if (subhead) subhead.textContent = 'গত ২৪ ঘণ্টার ফলাফল — শুধু কেনা ও বিক্রি';
+    box.querySelectorAll('.performance-item').forEach(item => {
+      const pairNode = item.querySelector('.pair');
+      if (pairNode) {
+        const small = pairNode.querySelector('small');
+        if (small) small.textContent = String(small.textContent || '').toUpperCase() === 'CRYPTO' ? 'ক্রিপ্টো বাজার' : 'বাস্তব বাজার';
+      }
+      const signal = item.querySelector('.signal-buy, .signal-sell');
+      if (signal) signal.textContent = signal.textContent.trim() === 'BUY' ? 'কেনা' : signal.textContent.trim() === 'SELL' ? 'বিক্রি' : signal.textContent;
+      const result = item.querySelector('.win, .loss');
+      if (result) result.textContent = result.textContent.trim() === 'WIN' ? 'জয়' : result.textContent.trim() === 'LOSS' ? 'হার' : result.textContent;
+    });
+    const empty = box.querySelector('.performance-empty');
+    if (empty && /Performance|confirmed BUY\/SELL|Performance data|ফলাফল যাচাই/i.test(empty.textContent)) {
+      if (empty.textContent.includes('Performance দেখতে')) empty.textContent = 'ফলাফল দেখতে খুলুন।';
+      else if (empty.textContent.includes('confirmed BUY/SELL')) empty.textContent = 'শেষ ২৪ ঘণ্টায় কোনো নিশ্চিত কেনা/বিক্রির ফলাফল নেই।';
+      else if (empty.textContent.includes('Performance data')) empty.textContent = 'ফলাফলের তথ্য এখন পাওয়া যাচ্ছে না।';
+      else if (empty.textContent.includes('ফলাফল যাচাই')) empty.textContent = 'ফলাফল যাচাই হচ্ছে…';
+    }
+    const error = document.getElementById('performance-error');
+    if (error && error.textContent.includes('Performance error')) error.textContent = 'ফলাফল দেখাতে সমস্যা হয়েছে।';
+  }
+
   function tick() { if (!pair()) return; restoreNews(); const source = currentSource(); if (!source) return; clearOldDirectionForNewEvent(); markLkgNodes(); saveNews(); applyDirection(); saveDirection(); restorePanelScroll(); }
   if (panel) panel.addEventListener('scroll', () => { savedScrollTop = panel.scrollTop; }, {passive:true});
-  setupPreNewsDirection(); tick(); window.setInterval(tick, 1000);
-  if ('MutationObserver' in window) { let timer = null; const observer = new MutationObserver(() => { window.clearTimeout(timer); window.requestAnimationFrame(() => { if (panel) panel.scrollTop = savedScrollTop; }); timer = window.setTimeout(tick, 80); }); observer.observe(content, {childList:true, subtree:true}); }
+  setupPreNewsDirection(); tick(); translatePerformance(); window.setInterval(tick, 1000); window.setInterval(translatePerformance, 500);
+  if ('MutationObserver' in window) { let timer = null; const observer = new MutationObserver(() => { window.clearTimeout(timer); window.requestAnimationFrame(() => { if (panel) panel.scrollTop = savedScrollTop; }); timer = window.setTimeout(tick, 80); translatePerformance(); }); observer.observe(content, {childList:true, subtree:true}); }
   document.getElementById('pair')?.addEventListener('change', () => { window.setTimeout(tick, 100); window.setTimeout(refreshPreNewsDirection, 250); });
   document.getElementById('mode')?.addEventListener('change', () => { window.setTimeout(tick, 100); window.setTimeout(refreshPreNewsDirection, 250); });
 })();
