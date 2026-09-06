@@ -60,7 +60,6 @@ def init_db() -> None:
                     UNIQUE (market_mode, pair, signal, entry_time_utc)
                 )
             """)
-            # Safe migrations for databases created by the previous version.
             cur.execute("ALTER TABLE mmc_signal_performance ADD COLUMN IF NOT EXISTS mmc_level_type VARCHAR(16)")
             cur.execute("ALTER TABLE mmc_signal_performance ADD COLUMN IF NOT EXISTS mmc_level_price DOUBLE PRECISION")
             cur.execute("""
@@ -87,8 +86,10 @@ def init_db() -> None:
                 CREATE INDEX IF NOT EXISTS mmc_loss_locks_created_idx
                 ON mmc_loss_locks (created_at DESC)
             """)
+            # Performance is a rolling 24h view.  Loss protection is deliberately
+            # NOT expired here: one LOSS stays locked until a new strong level
+            # plus fresh MMC confirmation clears it.
             cur.execute("DELETE FROM mmc_signal_performance WHERE signal_time_utc < NOW() - INTERVAL '24 hours'")
-            cur.execute("DELETE FROM mmc_loss_locks WHERE created_at < NOW() - INTERVAL '24 hours'")
         conn.commit()
 
 
@@ -145,7 +146,10 @@ def loss_lock_reason(mode: str, pair: str, signal_action: str, frame=None, level
             )
         return None
     except Exception:
-        # Database protection must not crash the live signal endpoint.
+        # Protection fails closed: if the lock state cannot be read reliably,
+        # do not allow a new BUY/SELL signal through.
+        if action in {"BUY", "SELL"}:
+            return "LOSS_LOCKED: loss-protection state যাচাই করা যায়নি; নিরাপত্তার জন্য signal OFF রাখা হয়েছে।"
         return None
 
 
@@ -168,7 +172,7 @@ def pending_trade_reason(mode: str, pair: str) -> str | None:
             f"({_minute_start(entry_time).isoformat()})। আগের 1-minute candle-এর WIN/LOSS নিশ্চিত না হওয়া পর্যন্ত নতুন BUY/SELL বন্ধ।"
         )
     except Exception:
-        return None
+        return "PENDING_LOCK: performance state যাচাই করা যায়নি; নিরাপত্তার জন্য নতুন BUY/SELL সাময়িকভাবে বন্ধ।"
 
 
 def record_signal(result: dict) -> None:
@@ -278,8 +282,8 @@ def settle_pending() -> None:
                             waiting_for_new_level=TRUE,
                             created_at=NOW()
                     """, (mode, pair, signal, entry_time, level_type, level_price))
+            # Keep performance history at 24h.  Do not delete loss locks here.
             cur.execute("DELETE FROM mmc_signal_performance WHERE signal_time_utc < NOW() - INTERVAL '24 hours'")
-            cur.execute("DELETE FROM mmc_loss_locks WHERE created_at < NOW() - INTERVAL '24 hours'")
         conn.commit()
 
 
