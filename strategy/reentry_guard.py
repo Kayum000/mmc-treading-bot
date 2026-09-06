@@ -78,15 +78,31 @@ def _save_lock(mode: str, pair: str, side: str, level_type: str, level_price: fl
 
 
 def check_reentry_guard(frame: pd.DataFrame, mode: str, pair: str, side: str) -> str | None:
-    """Allow one entry per clean MMC level until that level is invalidated."""
+    """Allow one entry per level; unlock only after invalidation or a fresh level."""
     side = str(side).upper()
     if side not in {"BUY", "SELL"}:
         return None
     try:
         _ensure_table()
         lock = _get_lock(mode, pair, side)
+
+        levels = get_mmc_levels(frame)
+        current_level = None
+        current_tolerance = None
+        if levels is not None:
+            if side == "BUY":
+                current_level = levels.get("support")
+            else:
+                current_level = levels.get("resistance")
+            current_tolerance = float(levels.get("tolerance") or 0)
+
         if lock:
             level_type, level_price, tolerance = lock
+            fresh_level = (
+                current_level is not None
+                and abs(float(current_level) - float(level_price)) > max(float(tolerance), current_tolerance or 0.0) * 1.5
+            )
+            invalidated = False
             if frame is not None and not frame.empty:
                 latest_close = float(frame.iloc[-1]["close"])
                 invalidated = (
@@ -94,30 +110,27 @@ def check_reentry_guard(frame: pd.DataFrame, mode: str, pair: str, side: str) ->
                     if side == "SELL"
                     else latest_close < float(level_price) - float(tolerance)
                 )
-                if invalidated:
-                    _delete_lock(mode, pair, side)
-                else:
-                    return (
-                        f"REENTRY_BLOCKED: একই active strong {level_type} level থেকে আগের {side} signal দেওয়া হয়েছে; "
-                        "level invalidated না হওয়া পর্যন্ত নতুন entry বন্ধ।"
-                    )
+
+            if invalidated or fresh_level:
+                _delete_lock(mode, pair, side)
+            else:
+                return (
+                    f"REENTRY_BLOCKED: একই active strong {level_type} level থেকে আগের {side} signal দেওয়া হয়েছে; "
+                    "level invalidated বা নতুন strong level তৈরি না হওয়া পর্যন্ত নতুন entry বন্ধ।"
+                )
 
         expected = "strong_support_rejection" if side == "BUY" else "strong_resistance_rejection"
-        if strong_level_rejection(frame) != expected:
-            return None
-        levels = get_mmc_levels(frame)
-        if levels is None:
+        if strong_level_rejection(frame) != expected or levels is None or current_level is None:
             return None
 
-        if side == "BUY":
-            level_price = float(levels["support"])
-            tolerance = float(levels["tolerance"])
-            level_type = "support"
-        else:
-            level_price = float(levels["resistance"])
-            tolerance = float(levels["tolerance"])
-            level_type = "resistance"
-        _save_lock(mode, pair, side, level_type, level_price, tolerance)
+        _save_lock(
+            mode,
+            pair,
+            side,
+            "support" if side == "BUY" else "resistance",
+            float(current_level),
+            float(current_tolerance or levels["tolerance"]),
+        )
         return None
     except Exception:
         return None
