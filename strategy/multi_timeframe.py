@@ -4,69 +4,16 @@ from config import CONFIG
 from strategy.mmc import market_structure, liquidity_sweep, displacement, breakout_retest_role_reversal, strong_level_rejection
 
 
-def add_ema(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-    out["ema_fast"] = out["close"].ewm(span=CONFIG.fast_ema, adjust=False).mean()
-    out["ema_trend"] = out["close"].ewm(span=CONFIG.trend_ema, adjust=False).mean()
-    return out
+def timeframe_components(df: pd.DataFrame, side: str) -> dict:
+    """Return auditable, indicator-free MMC conditions for one timeframe."""
+    if df is None or df.empty:
+        return {
+            "score": 0, "trend": False, "structure": "neutral", "sweep": "none",
+            "displacement": "none", "rejection": "none", "trigger": False,
+            "structure_ok": False, "sweep_ok": False, "displacement_ok": False,
+            "rejection_ok": False, "role_reversal": "none", "role_reversal_ok": False,
+        }
 
-
-def timeframe_bias(df: pd.DataFrame) -> str:
-    df = add_ema(df)
-    if len(df) < CONFIG.trend_ema:
-        return "neutral"
-    close = df["close"].iloc[-1]
-    fast = df["ema_fast"].iloc[-1]
-    trend = df["ema_trend"].iloc[-1]
-    structure = market_structure(df, CONFIG.swing_lookback)
-    role_reversal = breakout_retest_role_reversal(df)
-    if close > trend and fast > trend and (
-        structure == "bullish_bos" or role_reversal == "bullish_role_reversal"
-    ):
-        return "bullish"
-    if close < trend and fast < trend and (
-        structure == "bearish_bos" or role_reversal == "bearish_role_reversal"
-    ):
-        return "bearish"
-    return "neutral"
-
-
-def score_timeframe(df: pd.DataFrame, side: str) -> int:
-    df = add_ema(df)
-    score = 0
-    close = df["close"].iloc[-1]
-    fast = df["ema_fast"].iloc[-1]
-    trend = df["ema_trend"].iloc[-1]
-    structure = market_structure(df, CONFIG.swing_lookback)
-    sweep = liquidity_sweep(df, CONFIG.sweep_lookback)
-    impulse = displacement(df)
-    rejection = strong_level_rejection(df)
-    if side == "buy":
-        score += int(close > trend)
-        score += int(fast > trend)
-        score += 2 * int(structure == "bullish_bos")
-        score += 2 * int(sweep == "buy_side_rejection")
-        score += int(impulse == "bullish")
-        score += 2 * int(rejection == "strong_support_rejection")
-    else:
-        score += int(close < trend)
-        score += int(fast < trend)
-        score += 2 * int(structure == "bearish_bos")
-        score += 2 * int(sweep == "sell_side_rejection")
-        score += int(impulse == "bearish")
-        score += 2 * int(rejection == "strong_resistance_rejection")
-    return score
-
-
-def timeframe_components(df: pd.DataFrame, side: str) -> dict[str, bool | str | int]:
-    """Return auditable MMC conditions for one timeframe without changing the core gates."""
-    df = add_ema(df)
-    if df.empty:
-        return {"score": 0, "trend": False, "structure": "neutral", "sweep": "none", "displacement": "none", "rejection": "none", "trigger": False, "structure_ok": False, "sweep_ok": False, "displacement_ok": False, "rejection_ok": False, "role_reversal": "none", "role_reversal_ok": False}
-
-    close = df["close"].iloc[-1]
-    fast = df["ema_fast"].iloc[-1]
-    trend = df["ema_trend"].iloc[-1]
     structure = market_structure(df, CONFIG.swing_lookback)
     sweep = liquidity_sweep(df, CONFIG.sweep_lookback)
     impulse = displacement(df)
@@ -74,32 +21,37 @@ def timeframe_components(df: pd.DataFrame, side: str) -> dict[str, bool | str | 
     role_reversal = breakout_retest_role_reversal(df)
 
     if side == "buy":
-        ema_trend_ok = close > trend and fast > trend
         structure_ok = structure == "bullish_bos"
         sweep_ok = sweep == "buy_side_rejection"
         displacement_ok = impulse == "bullish"
         rejection_ok = rejection == "strong_support_rejection"
         role_reversal_ok = role_reversal == "bullish_role_reversal"
     else:
-        ema_trend_ok = close < trend and fast < trend
         structure_ok = structure == "bearish_bos"
         sweep_ok = sweep == "sell_side_rejection"
         displacement_ok = impulse == "bearish"
         rejection_ok = rejection == "strong_resistance_rejection"
         role_reversal_ok = role_reversal == "bearish_role_reversal"
 
-    # A confirmed breakout/retest role reversal or strong level rejection is
-    # valid structure confirmation. Existing BOS/sweep logic remains intact.
-    trend_ok = ema_trend_ok and (structure_ok or role_reversal_ok or rejection_ok)
+    # Clean MMC: a timeframe has directional confirmation when structure has
+    # broken in that direction, or a confirmed role reversal/rejection exists.
+    trend_ok = structure_ok or role_reversal_ok or rejection_ok
+    score = (
+        2 * int(structure_ok)
+        + 2 * int(sweep_ok)
+        + int(displacement_ok)
+        + 2 * int(rejection_ok)
+        + 2 * int(role_reversal_ok)
+    )
 
     return {
-        "score": score_timeframe(df, side),
+        "score": score,
         "trend": trend_ok,
         "structure": structure,
         "sweep": sweep,
         "displacement": impulse,
         "rejection": rejection,
-        "trigger": sweep_ok or displacement_ok or rejection_ok,
+        "trigger": sweep_ok and displacement_ok,
         "structure_ok": structure_ok,
         "sweep_ok": sweep_ok,
         "displacement_ok": displacement_ok,
@@ -110,13 +62,13 @@ def timeframe_components(df: pd.DataFrame, side: str) -> dict[str, bool | str | 
 
 
 def multi_timeframe_score(frames: dict[str, pd.DataFrame], side: str) -> int:
-    """Weight higher timeframe more heavily: 30m=3, 15m=2, 5m=1."""
+    """Weight clean MMC structure: 30m=3, 15m=2, 5m=1."""
     weights = {"30m": 3, "15m": 2, "5m": 1}
-    return sum(score_timeframe(df, side) * weights.get(tf, 1) for tf, df in frames.items())
+    return sum(timeframe_components(df, side)["score"] * weights.get(tf, 1) for tf, df in frames.items())
 
 
 def confirmation_profile(frames: dict[str, pd.DataFrame], side: str) -> dict:
-    """Build a strict but explainable confirmation profile for final signal gating."""
+    """Build the final MMC confirmation chain: HTF -> setup -> entry."""
     parts = {tf: timeframe_components(frames[tf], side) for tf in ("30m", "15m", "5m")}
     return {
         "score": sum(parts[tf]["score"] * {"30m": 3, "15m": 2, "5m": 1}[tf] for tf in parts),
@@ -124,8 +76,11 @@ def confirmation_profile(frames: dict[str, pd.DataFrame], side: str) -> dict:
         "15m": parts["15m"],
         "5m": parts["5m"],
         "higher_timeframe_trend": bool(parts["30m"]["trend"] and parts["15m"]["trend"]),
-        "entry_trigger": bool(parts["5m"]["trigger"]),
-        "role_reversal_confirmation": bool(parts["30m"]["role_reversal_ok"] or parts["15m"]["role_reversal_ok"] or parts["30m"]["rejection_ok"] or parts["15m"]["rejection_ok"]),
+        "entry_trigger": bool(parts["5m"]["trigger"] or parts["5m"]["rejection_ok"]),
+        "role_reversal_confirmation": bool(
+            parts["30m"]["role_reversal_ok"] or parts["15m"]["role_reversal_ok"]
+            or parts["30m"]["rejection_ok"] or parts["15m"]["rejection_ok"]
+        ),
         "opposite_structure": bool(
             parts["30m"]["structure"] == ("bearish_bos" if side == "buy" else "bullish_bos")
             or parts["15m"]["structure"] == ("bearish_bos" if side == "buy" else "bullish_bos")
