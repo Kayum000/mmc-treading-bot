@@ -16,6 +16,15 @@ from performance import record_signal
 QUOTEX_MODE = "quotex"
 
 
+def _canonical_otc_pair(value):
+    """Return the canonical OTC symbol while accepting case variations."""
+    raw = str(value or "").strip()
+    for item in OTC_PAIRS:
+        if item.lower() == raw.lower():
+            return item
+    return ""
+
+
 def install(app):
     original_fetch_frame = signal_module._fetch_frame
 
@@ -28,10 +37,10 @@ def install(app):
 
     def get_signal_wrapper(pair, market_mode="real", automatic=False):
         mode = str(market_mode).strip().lower()
-        pair = str(pair).strip().upper()
         if mode != QUOTEX_MODE:
-            return original_get_signal(pair, mode, automatic=automatic)
-        if pair not in OTC_PAIRS:
+            return original_get_signal(str(pair).strip().upper(), mode, automatic=automatic)
+        pair = _canonical_otc_pair(pair)
+        if not pair:
             raise ValueError("অবৈধ Quotex OTC মার্কেট।")
         result = original_get_signal(f"OTC:{pair}", "real", automatic=automatic)
         result["pair"] = pair
@@ -52,13 +61,14 @@ def install(app):
 
     def index_wrapper():
         mode = request.form.get("mode", "").strip().lower() if request.method == "POST" else session.get("selected_mode", "").strip().lower()
-        pair = request.form.get("pair", "").strip().upper() if request.method == "POST" else session.get("selected_pair", "").strip().upper()
+        raw_pair = request.form.get("pair", "") if request.method == "POST" else session.get("selected_pair", "")
+        pair = _canonical_otc_pair(raw_pair) if mode == QUOTEX_MODE else str(raw_pair).strip().upper()
         if mode != QUOTEX_MODE:
             return original_index()
         result = None
         error = None
-        if pair not in OTC_PAIRS:
-            pair = ""
+        if not pair:
+            pair = _canonical_otc_pair(session.get("selected_pair", ""))
         if request.method == "POST":
             if not pair:
                 error = "একটি Quotex OTC মার্কেট নির্বাচন করুন।"
@@ -74,10 +84,11 @@ def install(app):
 
     def select_wrapper():
         mode = request.form.get("mode", "").strip().lower()
-        pair = request.form.get("pair", "").strip().upper()
+        raw_pair = request.form.get("pair", "")
         if mode != QUOTEX_MODE:
             return original_select()
-        if pair not in OTC_PAIRS:
+        pair = _canonical_otc_pair(raw_pair)
+        if not pair:
             return jsonify({"ok": False, "error": "অবৈধ Quotex OTC মার্কেট।"}), 400
         session["selected_mode"] = QUOTEX_MODE
         session["selected_pair"] = pair
@@ -85,10 +96,10 @@ def install(app):
 
     def auto_wrapper():
         mode = session.get("selected_mode", "").strip().lower()
-        pair = session.get("selected_pair", "").strip().upper()
+        pair = _canonical_otc_pair(session.get("selected_pair", ""))
         if mode != QUOTEX_MODE:
             return original_auto()
-        if pair not in OTC_PAIRS:
+        if not pair:
             return jsonify({"ok": False, "error": "প্রথমে একটি Quotex OTC মার্কেট নির্বাচন করুন।"}), 400
         try:
             result = get_signal_wrapper(pair, QUOTEX_MODE, automatic=True)
@@ -109,11 +120,14 @@ def install(app):
 
     def status_wrapper():
         mode = request.args.get("mode", session.get("selected_mode", "")).strip().lower()
-        pair = request.args.get("pair", session.get("selected_pair", "")).strip().upper()
+        raw_pair = request.args.get("pair", session.get("selected_pair", ""))
         if mode != QUOTEX_MODE:
             return original_status()
-        if pair not in OTC_PAIRS:
+        pair = _canonical_otc_pair(raw_pair)
+        if not pair:
             return jsonify({"ok": False, "unselected": True, "error": "প্রথমে একটি Quotex OTC মার্কেট নির্বাচন করুন।"})
+        session["selected_mode"] = QUOTEX_MODE
+        session["selected_pair"] = pair
         return jsonify(quotex_status(pair))
 
     app.view_functions["index"] = index_wrapper
@@ -149,6 +163,7 @@ function installQuotexUI(){{
  const originalScheduleStatus=window.scheduleStatus;window.scheduleStatus=function(){{if(mode.value==='quotex'){{window.__mmcCheckQuotexStatus();return}}originalScheduleStatus()}};
  const originalScheduleNews=window.scheduleNews;window.scheduleNews=function(){{if(mode.value==='quotex'){{document.getElementById('news-content').innerHTML='<div class="news-empty">Quotex OTC-এর জন্য সাধারণ scheduled news filter ব্যবহার করা হচ্ছে না।</div>';document.getElementById('news-state').textContent='OTC candle data আলাদাভাবে যাচাই হচ্ছে।';return}}originalScheduleNews()}};
  pair.addEventListener('change',()=>{{if(mode.value==='quotex'){{localStorage.setItem('mmc_selected_quotex_pair',pair.value);window.__mmcCheckQuotexStatus()}}}});
+ document.getElementById('signal-form').addEventListener('submit',()=>{{if(mode.value==='quotex'&&pair.value){{mode.value='quotex';localStorage.setItem('mmc_selected_quotex_pair',pair.value)}}}});
  if(mode.value==='quotex')window.__mmcSetQuotex();
 }}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',installQuotexUI);else installQuotexUI();
