@@ -1,11 +1,11 @@
 """Single canonical Mirror Market Concept (MMC) strategy engine.
 
-This module implements the clean, single-timeframe MMC model:
+This module implements a clean, single-timeframe Mirror Market Cycle:
 1) find a confirmed origin/base;
-2) find a strong impulse leg from that origin into a confirmed S/R zone;
+2) find a directional impulse leg from that origin into a confirmed S/R zone;
 3) measure the origin-to-zone distance;
-4) after rejection, project the same distance away from the zone (mirror target);
-5) require fresh rejection/confirmation before producing a next-1m entry.
+4) mirror that same distance back from the zone toward the origin;
+5) require fresh rejection and directional confirmation before producing a next-1m entry.
 
 Only completed 1-minute candles are used. No EMA/RSI/MACD and no MTF logic.
 """
@@ -111,18 +111,19 @@ def _candle_body_ratio(row) -> float:
 
 
 def _mirror_candidate(df: pd.DataFrame, side: str, lookback: int = 20) -> dict | None:
-    """Find the latest valid origin -> impulse -> zone mirror structure.
+    """Find the latest valid origin -> directional impulse -> zone structure.
 
-    SELL: bullish impulse from an earlier base/origin into resistance; mirror
-    target is zone - distance, where distance = zone - origin.
+    SELL: bullish impulse from an earlier swing-low origin into resistance.
+    BUY: bearish impulse from an earlier swing-high origin into support.
 
-    BUY: bearish impulse from an earlier origin into support; mirror target is
-    zone + distance, where distance = origin - zone.
-
-    The origin is deliberately a confirmed swing, not an arbitrary raw low/high.
+    The mirror target is the equal-distance return from the zone toward the
+    origin. Therefore the projected target equals the origin by construction;
+    this is intentional and avoids inventing an extension not defined by the
+    basic mirror-distance model.
     """
     if not _valid(df, lookback + 7):
         return None
+
     prior = df.iloc[-lookback - 1:-1].copy().reset_index(drop=True)
     ranges = (prior["high"].astype(float) - prior["low"].astype(float)).clip(lower=0)
     median_range = float(ranges.tail(10).median())
@@ -133,69 +134,74 @@ def _mirror_candidate(df: pd.DataFrame, side: str, lookback: int = 20) -> dict |
     swing_highs, swing_lows = _swing_levels(prior)
     resistance_clusters = _cluster_levels(swing_highs, tolerance)
     support_clusters = _cluster_levels(swing_lows, tolerance)
-    last = prior.iloc[-1]
-    last_close = float(last["close"])
+    last_close = float(prior.iloc[-1]["close"])
 
-    candidates = []
+    candidates: list[dict] = []
     side = str(side).upper()
+
     if side == "SELL":
         for zone in resistance_clusters:
             if zone["touches"] < 2 or zone["price"] < last_close - tolerance:
                 continue
             z = float(zone["price"])
             for i in range(2, len(prior) - 3):
-                w = prior.iloc[i - 2:i + 3]
+                window = prior.iloc[i - 2:i + 3]
                 origin = float(prior.iloc[i]["low"])
-                if origin > float(w["low"].min()) + tolerance:
+                if origin > float(window["low"].min()) + tolerance:
                     continue
-                if z - origin <= tolerance * 4:
+                distance = z - origin
+                if distance <= tolerance * 4:
                     continue
                 future = prior.iloc[i + 1:]
                 if future.empty:
                     continue
-                leg_high = float(future["high"].max())
-                if leg_high < z - tolerance:
+                directional_impulses = future.loc[
+                    (future["close"].astype(float) > future["open"].astype(float))
+                    & (future.apply(_candle_body_ratio, axis=1) >= 0.55)
+                ]
+                if directional_impulses.empty:
                     continue
-                leg_body = future.apply(_candle_body_ratio, axis=1)
-                if float(leg_body.max()) < 0.55:
+                if float(directional_impulses["high"].astype(float).max()) < z - tolerance:
                     continue
-                mirror_target = z - (z - origin)
+                mirror_target = z - distance
                 candidates.append({
                     "side": "SELL", "origin": origin, "zone": z,
-                    "distance": z - origin, "mirror_target": mirror_target,
+                    "distance": distance, "mirror_target": mirror_target,
                     "tolerance": tolerance, "zone_touches": int(zone["touches"]),
                     "origin_index": i,
                 })
-                break
+
     elif side == "BUY":
         for zone in support_clusters:
             if zone["touches"] < 2 or zone["price"] > last_close + tolerance:
                 continue
             z = float(zone["price"])
             for i in range(2, len(prior) - 3):
-                w = prior.iloc[i - 2:i + 3]
+                window = prior.iloc[i - 2:i + 3]
                 origin = float(prior.iloc[i]["high"])
-                if origin < float(w["high"].max()) - tolerance:
+                if origin < float(window["high"].max()) - tolerance:
                     continue
-                if origin - z <= tolerance * 4:
+                distance = origin - z
+                if distance <= tolerance * 4:
                     continue
                 future = prior.iloc[i + 1:]
                 if future.empty:
                     continue
-                leg_low = float(future["low"].min())
-                if leg_low > z + tolerance:
+                directional_impulses = future.loc[
+                    (future["close"].astype(float) < future["open"].astype(float))
+                    & (future.apply(_candle_body_ratio, axis=1) >= 0.55)
+                ]
+                if directional_impulses.empty:
                     continue
-                leg_body = future.apply(_candle_body_ratio, axis=1)
-                if float(leg_body.max()) < 0.55:
+                if float(directional_impulses["low"].astype(float).min()) > z + tolerance:
                     continue
-                mirror_target = z + (origin - z)
+                mirror_target = z + distance
                 candidates.append({
                     "side": "BUY", "origin": origin, "zone": z,
-                    "distance": origin - z, "mirror_target": mirror_target,
+                    "distance": distance, "mirror_target": mirror_target,
                     "tolerance": tolerance, "zone_touches": int(zone["touches"]),
                     "origin_index": i,
                 })
-                break
 
     if not candidates:
         return None
@@ -208,12 +214,7 @@ def get_mirror_projection(df: pd.DataFrame, side: str, lookback: int = 20) -> di
 
 
 def strong_level_rejection(df: pd.DataFrame, lookback: int = 20) -> str:
-    """Confirm rejection directly against the canonical Mirror MMC zone.
-
-    This intentionally does not maintain a second S/R detector. The zone,
-    tolerance and origin all come from get_mirror_projection(), so signal,
-    re-entry and loss-lock logic share one level definition.
-    """
+    """Confirm rejection directly against the canonical Mirror MMC zone."""
     last = df.iloc[-1] if df is not None and not df.empty else None
     if last is None:
         return "none"
@@ -305,9 +306,12 @@ def generate_signal(df: pd.DataFrame) -> Signal:
     return Signal("NO_TRADE", buy_score, sell_score, "Valid origin→impulse→zone mirror structure এবং confirmation একসঙ্গে তৈরি হয়নি; তাই signal নেই।")
 
 
-def level_for_side(df: pd.DataFrame, side: str) -> tuple[str, float] | None:
+def level_for_side(df: pd.DataFrame, side: str):
     """Return the canonical strong level used by a confirmed Mirror MMC setup."""
+    side = str(side).upper()
+    if side not in {"BUY", "SELL"}:
+        return None
     mirror = get_mirror_projection(df, side, CONFIG.level_lookback)
-    if mirror is not None:
-        return ("support" if str(side).upper() == "BUY" else "resistance", float(mirror["zone"]))
-    return None
+    if mirror is None:
+        return None
+    return ("support" if side == "BUY" else "resistance", float(mirror["zone"]))
