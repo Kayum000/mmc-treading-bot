@@ -8,7 +8,8 @@ import pandas as pd
 
 from data.twelve_data_forex import fetch_forex_candles
 from data.binance_crypto import fetch_crypto_candles
-from strategy.signal import generate_1m_signal
+from strategy.signal import generate_1m_signal, Signal
+from strategy.reentry_guard import check_reentry_guard
 
 _CACHE = {}
 _CACHE_LOCK = threading.Lock()
@@ -66,6 +67,15 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     signal_at_utc = datetime.now(timezone.utc)
     entry_frame = _load_1m_frame(requested_pair, market_mode, signal_at_utc, automatic)
     result = generate_1m_signal(entry_frame)
+
+    # Prevent repeated BUY/SELL entries while the same strong support/resistance
+    # level is still active. The guard is deliberately outside the MMC engine:
+    # if PostgreSQL is unavailable it fails open and the original signal path is
+    # preserved.
+    if result.action in {"BUY", "SELL"}:
+        block_reason = check_reentry_guard(entry_frame, market_mode, requested_pair, result.action)
+        if block_reason:
+            result = Signal("NO_TRADE", result.buy_score, result.sell_score, block_reason)
 
     # The trade is always for the next 1-minute candle.
     next_candle_utc = _next_candle_boundary_utc(signal_at_utc, 60)
