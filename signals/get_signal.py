@@ -1,4 +1,4 @@
-"""Live multi-timeframe MMC signal generation for the selected Real or Crypto market."""
+"""Live single-timeframe clean MMC signal generation for the selected market."""
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
@@ -26,47 +26,35 @@ def _period_start(now_utc: datetime, seconds: int) -> int:
     return (int(now_utc.timestamp()) // seconds) * seconds
 
 
-def _fetch_frame(pair: str, market_mode: str, timeframe: str):
+def _fetch_frame(pair: str, market_mode: str):
     if market_mode == "crypto":
-        return fetch_crypto_candles(pair.replace("/", ""), timeframe)
-    return fetch_forex_candles(pair, {"30m": "30min", "15m": "15min", "5m": "5min", "1m": "1min"}[timeframe])
+        return fetch_crypto_candles(pair.replace("/", ""), "1m")
+    return fetch_forex_candles(pair, "1min")
 
 
-def _load_frames(pair: str, market_mode: str, now_utc: datetime, automatic: bool):
-    """Load only the selected market and cache each timeframe until its candle period changes."""
+def _load_frame(pair: str, market_mode: str, now_utc: datetime, automatic: bool):
+    """Load only the selected market's 1m candles; never fetch unused MTF data."""
     key = (market_mode, pair)
-    frames = {}
-    periods = {
-        "30m": _period_start(now_utc, 1800),
-        "15m": _period_start(now_utc, 900),
-        "5m": _period_start(now_utc, 300),
-        "1m": _period_start(now_utc, 60),
-    }
-
+    period = _period_start(now_utc, 60)
     with _CACHE_LOCK:
-        cached = _CACHE.get(key, {}) if automatic else {}
+        cached = _CACHE.get(key) if automatic else None
 
-    for tf in ("30m", "15m", "5m", "1m"):
-        if automatic and cached.get(tf) is not None and cached.get(f"{tf}_period") == periods[tf]:
-            frames[tf] = cached[tf]
-        else:
-            frames[tf] = _fetch_frame(pair, market_mode, tf)
+    if automatic and cached is not None and cached.get("period") == period:
+        return cached["frame"]
 
+    frame = _fetch_frame(pair, market_mode)
     if automatic:
         with _CACHE_LOCK:
-            _CACHE[key] = {}
-            for tf in ("30m", "15m", "5m", "1m"):
-                _CACHE[key][tf] = frames[tf]
-                _CACHE[key][f"{tf}_period"] = periods[tf]
-
-    return frames
+            _CACHE[key] = {"period": period, "frame": frame}
+    return frame
 
 
 def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) -> dict:
-    """Generate one pure-MMC next-1m-candle entry for the selected market.
+    """Generate one clean-MMC next-1m-candle entry for the selected market.
 
-    The strategy decision is centralized in strategy.signal.generate_signal:
-    30m direction -> 15m confirmation -> 5m setup -> 1m final confirmation.
+    Strategy flow is intentionally single-location: 1m price action -> strong
+    support/resistance -> rejection -> MMC confirmation -> next 1m entry.
+    No multi-timeframe analysis is performed.
     """
     pair = pair.strip().upper()
     market_mode = market_mode.strip().lower()
@@ -102,13 +90,12 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
             "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": None,
             "analysis_candle_time_utc": None, "entry_price": None, "entry_price_type": "pending_trade_block",
             "entry_time_utc": next_candle_utc.isoformat(timespec="seconds"), "entry_time_bd": entry_time_text,
-            "entry_delay_seconds": 0, "timeframe": "30m + 15m + 5m confirmation / 1m entry",
-            "entry_timeframe": "1m", "automatic": automatic,
+            "entry_delay_seconds": 0, "timeframe": "Clean MMC / 1m", "entry_timeframe": "1m",
+            "automatic": automatic,
         }
 
-    frames = _load_frames(requested_pair, market_mode, signal_at_utc, automatic)
-    entry_frame = frames["1m"]
-    result = generate_signal(frames)
+    entry_frame = _load_frame(requested_pair, market_mode, signal_at_utc, automatic)
+    result = generate_signal(entry_frame)
 
     loss_reason = loss_lock_reason(market_mode, requested_pair, result.action)
     if loss_reason and result.action in {"BUY", "SELL"}:
@@ -145,8 +132,7 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         "analysis_candle_time_utc": candle_time, "entry_price": entry_price,
         "entry_price_type": "last_closed_1m_close_reference", "entry_time_utc": next_candle_utc.isoformat(),
         "entry_time_bd": entry_time_text, "entry_delay_seconds": 0,
-        "timeframe": "30m + 15m + 5m confirmation / 1m entry", "entry_timeframe": "1m",
-        "automatic": automatic,
+        "timeframe": "Clean MMC / 1m", "entry_timeframe": "1m", "automatic": automatic,
     }
 
 
