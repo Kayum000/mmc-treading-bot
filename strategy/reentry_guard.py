@@ -1,11 +1,11 @@
-"""Persistent one-entry lock for each active clean MMC level."""
+"""Persistent one-entry lock for each active clean Mirror MMC level."""
 from __future__ import annotations
 
 import os
 
 import pandas as pd
 
-from strategy.mmc import get_mmc_levels, strong_level_rejection
+from strategy.mmc import get_mirror_projection, strong_level_rejection
 
 
 def _db_url() -> str:
@@ -78,7 +78,7 @@ def _save_lock(mode: str, pair: str, side: str, level_type: str, level_price: fl
 
 
 def check_reentry_guard(frame: pd.DataFrame, mode: str, pair: str, side: str) -> str | None:
-    """Allow one entry per level; unlock only after invalidation or a fresh level."""
+    """Allow one entry per canonical Mirror MMC level; unlock on invalidation or a fresh level."""
     side = str(side).upper()
     if side not in {"BUY", "SELL"}:
         return None
@@ -86,21 +86,16 @@ def check_reentry_guard(frame: pd.DataFrame, mode: str, pair: str, side: str) ->
         _ensure_table()
         lock = _get_lock(mode, pair, side)
 
-        levels = get_mmc_levels(frame)
-        current_level = None
-        current_tolerance = None
-        if levels is not None:
-            if side == "BUY":
-                current_level = levels.get("support")
-            else:
-                current_level = levels.get("resistance")
-            current_tolerance = float(levels.get("tolerance") or 0)
+        mirror = get_mirror_projection(frame, side)
+        current_level = float(mirror["zone"]) if mirror is not None else None
+        current_tolerance = float(mirror["tolerance"]) if mirror is not None else 0.0
+        level_type = "support" if side == "BUY" else "resistance"
 
         if lock:
-            level_type, level_price, tolerance = lock
+            locked_type, level_price, tolerance = lock
             fresh_level = (
                 current_level is not None
-                and abs(float(current_level) - float(level_price)) > max(float(tolerance), current_tolerance or 0.0) * 1.5
+                and abs(current_level - float(level_price)) > max(float(tolerance), current_tolerance) * 1.5
             )
             invalidated = False
             if frame is not None and not frame.empty:
@@ -115,21 +110,21 @@ def check_reentry_guard(frame: pd.DataFrame, mode: str, pair: str, side: str) ->
                 _delete_lock(mode, pair, side)
             else:
                 return (
-                    f"REENTRY_BLOCKED: একই active strong {level_type} level থেকে আগের {side} signal দেওয়া হয়েছে; "
-                    "level invalidated বা নতুন strong level তৈরি না হওয়া পর্যন্ত নতুন entry বন্ধ।"
+                    f"REENTRY_BLOCKED: একই active strong {locked_type} level থেকে আগের {side} signal দেওয়া হয়েছে; "
+                    "level invalidated বা নতুন strong Mirror MMC level তৈরি না হওয়া পর্যন্ত নতুন entry বন্ধ।"
                 )
 
         expected = "strong_support_rejection" if side == "BUY" else "strong_resistance_rejection"
-        if strong_level_rejection(frame) != expected or levels is None or current_level is None:
+        if mirror is None or strong_level_rejection(frame) != expected:
             return None
 
         _save_lock(
             mode,
             pair,
             side,
-            "support" if side == "BUY" else "resistance",
-            float(current_level),
-            float(current_tolerance or levels["tolerance"]),
+            level_type,
+            current_level,
+            current_tolerance,
         )
         return None
     except Exception:
