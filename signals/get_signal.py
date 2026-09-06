@@ -8,8 +8,7 @@ import pandas as pd
 
 from data.twelve_data_forex import fetch_forex_candles
 from data.binance_crypto import fetch_crypto_candles
-from strategy.signal import generate_1m_signal, Signal
-from strategy.multi_timeframe import timeframe_components
+from strategy.signal import generate_signal, Signal
 from strategy.reentry_guard import check_reentry_guard
 from performance import settle_pending, loss_lock_reason, pending_trade_reason
 
@@ -37,7 +36,12 @@ def _load_frames(pair: str, market_mode: str, now_utc: datetime, automatic: bool
     """Load only the selected market and cache each timeframe until its candle period changes."""
     key = (market_mode, pair)
     frames = {}
-    periods = {"30m": _period_start(now_utc, 1800), "15m": _period_start(now_utc, 900), "5m": _period_start(now_utc, 300), "1m": _period_start(now_utc, 60)}
+    periods = {
+        "30m": _period_start(now_utc, 1800),
+        "15m": _period_start(now_utc, 900),
+        "5m": _period_start(now_utc, 300),
+        "1m": _period_start(now_utc, 60),
+    }
 
     with _CACHE_LOCK:
         cached = _CACHE.get(key, {}) if automatic else {}
@@ -58,28 +62,11 @@ def _load_frames(pair: str, market_mode: str, now_utc: datetime, automatic: bool
     return frames
 
 
-def _mtf_direction_allows(frames: dict, side: str) -> bool:
-    """Use 30m+15m for directional agreement and 5m for entry confirmation."""
-    wanted = "buy" if side == "BUY" else "sell"
-    higher = [timeframe_components(frames[tf], wanted) for tf in ("30m", "15m")]
-    entry = timeframe_components(frames["5m"], wanted)
-
-    # Both higher timeframes must agree with the proposed 1m direction.
-    if not all(bool(part["trend"]) for part in higher):
-        return False
-
-    # The 5m timeframe must show a same-direction trigger. This is deliberately
-    # lighter than the full MTF score gate so valid 1m entries are not erased.
-    return bool(entry["trigger"])
-
-
 def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) -> dict:
-    """Generate a 1m entry only when 30m/15m direction and 5m trigger agree.
+    """Generate one pure-MMC next-1m-candle entry for the selected market.
 
-    Only the selected market is fetched. Higher timeframes are cached in AUTO
-    mode according to their candle boundaries, while the 1m frame refreshes
-    once per minute. The entry remains the next 1m candle, never the current
-    running candle.
+    The strategy decision is centralized in strategy.signal.generate_signal:
+    30m direction -> 15m confirmation -> 5m setup -> 1m final confirmation.
     """
     pair = pair.strip().upper()
     market_mode = market_mode.strip().lower()
@@ -121,16 +108,7 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
 
     frames = _load_frames(requested_pair, market_mode, signal_at_utc, automatic)
     entry_frame = frames["1m"]
-    result = generate_1m_signal(entry_frame)
-
-    # Final MTF direction filter: a 1m BUY/SELL is valid only when 30m and 15m
-    # agree with it and 5m provides a same-direction trigger.
-    if result.action in {"BUY", "SELL"} and not _mtf_direction_allows(frames, result.action):
-        direction = "BUY" if result.action == "BUY" else "SELL"
-        result = Signal(
-            "NO_TRADE", result.buy_score, result.sell_score,
-            f"১ মিনিটে {direction} setup পাওয়া গেলেও ৩০m ও ১৫m একই দিকে নিশ্চিত নয় অথবা ৫m confirmation নেই; তাই MTF filter-এর কারণে entry বাতিল করা হয়েছে।",
-        )
+    result = generate_signal(frames)
 
     loss_reason = loss_lock_reason(market_mode, requested_pair, result.action)
     if loss_reason and result.action in {"BUY", "SELL"}:
