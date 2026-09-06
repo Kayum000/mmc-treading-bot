@@ -1,4 +1,4 @@
-"""Twelve Data real-time Forex candle adapter.
+"""Twelve Data real-time Forex 1-minute candle adapter.
 
 API keys are read from TWELVE_DATA_API_KEY and never stored in source control.
 This adapter only reads market data; it does not place trades.
@@ -14,8 +14,8 @@ from urllib.request import Request, urlopen
 
 import pandas as pd
 
-INTERVALS = {"30min": "30m", "15min": "15m", "5min": "5m", "1min": "1m"}
-_INTERVAL_SECONDS = {"30min": 1800, "15min": 900, "5min": 300, "1min": 60}
+INTERVAL = "1min"
+_INTERVAL_SECONDS = 60
 
 _LAST_CREDIT_USAGE = {"used": None, "left": None, "limit": None}
 
@@ -52,27 +52,26 @@ def fetch_api_usage() -> dict:
         return json.load(response)
 
 
-def _closed_candles(df: pd.DataFrame, interval: str) -> pd.DataFrame:
-    """Keep only candles whose full interval has already closed in UTC."""
+def _closed_candles(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep only candles whose full 1-minute interval has already closed in UTC."""
     if df.empty:
         return df
     now_utc = pd.Timestamp(datetime.now(timezone.utc))
-    seconds = _INTERVAL_SECONDS[interval]
-    current_boundary = pd.Timestamp((int(now_utc.timestamp()) // seconds) * seconds, unit="s", tz="UTC")
+    current_boundary = pd.Timestamp((int(now_utc.timestamp()) // _INTERVAL_SECONDS) * _INTERVAL_SECONDS, unit="s", tz="UTC")
     timestamps = pd.to_datetime(df["timestamp"], utc=True)
     return df.loc[timestamps < current_boundary].copy()
 
 
-def fetch_forex_candles(symbol: str, interval: str = "5min", outputsize: int = 200) -> pd.DataFrame:
+def fetch_forex_candles(symbol: str, interval: str = INTERVAL, outputsize: int = 200) -> pd.DataFrame:
     api_key = os.getenv("TWELVE_DATA_API_KEY")
     if not api_key:
         raise RuntimeError("Set TWELVE_DATA_API_KEY in the environment; never commit it to GitHub.")
-    if interval not in INTERVALS:
-        raise ValueError(f"Unsupported interval: {interval}")
+    if interval != INTERVAL:
+        raise ValueError("Only the 1min interval is supported by the clean MMC strategy")
 
     params = urlencode({
         "symbol": symbol,
-        "interval": interval,
+        "interval": INTERVAL,
         "outputsize": outputsize,
         "timezone": "UTC",
         "apikey": api_key,
@@ -102,7 +101,7 @@ def fetch_forex_candles(symbol: str, interval: str = "5min", outputsize: int = 2
     for col in ("open", "high", "low", "close"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df[["timestamp", "open", "high", "low", "close"]].dropna().sort_values("timestamp")
-    df = _closed_candles(df, interval)
+    df = _closed_candles(df)
     if df.empty:
-        raise RuntimeError(f"Twelve Data returned no closed {INTERVALS[interval]} candles")
+        raise RuntimeError("Twelve Data returned no closed 1m candles")
     return df.reset_index(drop=True)
