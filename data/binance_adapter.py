@@ -1,13 +1,13 @@
-"""Binance public market-data adapter.
+"""Binance public 1-minute market-data adapter.
 
-Only public candle data is handled here. No API key is required and this module
-never creates orders.
+Only public candle data is handled here. No API key is required and this
+module never creates orders or exposes other strategy timeframes.
 """
 from __future__ import annotations
 
 import pandas as pd
 
-INTERVALS = {"1m", "5m", "15m"}
+INTERVALS = {"1m"}
 
 
 def normalize_klines(rows: list[list]) -> pd.DataFrame:
@@ -23,5 +23,5 @@ def normalize_klines(rows: list[list]) -> pd.DataFrame:
 
 def validate_interval(interval: str) -> str:
     if interval not in INTERVALS:
-        raise ValueError(f"Supported intervals: {sorted(INTERVALS)}")
+        raise ValueError("Only the 1m interval is supported")
     return interval
