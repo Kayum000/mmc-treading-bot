@@ -26,7 +26,7 @@ def _run(value):
 
 
 def _install_selenium_browser_fallback():
-    """Use a known Linux Chromium binary when UC cannot launch its driver."""
+    """Launch the Docker-provided Chromium/driver instead of UC auto-downloading one."""
     import undetected_chromedriver as uc
     from selenium import webdriver
     from selenium.webdriver.chrome.service import Service
@@ -47,23 +47,14 @@ def _install_selenium_browser_fallback():
         kwargs.pop("user_multi_procs", None)
         headless = kwargs.pop("headless", True)
         browser_executable_path = kwargs.pop("browser_executable_path", None)
+
+        # If a caller uses positional UC arguments we cannot safely reinterpret
+        # them as Selenium arguments; preserve the original behavior in that case.
         if args:
             return original(*args, options=options, **kwargs)
 
         if options is None:
             options = uc.ChromeOptions()
-        if headless:
-            options.add_argument("--headless=new")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--disable-software-rasterizer")
-        options.add_argument("--disable-extensions")
-        options.add_argument("--disable-background-networking")
-        options.add_argument("--disable-sync")
-        options.add_argument("--no-first-run")
-        options.add_argument("--no-default-browser-check")
-        options.add_argument("--window-size=1920,1080")
 
         browser_path = browser_executable_path or os.getenv("CHROME_BIN", "")
         if not browser_path:
@@ -79,9 +70,49 @@ def _install_selenium_browser_fallback():
         if browser_path:
             options.binary_location = browser_path
 
+        if headless:
+            options.add_argument("--headless=new")
+        for flag in (
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--disable-software-rasterizer",
+            "--disable-extensions",
+            "--disable-background-networking",
+            "--disable-sync",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-crash-reporter",
+            "--remote-debugging-pipe",
+            "--window-size=1920,1080",
+        ):
+            options.add_argument(flag)
+
+        user_data = "/tmp/mmc-chrome"
+        Path(user_data).mkdir(parents=True, exist_ok=True)
+        options.add_argument(f"--user-data-dir={user_data}")
+
         driver_path = os.getenv("CHROMEDRIVER_BIN", "")
-        service = Service(driver_path) if driver_path and Path(driver_path).exists() else None
-        return webdriver.Chrome(service=service, options=options)
+        service = None
+        if driver_path and Path(driver_path).exists():
+            service = Service(
+                executable_path=driver_path,
+                log_output="/tmp/mmc-chromedriver.log",
+            )
+        try:
+            return webdriver.Chrome(service=service, options=options)
+        except Exception as exc:
+            log_path = Path("/tmp/mmc-chromedriver.log")
+            detail = ""
+            if log_path.exists():
+                try:
+                    detail = log_path.read_text(errors="replace")[-4000:]
+                except Exception:
+                    pass
+            if detail:
+                raise RuntimeError(f"ChromeDriver launch failed: {exc}\n{detail}") from exc
+            raise
 
     uc.Chrome = _chrome_fallback
     uc._mmc_selenium_fallback = True
