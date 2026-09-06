@@ -1,0 +1,31 @@
+name: one-time-cleanup
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix Python invalid escape warning and remove this workflow
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('web/app.py')
+          s = p.read_text()
+          s = s.replace("replace(/\\.$/,'')", "replace(/\\\\.$/,'')")
+          p.write_text(s)
+          PY
+          git rm .github/workflows/one-time-cleanup.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add web/app.py
+          git commit -m 'fix: remove invalid escape warning' || exit 0
+          git push
