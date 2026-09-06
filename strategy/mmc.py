@@ -1,13 +1,15 @@
 """Single canonical Mirror Market Concept (MMC) strategy engine.
 
-This module implements a clean, single-timeframe Mirror Market Cycle:
-1) find a confirmed origin/base;
-2) find a directional impulse leg from that origin into a confirmed S/R zone;
-3) measure the origin-to-zone distance;
-4) mirror that same distance back from the zone toward the origin;
-5) require fresh rejection and directional confirmation before producing a next-1m entry.
+Clean 1-minute MMC flow:
+1) find a confirmed swing origin/base;
+2) find a directional impulse from that origin into a clustered Supply/Demand zone;
+3) measure the actual origin-to-zone distance dynamically;
+4) calculate the 50% equilibrium of that measured leg;
+5) mirror the same distance back from the zone toward the origin (AB=CD equal-distance);
+6) require the projected mirror level to have opposite-side structure confluence;
+7) require fresh rejection and closed-1m directional confirmation.
 
-Only completed 1-minute candles are used. No EMA/RSI/MACD and no MTF logic.
+No EMA/RSI/MACD and no multi-timeframe decision layer.
 """
 from __future__ import annotations
 
@@ -110,16 +112,19 @@ def _candle_body_ratio(row) -> float:
     return abs(close - open_) / max(high - low, 1e-12)
 
 
+def _near(value: float, level: float, tolerance: float) -> bool:
+    return abs(float(value) - float(level)) <= float(tolerance)
+
+
 def _mirror_candidate(df: pd.DataFrame, side: str, lookback: int = 20) -> dict | None:
-    """Find the latest valid origin -> directional impulse -> zone structure.
+    """Find the latest dynamic origin -> impulse -> S/D -> mirror structure.
 
-    SELL: bullish impulse from an earlier swing-low origin into resistance.
-    BUY: bearish impulse from an earlier swing-high origin into support.
-
-    The mirror target is the equal-distance return from the zone toward the
-    origin. Therefore the projected target equals the origin by construction;
-    this is intentional and avoids inventing an extension not defined by the
-    basic mirror-distance model.
+    The measured leg is never based on a fixed pip/point distance.  For SELL,
+    price travels from a demand-like swing-low origin into resistance.  For
+    BUY, price travels from a supply-like swing-high origin into support.
+    The equal-distance mirror returns to the origin by construction.  The
+    origin must also be confirmed by an opposite-side clustered structure,
+    which prevents an arbitrary swing from being treated as the mirror target.
     """
     if not _valid(df, lookback + 7):
         return None
@@ -129,15 +134,14 @@ def _mirror_candidate(df: pd.DataFrame, side: str, lookback: int = 20) -> dict |
     median_range = float(ranges.tail(10).median())
     if median_range <= 0:
         return None
-    tolerance = max(median_range * 0.08, 1e-12)
 
+    tolerance = max(median_range * 0.08, 1e-12)
     swing_highs, swing_lows = _swing_levels(prior)
     resistance_clusters = _cluster_levels(swing_highs, tolerance)
     support_clusters = _cluster_levels(swing_lows, tolerance)
     last_close = float(prior.iloc[-1]["close"])
-
-    candidates: list[dict] = []
     side = str(side).upper()
+    candidates: list[dict] = []
 
     if side == "SELL":
         for zone in resistance_clusters:
@@ -149,6 +153,17 @@ def _mirror_candidate(df: pd.DataFrame, side: str, lookback: int = 20) -> dict |
                 origin = float(prior.iloc[i]["low"])
                 if origin > float(window["low"].min()) + tolerance:
                     continue
+
+                # The origin is a demand-like base only when it also aligns
+                # with another clustered support level.
+                origin_support = None
+                for support in support_clusters:
+                    if support["touches"] >= 2 and _near(origin, support["price"], tolerance):
+                        origin_support = float(support["price"])
+                        break
+                if origin_support is None:
+                    continue
+
                 distance = z - origin
                 if distance <= tolerance * 4:
                     continue
@@ -163,11 +178,15 @@ def _mirror_candidate(df: pd.DataFrame, side: str, lookback: int = 20) -> dict |
                     continue
                 if float(directional_impulses["high"].astype(float).max()) < z - tolerance:
                     continue
+
+                equilibrium = origin + distance * 0.50
                 mirror_target = z - distance
                 candidates.append({
                     "side": "SELL", "origin": origin, "zone": z,
-                    "distance": distance, "mirror_target": mirror_target,
-                    "tolerance": tolerance, "zone_touches": int(zone["touches"]),
+                    "distance": distance, "equilibrium": equilibrium,
+                    "mirror_target": mirror_target, "tolerance": tolerance,
+                    "zone_touches": int(zone["touches"]),
+                    "origin_structure": origin_support, "structure_confluence": True,
                     "origin_index": i,
                 })
 
@@ -181,6 +200,17 @@ def _mirror_candidate(df: pd.DataFrame, side: str, lookback: int = 20) -> dict |
                 origin = float(prior.iloc[i]["high"])
                 if origin < float(window["high"].max()) - tolerance:
                     continue
+
+                # The origin is a supply-like base only when it also aligns
+                # with another clustered resistance level.
+                origin_resistance = None
+                for resistance in resistance_clusters:
+                    if resistance["touches"] >= 2 and _near(origin, resistance["price"], tolerance):
+                        origin_resistance = float(resistance["price"])
+                        break
+                if origin_resistance is None:
+                    continue
+
                 distance = origin - z
                 if distance <= tolerance * 4:
                     continue
@@ -195,11 +225,15 @@ def _mirror_candidate(df: pd.DataFrame, side: str, lookback: int = 20) -> dict |
                     continue
                 if float(directional_impulses["low"].astype(float).min()) > z + tolerance:
                     continue
+
+                equilibrium = origin - distance * 0.50
                 mirror_target = z + distance
                 candidates.append({
                     "side": "BUY", "origin": origin, "zone": z,
-                    "distance": distance, "mirror_target": mirror_target,
-                    "tolerance": tolerance, "zone_touches": int(zone["touches"]),
+                    "distance": distance, "equilibrium": equilibrium,
+                    "mirror_target": mirror_target, "tolerance": tolerance,
+                    "zone_touches": int(zone["touches"]),
+                    "origin_structure": origin_resistance, "structure_confluence": True,
                     "origin_index": i,
                 })
 
@@ -209,7 +243,7 @@ def _mirror_candidate(df: pd.DataFrame, side: str, lookback: int = 20) -> dict |
 
 
 def get_mirror_projection(df: pd.DataFrame, side: str, lookback: int = 20) -> dict | None:
-    """Public mirror calculation: origin, zone, measured distance and target."""
+    """Return dynamic origin, zone, distance, 50% equilibrium and mirror target."""
     return _mirror_candidate(df, side, lookback)
 
 
@@ -267,9 +301,9 @@ def final_confirmation(df: pd.DataFrame, side: str, lookback: int = 20) -> bool:
     rejection = strong_level_rejection(df, lookback)
     mirror = get_mirror_projection(df, wanted.upper(), lookback)
     if wanted == "buy":
-        return rejection == "strong_support_rejection" and mirror is not None and (liquidity_sweep(df, 10) == "buy_side_rejection" or displacement(df) == "bullish")
+        return rejection == "strong_support_rejection" and mirror is not None and mirror["structure_confluence"] and (liquidity_sweep(df, 10) == "buy_side_rejection" or displacement(df) == "bullish")
     if wanted == "sell":
-        return rejection == "strong_resistance_rejection" and mirror is not None and (liquidity_sweep(df, 10) == "sell_side_rejection" or displacement(df) == "bearish")
+        return rejection == "strong_resistance_rejection" and mirror is not None and mirror["structure_confluence"] and (liquidity_sweep(df, 10) == "sell_side_rejection" or displacement(df) == "bearish")
     return False
 
 
@@ -285,25 +319,63 @@ def generate_signal(df: pd.DataFrame) -> Signal:
     buy_mirror = get_mirror_projection(df, "BUY", CONFIG.level_lookback)
     sell_mirror = get_mirror_projection(df, "SELL", CONFIG.level_lookback)
 
-    buy_score = 2 * int(structure == "bullish_bos") + 2 * int(sweep == "buy_side_rejection") + int(impulse == "bullish") + 3 * int(rejection == "strong_support_rejection") + 2 * int(buy_mirror is not None)
-    sell_score = 2 * int(structure == "bearish_bos") + 2 * int(sweep == "sell_side_rejection") + int(impulse == "bearish") + 3 * int(rejection == "strong_resistance_rejection") + 2 * int(sell_mirror is not None)
+    buy_score = (
+        2 * int(structure == "bullish_bos")
+        + 2 * int(sweep == "buy_side_rejection")
+        + int(impulse == "bullish")
+        + 3 * int(rejection == "strong_support_rejection")
+        + 2 * int(buy_mirror is not None)
+        + int(bool(buy_mirror and buy_mirror.get("structure_confluence")))
+    )
+    sell_score = (
+        2 * int(structure == "bearish_bos")
+        + 2 * int(sweep == "sell_side_rejection")
+        + int(impulse == "bearish")
+        + 3 * int(rejection == "strong_resistance_rejection")
+        + 2 * int(sell_mirror is not None)
+        + int(bool(sell_mirror and sell_mirror.get("structure_confluence")))
+    )
 
-    buy_confirmation = rejection == "strong_support_rejection" and buy_mirror is not None and final_confirmation(df, "buy", CONFIG.level_lookback) and ((sweep == "buy_side_rejection" and impulse == "bullish") or structure == "bullish_bos")
-    sell_confirmation = rejection == "strong_resistance_rejection" and sell_mirror is not None and final_confirmation(df, "sell", CONFIG.level_lookback) and ((sweep == "sell_side_rejection" and impulse == "bearish") or structure == "bearish_bos")
+    buy_confirmation = (
+        rejection == "strong_support_rejection"
+        and buy_mirror is not None
+        and buy_mirror["structure_confluence"]
+        and final_confirmation(df, "buy", CONFIG.level_lookback)
+        and ((sweep == "buy_side_rejection" and impulse == "bullish") or structure == "bullish_bos")
+    )
+    sell_confirmation = (
+        rejection == "strong_resistance_rejection"
+        and sell_mirror is not None
+        and sell_mirror["structure_confluence"]
+        and final_confirmation(df, "sell", CONFIG.level_lookback)
+        and ((sweep == "sell_side_rejection" and impulse == "bearish") or structure == "bearish_bos")
+    )
 
     if buy_confirmation and not sell_confirmation:
         m = buy_mirror
-        return Signal("BUY", buy_score, sell_score, f"ক্লিন Mirror MMC BUY: origin {m['origin']:.8f} → support {m['zone']:.8f}, mirror distance {m['distance']:.8f}, projected mirror target {m['mirror_target']:.8f}; rejection + bullish confirmation। পরবর্তী 1m candle-এ entry।")
+        return Signal(
+            "BUY", buy_score, sell_score,
+            f"ক্লিন Mirror MMC BUY: supply-origin {m['origin']:.8f} → support {m['zone']:.8f}, "
+            f"dynamic mirror distance {m['distance']:.8f}, 50% equilibrium {m['equilibrium']:.8f}, "
+            f"AB=CD projected mirror target {m['mirror_target']:.8f}; structure confluence + rejection + bullish confirmation। "
+            "পরবর্তী 1m candle-এ entry।",
+        )
     if sell_confirmation and not buy_confirmation:
         m = sell_mirror
-        return Signal("SELL", buy_score, sell_score, f"ক্লিন Mirror MMC SELL: origin {m['origin']:.8f} → resistance {m['zone']:.8f}, mirror distance {m['distance']:.8f}, projected mirror target {m['mirror_target']:.8f}; rejection + bearish confirmation। পরবর্তী 1m candle-এ entry।")
+        return Signal(
+            "SELL", buy_score, sell_score,
+            f"ক্লিন Mirror MMC SELL: demand-origin {m['origin']:.8f} → resistance {m['zone']:.8f}, "
+            f"dynamic mirror distance {m['distance']:.8f}, 50% equilibrium {m['equilibrium']:.8f}, "
+            f"AB=CD projected mirror target {m['mirror_target']:.8f}; structure confluence + rejection + bearish confirmation। "
+            "পরবর্তী 1m candle-এ entry।",
+        )
     if buy_confirmation and sell_confirmation:
         return Signal("NO_TRADE", buy_score, sell_score, "একই candle-এ দুই দিকের Mirror MMC confirmation এসেছে; তাই entry নেই।")
     if rejection == "strong_support_rejection":
-        return Signal("NO_TRADE", buy_score, sell_score, "Support rejection হয়েছে, কিন্তু valid origin→impulse→mirror projection এবং সম্পূর্ণ bullish confirmation হয়নি; BUY বন্ধ।")
+        return Signal("NO_TRADE", buy_score, sell_score, "Support rejection হয়েছে, কিন্তু valid Supply/Demand origin, dynamic impulse distance, AB=CD mirror এবং সম্পূর্ণ bullish confirmation একসঙ্গে হয়নি; BUY বন্ধ।")
     if rejection == "strong_resistance_rejection":
-        return Signal("NO_TRADE", buy_score, sell_score, "Resistance rejection হয়েছে, কিন্তু valid origin→impulse→mirror projection এবং সম্পূর্ণ bearish confirmation হয়নি; SELL বন্ধ।")
-    return Signal("NO_TRADE", buy_score, sell_score, "Valid origin→impulse→zone mirror structure এবং confirmation একসঙ্গে তৈরি হয়নি; তাই signal নেই।")
+        return Signal("NO_TRADE", buy_score, sell_score, "Resistance rejection হয়েছে, কিন্তু valid Supply/Demand origin, dynamic impulse distance, AB=CD mirror এবং সম্পূর্ণ bearish confirmation একসঙ্গে হয়নি; SELL বন্ধ।")
+    return Signal("NO_TRADE", buy_score, sell_score, "Valid Supply/Demand origin → dynamic impulse measure → 50% equilibrium → AB=CD mirror → structure confluence → rejection → confirmation একসঙ্গে তৈরি হয়নি; তাই signal নেই।")
 
 
 def level_for_side(df: pd.DataFrame, side: str):
@@ -312,6 +384,6 @@ def level_for_side(df: pd.DataFrame, side: str):
     if side not in {"BUY", "SELL"}:
         return None
     mirror = get_mirror_projection(df, side, CONFIG.level_lookback)
-    if mirror is None:
+    if mirror is None or not mirror.get("structure_confluence"):
         return None
     return ("support" if side == "BUY" else "resistance", float(mirror["zone"]))
