@@ -69,26 +69,26 @@ def _mirror(df,side,lookback=20):
     if side=='SELL':
         for zc in rc:
             z=zc['price']
-            if zc['touches']<2 or z<last-t:continue
+            if zc['touches']<1 or z<last-t:continue
             for i in range(2,len(p)-3):
                 o=float(p.iloc[i]['low']); w=p.iloc[i-2:i+3]
                 if o>float(w['low'].min())+t:continue
-                if not any(c['touches']>=2 and _near(o,c['price'],t) for c in sc):continue
+                if not any(c['touches']>=1 and _near(o,c['price'],t) for c in sc):continue
                 d=z-o; f=p.iloc[i+1:]
-                if d<=t*4 or f.empty:continue
+                if d<=t*3 or f.empty:continue
                 if not ((f['close'].astype(float)>f['open'].astype(float)) & (f.apply(_ratio,axis=1)>=.55)).any():continue
                 if float(f['high'].max())<z-t:continue
                 cs.append({'side':'SELL','origin':o,'zone':z,'distance':d,'equilibrium':o+d*.5,'mirror_target':z-d,'tolerance':t,'zone_touches':zc['touches'],'structure_confluence':True,'origin_index':i})
     else:
         for zc in sc:
             z=zc['price']
-            if zc['touches']<2 or z>last+t:continue
+            if zc['touches']<1 or z>last+t:continue
             for i in range(2,len(p)-3):
                 o=float(p.iloc[i]['high']); w=p.iloc[i-2:i+3]
                 if o<float(w['high'].max())-t:continue
-                if not any(c['touches']>=2 and _near(o,c['price'],t) for c in rc):continue
+                if not any(c['touches']>=1 and _near(o,c['price'],t) for c in rc):continue
                 d=o-z; f=p.iloc[i+1:]
-                if d<=t*4 or f.empty:continue
+                if d<=t*3 or f.empty:continue
                 if not ((f['close'].astype(float)<f['open'].astype(float)) & (f.apply(_ratio,axis=1)>=.55)).any():continue
                 if float(f['low'].min())>z+t:continue
                 cs.append({'side':'BUY','origin':o,'zone':z,'distance':d,'equilibrium':o-d*.5,'mirror_target':z+d,'tolerance':t,'zone_touches':zc['touches'],'structure_confluence':True,'origin_index':i})
@@ -109,8 +109,8 @@ def strong_level_rejection(df,lookback=20):
     if df is None or df.empty:return 'none'
     r=df.iloc[-1]; hi,lo=float(r['high']),float(r['low']);o,c=float(r['open']),float(r['close']);rg=_rng(r);b=abs(c-o);up=hi-max(o,c);dn=min(o,c)-lo;s=liquidity_sweep(df,min(10,len(df)-1));imp=displacement(df)
     sm=get_mirror_projection(df,'SELL',lookback);bm=get_mirror_projection(df,'BUY',lookback)
-    sell=bool(sm) and hi>=sm['zone']-sm['tolerance'] and c<sm['zone'] and c<=lo+rg*.48 and up>=max(b*1.25,rg*.30) and (s=='sell_side_rejection' or imp=='bearish')
-    buy=bool(bm) and lo<=bm['zone']+bm['tolerance'] and c>bm['zone'] and c>=lo+rg*.52 and dn>=max(b*1.25,rg*.30) and (s=='buy_side_rejection' or imp=='bullish')
+    sell=bool(sm) and hi>=sm['zone']-sm['tolerance'] and c<sm['zone'] and c<=lo+rg*.55 and up>=max(b*1.20,rg*.25) and (s=='sell_side_rejection' or imp=='bearish')
+    buy=bool(bm) and lo<=bm['zone']+bm['tolerance'] and c>bm['zone'] and c>=lo+rg*.45 and dn>=max(b*1.20,rg*.25) and (s=='buy_side_rejection' or imp=='bullish')
     return 'strong_resistance_rejection' if sell and not buy else 'strong_support_rejection' if buy and not sell else 'none'
 
 def _gen_votes(df,side):
@@ -153,7 +153,7 @@ def _ifvg(df,side):
     x=df.tail(5).reset_index(drop=True)
     for i in range(2,4):
         a,c=x.iloc[i-2],x.iloc[i]
-        if side=='BUY' and float(c['low'])>float(a['high']) and float(x.iloc[i+1]['low'])<float(a['high']):return True
+        if side=='BUY' and float(c['low'])>float(a['high']) and float(x.iloc[i+1]['low'])<float(a['high'):return True
         if side=='SELL' and float(c['high'])<float(a['low']) and float(x.iloc[i+1]['high'])>float(a['low']):return True
     return False
 
@@ -199,15 +199,18 @@ def concept_scores(df,mirror=None):
 
 def final_confirmation(df,side,lookback=20):
     side=str(side).lower();m=get_mirror_projection(df,side.upper(),lookback);r=strong_level_rejection(df,lookback)
-    return bool(m and m['structure_confluence'] and r==('strong_support_rejection' if side=='buy' else 'strong_resistance_rejection') and (liquidity_sweep(df,10)==('buy_side_rejection' if side=='buy' else 'sell_side_rejection') or displacement(df)==('bullish' if side=='buy' else 'bearish')))
+    expected='strong_support_rejection' if side=='buy' else 'strong_resistance_rejection'
+    confirm=liquidity_sweep(df,10)==('buy_side_rejection' if side=='buy' else 'sell_side_rejection') or displacement(df)==('bullish' if side=='buy' else 'bearish')
+    return bool(m and m['structure_confluence'] and r==expected and confirm)
 
 def generate_signal(df):
     minimum=max(CONFIG.sweep_lookback+1,CONFIG.level_lookback+5,27)
     if not _valid(df,minimum):return Signal('NO_TRADE',0,0,'পরিষ্কার MMC যাচাইয়ের জন্য পর্যাপ্ত বন্ধ ১ মিনিটের ক্যান্ডেল নেই।')
     buy_m=get_mirror_projection(df,'BUY',CONFIG.level_lookback);sell_m=get_mirror_projection(df,'SELL',CONFIG.level_lookback);st=market_structure(df,CONFIG.swing_lookback);sw=liquidity_sweep(df,CONFIG.sweep_lookback);imp=displacement(df);bv,sv,_=concept_scores(df)
-    if final_confirmation(df,'buy',CONFIG.level_lookback) and not final_confirmation(df,'sell',CONFIG.level_lookback):
+    buy_ok=final_confirmation(df,'buy',CONFIG.level_lookback);sell_ok=final_confirmation(df,'sell',CONFIG.level_lookback)
+    if buy_ok and not sell_ok:
         return Signal('BUY',bv,sv,f'Mirror MMC BUY confirmed; supporting concept votes {bv}/22 vs {sv}/22. Final direction is controlled only by the main Mirror MMC.')
-    if final_confirmation(df,'sell',CONFIG.level_lookback) and not final_confirmation(df,'buy',CONFIG.level_lookback):
+    if sell_ok and not buy_ok:
         return Signal('SELL',bv,sv,f'Mirror MMC SELL confirmed; supporting concept votes {bv}/22 vs {sv}/22. Final direction is controlled only by the main Mirror MMC.')
     if buy_m and sell_m and st=='neutral' and sw=='none' and imp=='none':
         return Signal('NO_TRADE',bv,sv,'একই সময়ে দুই দিকের Mirror MMC setup পরিষ্কার নয়; তাই কোনো Entry নেই।')
