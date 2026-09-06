@@ -4,6 +4,9 @@ The deployed service is the on-demand signal UI. It does not place trades.
 The old CSV CLI remains available as a separate module if needed.
 """
 from web.app import app
+from web.quotex_integration import install as install_quotex
+
+install_quotex(app)
 
 
 if __name__ == "__main__":
