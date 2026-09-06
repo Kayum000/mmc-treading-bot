@@ -153,7 +153,7 @@ def _ifvg(df,side):
     x=df.tail(5).reset_index(drop=True)
     for i in range(2,4):
         a,c=x.iloc[i-2],x.iloc[i]
-        if side=='BUY' and float(c['low'])>float(a['high']) and float(x.iloc[i+1]['low'])<float(a['high'):return True
+        if side=='BUY' and float(c['low'])>float(a['high']) and float(x.iloc[i+1]['low'])<float(a['high']):return True
         if side=='SELL' and float(c['high'])<float(a['low']) and float(x.iloc[i+1]['high'])>float(a['low']):return True
     return False
 
