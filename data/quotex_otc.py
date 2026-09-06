@@ -9,6 +9,7 @@ import asyncio
 import os
 import time
 from pathlib import Path
+import threading
 
 import pandas as pd
 
@@ -17,6 +18,14 @@ OTC_PAIRS = [
     "USDCHF_otc", "NZDUSD_otc", "EURJPY_otc", "GBPJPY_otc", "XAUUSD_otc",
 ]
 _PERIOD = 60
+# Quotex/Chromium is expensive on the 512 MB Render instance. Never allow two
+# OTC browser sessions to start at the same time, and reuse a very recent candle
+# snapshot for dashboard polling. Signal logic still receives the same 1m data.
+_QUOTEX_LOCK = threading.Lock()
+_CANDLE_CACHE = {}
+_CANDLE_CACHE_TTL = 15.0
+_STATUS_CACHE = {}
+_STATUS_CACHE_TTL = 15.0
 
 
 def _run(value):
@@ -184,31 +193,50 @@ def _normalise_rows(payload):
 
 
 def _fetch_sync(asset: str, count: int = 200):
-    client = _client()
-    try:
-        check = _run(client.connect())
-        ok = check[0] if isinstance(check, tuple) else bool(check)
-        if not ok:
-            reason = check[1] if isinstance(check, tuple) and len(check) > 1 else "unknown connection error"
-            raise RuntimeError(f"Quotex connection failed: {reason}")
+    canonical = next((item for item in OTC_PAIRS if item.lower() == str(asset).strip().lower()), "")
+    if not canonical:
+        raise ValueError("Unsupported Quotex OTC market")
+    cache_key = (canonical, int(count))
+    now = time.monotonic()
+    cached = _CANDLE_CACHE.get(cache_key)
+    if cached and now - cached[0] < _CANDLE_CACHE_TTL:
+        return cached[1].copy(deep=True)
 
-        offset = _PERIOD * max(count + 20, 220)
-        payload = _run(client.get_candles(asset, offset, _PERIOD))
-        rows = _normalise_rows(payload)
-        if not rows:
-            raise RuntimeError(f"Quotex returned no candle data for {asset}.")
+    # This lock is intentionally around the complete browser lifecycle. With
+    # Gunicorn threads, concurrent dashboard polling must not spawn Chromium
+    # processes concurrently and exhaust the small Render memory limit.
+    with _QUOTEX_LOCK:
+        now = time.monotonic()
+        cached = _CANDLE_CACHE.get(cache_key)
+        if cached and now - cached[0] < _CANDLE_CACHE_TTL:
+            return cached[1].copy(deep=True)
 
-        df = pd.DataFrame(rows).drop_duplicates(subset=["timestamp"]).sort_values("timestamp")
-        boundary = pd.Timestamp((int(time.time()) // _PERIOD) * _PERIOD, unit="s", tz="UTC")
-        df = df.loc[df["timestamp"] < boundary].tail(count).reset_index(drop=True)
-        if len(df) < 27:
-            raise RuntimeError(f"Quotex returned only {len(df)} closed 1m candles for {asset}; at least 27 are required.")
-        return df
-    finally:
+        client = _client()
         try:
-            client.close()
-        except Exception:
-            pass
+            check = _run(client.connect())
+            ok = check[0] if isinstance(check, tuple) else bool(check)
+            if not ok:
+                reason = check[1] if isinstance(check, tuple) and len(check) > 1 else "unknown connection error"
+                raise RuntimeError(f"Quotex connection failed: {reason}")
+
+            offset = _PERIOD * max(count + 20, 220)
+            payload = _run(client.get_candles(canonical, offset, _PERIOD))
+            rows = _normalise_rows(payload)
+            if not rows:
+                raise RuntimeError(f"Quotex returned no candle data for {canonical}.")
+
+            df = pd.DataFrame(rows).drop_duplicates(subset=["timestamp"]).sort_values("timestamp")
+            boundary = pd.Timestamp((int(time.time()) // _PERIOD) * _PERIOD, unit="s", tz="UTC")
+            df = df.loc[df["timestamp"] < boundary].tail(count).reset_index(drop=True)
+            if len(df) < 27:
+                raise RuntimeError(f"Quotex returned only {len(df)} closed 1m candles for {canonical}; at least 27 are required.")
+            _CANDLE_CACHE[cache_key] = (time.monotonic(), df)
+            return df.copy(deep=True)
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
 
 
 def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 200) -> pd.DataFrame:
@@ -222,13 +250,21 @@ def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 200) -> 
 
 
 def quotex_status(asset: str) -> dict:
+    canonical = next((item for item in OTC_PAIRS if item.lower() == str(asset).strip().lower()), "")
+    if not canonical:
+        return {"ok": False, "connected": False, "asset": asset, "timeframe": "1m", "error": "Unsupported Quotex OTC market", "source": "Quotex OTC", "latency_ms": 0}
+
+    cache_key = canonical
+    now = time.monotonic()
+    cached = _STATUS_CACHE.get(cache_key)
+    if cached and now - cached[0] < _STATUS_CACHE_TTL:
+        return dict(cached[1])
+
     started = time.time()
     try:
-        canonical = next((item for item in OTC_PAIRS if item.lower() == str(asset).strip().lower()), "")
-        if not canonical:
-            raise ValueError("Unsupported Quotex OTC market")
         df = fetch_quotex_candles(canonical, "1m", 40)
-        latest = pd.Timestamp(df.iloc[-1]["timestamp"]).strftime("%d %b %Y, %H:%M:%S UTC")
-        return {"ok": True, "connected": True, "asset": canonical, "timeframe": "1m", "closed_candles": len(df), "latest_closed_candle": latest, "source": "Quotex OTC", "latency_ms": int((time.time() - started) * 1000)}
+        result = {"ok": True, "connected": True, "asset": canonical, "timeframe": "1m", "closed_candles": len(df), "latest_closed_candle": pd.Timestamp(df.iloc[-1]["timestamp"]).strftime("%d %b %Y, %H:%M:%S UTC"), "source": "Quotex OTC", "latency_ms": int((time.time() - started) * 1000)}
     except Exception as exc:
-        return {"ok": False, "connected": False, "asset": asset, "timeframe": "1m", "error": str(exc), "source": "Quotex OTC", "latency_ms": int((time.time() - started) * 1000)}
+        result = {"ok": False, "connected": False, "asset": canonical, "timeframe": "1m", "error": str(exc), "source": "Quotex OTC", "latency_ms": int((time.time() - started) * 1000)}
+    _STATUS_CACHE[cache_key] = (time.monotonic(), result)
+    return dict(result)
