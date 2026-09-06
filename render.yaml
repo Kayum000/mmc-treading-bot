@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: mmc-treading-bot
+    runtime: docker
+    repo: https://github.com/Kayum000/mmc-treading-bot
+    branch: main
+    region: oregon
+    plan: free
+    autoDeploy: false
+    dockerfilePath: ./Dockerfile
