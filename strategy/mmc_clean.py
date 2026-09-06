@@ -6,35 +6,36 @@ def _valid(df: pd.DataFrame, minimum: int = 2) -> bool:
 
 
 def market_structure(df: pd.DataFrame, lookback: int = 3) -> str:
-    """Latest closed-candle market-structure break."""
+    """Return a BOS direction from the latest closed candle only."""
     if not _valid(df, lookback + 2):
         return "neutral"
     prior = df.iloc[-lookback - 1:-1]
     last = df.iloc[-1]
-    if float(last["close"]) > float(prior["high"].max()):
+    close = float(last["close"])
+    if close > float(prior["high"].max()):
         return "bullish_bos"
-    if float(last["close"]) < float(prior["low"].min()):
+    if close < float(prior["low"].min()):
         return "bearish_bos"
     return "neutral"
 
 
 def liquidity_sweep(df: pd.DataFrame, lookback: int = 10) -> str:
-    """Sweep prior liquidity and close back through the swept level."""
+    """Detect a liquidity grab that closes back inside the prior range."""
     if not _valid(df, lookback + 1):
         return "none"
     prior = df.iloc[-lookback - 1:-1]
     last = df.iloc[-1]
-    high = float(prior["high"].max())
-    low = float(prior["low"].min())
-    if float(last["high"]) > high and float(last["close"]) < high:
+    prior_high = float(prior["high"].max())
+    prior_low = float(prior["low"].min())
+    if float(last["high"]) > prior_high and float(last["close"]) < prior_high:
         return "sell_side_rejection"
-    if float(last["low"]) < low and float(last["close"]) > low:
+    if float(last["low"]) < prior_low and float(last["close"]) > prior_low:
         return "buy_side_rejection"
     return "none"
 
 
 def displacement(df: pd.DataFrame) -> str:
-    """Directional displacement with both body-quality and range expansion."""
+    """Require a decisive candle body and range expansion."""
     if not _valid(df, 3):
         return "none"
     previous = df.iloc[-2]
@@ -42,7 +43,7 @@ def displacement(df: pd.DataFrame) -> str:
     previous_range = max(float(previous["high"] - previous["low"]), 1e-12)
     last_range = max(float(last["high"] - last["low"]), 1e-12)
     body = abs(float(last["close"] - last["open"]))
-    if body / last_range < 0.65 or body < previous_range * 0.60:
+    if body / last_range < 0.65 or last_range < previous_range * 1.10:
         return "none"
     if float(last["close"]) > float(last["open"]):
         return "bullish"
@@ -51,37 +52,82 @@ def displacement(df: pd.DataFrame) -> str:
     return "none"
 
 
-def _levels(df: pd.DataFrame, lookback: int = 20):
-    if not _valid(df, lookback + 3):
-        return None
-    prior = df.iloc[-lookback - 1:-1].copy()
-    highs = prior["high"].astype(float)
-    lows = prior["low"].astype(float)
-    swing_highs = []
-    swing_lows = []
+def _swing_levels(prior: pd.DataFrame):
+    """Return confirmed 5-candle swing highs/lows from closed candles."""
+    highs = []
+    lows = []
     for i in range(2, len(prior) - 2):
         window = prior.iloc[i - 2:i + 3]
-        h = float(prior.iloc[i]["high"])
-        l = float(prior.iloc[i]["low"])
-        if h >= float(window["high"].max()):
-            swing_highs.append(h)
-        if l <= float(window["low"].min()):
-            swing_lows.append(l)
-    resistance = max(swing_highs) if swing_highs else float(highs.max())
-    support = min(swing_lows) if swing_lows else float(lows.min())
-    median_range = float((highs - lows).tail(10).median())
-    tolerance = max(median_range * 0.08, abs(resistance - support) * 0.003, 1e-12)
-    resistance_touches = int((highs.sub(resistance).abs() <= tolerance).sum())
-    support_touches = int((lows.sub(support).abs() <= tolerance).sum())
-    return resistance, support, tolerance, resistance_touches, support_touches
+        high = float(prior.iloc[i]["high"])
+        low = float(prior.iloc[i]["low"])
+        if high >= float(window["high"].max()):
+            highs.append(high)
+        if low <= float(window["low"].min()):
+            lows.append(low)
+    return highs, lows
+
+
+def _cluster_levels(values, tolerance: float):
+    """Cluster nearby swing prices so repeated tests form one MMC level."""
+    if not values:
+        return []
+    levels = []
+    for value in sorted(float(v) for v in values):
+        if not levels or abs(value - levels[-1]["price"]) > tolerance:
+            levels.append({"price": value, "touches": 1})
+        else:
+            current = levels[-1]
+            current["price"] = (current["price"] * current["touches"] + value) / (current["touches"] + 1)
+            current["touches"] += 1
+    return levels
+
+
+def get_mmc_levels(df: pd.DataFrame, lookback: int = 20):
+    """Return confirmed support/resistance clusters; no whole-range fallback."""
+    if not _valid(df, lookback + 5):
+        return None
+    prior = df.iloc[-lookback - 1:-1].copy()
+    ranges = (prior["high"].astype(float) - prior["low"].astype(float)).clip(lower=0)
+    median_range = float(ranges.tail(10).median())
+    if median_range <= 0:
+        return None
+
+    tolerance = max(median_range * 0.08, 1e-12)
+    swing_highs, swing_lows = _swing_levels(prior)
+    resistance_clusters = _cluster_levels(swing_highs, tolerance)
+    support_clusters = _cluster_levels(swing_lows, tolerance)
+    if not resistance_clusters or not support_clusters:
+        return None
+
+    latest_close = float(df.iloc[-1]["close"])
+    resistance_candidates = [x for x in resistance_clusters if x["price"] >= latest_close - tolerance]
+    support_candidates = [x for x in support_clusters if x["price"] <= latest_close + tolerance]
+    if not resistance_candidates or not support_candidates:
+        return None
+
+    strong_res = [x for x in resistance_candidates if x["touches"] >= 2]
+    strong_sup = [x for x in support_candidates if x["touches"] >= 2]
+    resistance = min(strong_res or resistance_candidates, key=lambda x: abs(x["price"] - latest_close))
+    support = min(strong_sup or support_candidates, key=lambda x: abs(x["price"] - latest_close))
+    return {
+        "resistance": float(resistance["price"]),
+        "support": float(support["price"]),
+        "tolerance": tolerance,
+        "resistance_touches": int(resistance["touches"]),
+        "support_touches": int(support["touches"]),
+    }
 
 
 def strong_level_rejection(df: pd.DataFrame, lookback: int = 20) -> str:
-    """Strict MMC support/resistance rejection on the latest closed candle."""
-    levels = _levels(df, lookback)
+    """Confirm a real support/resistance rejection on the latest closed candle."""
+    levels = get_mmc_levels(df, lookback)
     if levels is None:
         return "none"
-    resistance, support, tolerance, resistance_touches, support_touches = levels
+    resistance = levels["resistance"]
+    support = levels["support"]
+    tolerance = levels["tolerance"]
+    resistance_touches = levels["resistance_touches"]
+    support_touches = levels["support_touches"]
     last = df.iloc[-1]
     high = float(last["high"])
     low = float(last["low"])
@@ -118,20 +164,20 @@ def strong_level_rejection(df: pd.DataFrame, lookback: int = 20) -> str:
 
 
 def breakout_retest_role_reversal(df: pd.DataFrame, lookback: int = 10) -> str:
-    """Latest closed-candle breakout/retest role reversal only."""
-    if not _valid(df, lookback + 4):
+    """Confirm a recent breakout followed by a same-level retest and close."""
+    if not _valid(df, lookback + 5):
         return "none"
     recent = df.iloc[-lookback * 3:].reset_index(drop=True)
     last_idx = len(recent) - 1
-    median_range = float((recent["high"] - recent["low"]).tail(lookback).median())
-    tolerance = max(median_range * 0.10, 1e-12)
+    ranges = (recent["high"].astype(float) - recent["low"].astype(float)).clip(lower=0)
+    tolerance = max(float(ranges.tail(lookback).median()) * 0.10, 1e-12)
 
-    for breakout_idx in range(max(lookback, last_idx - 4), last_idx):
+    for breakout_idx in range(max(lookback, last_idx - 3), last_idx):
         prior = recent.iloc[breakout_idx - lookback:breakout_idx]
         breakout = recent.iloc[breakout_idx]
+        last = recent.iloc[last_idx]
         resistance = float(prior["high"].max())
         support = float(prior["low"].min())
-        last = recent.iloc[last_idx]
         if float(breakout["close"]) > resistance:
             if float(last["low"]) <= resistance + tolerance and float(last["close"]) > resistance:
                 return "bullish_role_reversal"
