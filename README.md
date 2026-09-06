@@ -47,8 +47,6 @@ Only then can a new BUY/SELL signal be issued.
 
 All MMC decision logic lives in `strategy/mmc.py`.
 
-`strategy/signal.py` is only a compatibility export and contains no second strategy implementation.
-
 `strategy/reentry_guard.py` is only a persistent one-entry-per-level protection layer; it reuses the canonical MMC level calculation.
 
 ## Historical backtest
