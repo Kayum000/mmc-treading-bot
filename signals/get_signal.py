@@ -1,4 +1,4 @@
-"""Live 1-minute MMC signal generation for the selected Real or Crypto market."""
+"""Live multi-timeframe MMC signal generation for the selected Real or Crypto market."""
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
@@ -9,6 +9,7 @@ import pandas as pd
 from data.twelve_data_forex import fetch_forex_candles
 from data.binance_crypto import fetch_crypto_candles
 from strategy.signal import generate_1m_signal, Signal
+from strategy.multi_timeframe import timeframe_components
 from strategy.reentry_guard import check_reentry_guard
 from performance import settle_pending, loss_lock_reason, pending_trade_reason
 
@@ -26,44 +27,59 @@ def _period_start(now_utc: datetime, seconds: int) -> int:
     return (int(now_utc.timestamp()) // seconds) * seconds
 
 
-def _load_1m_frame(pair: str, market_mode: str, now_utc: datetime, automatic: bool):
-    """Load the selected market's 1m candles, refreshing at most once/minute in auto mode."""
-    key = (market_mode, pair)
-    current_period = _period_start(now_utc, 60)
-
-    if automatic:
-        with _CACHE_LOCK:
-            cached = _CACHE.get(key, {})
-            frame = cached.get("entry_frame")
-            period = cached.get("entry_period")
-        if frame is not None and period == current_period:
-            return frame
-
+def _fetch_frame(pair: str, market_mode: str, timeframe: str):
     if market_mode == "crypto":
-        frame = fetch_crypto_candles(pair.replace("/", ""), "1m")
-    else:
-        frame = fetch_forex_candles(pair, "1min")
+        return fetch_crypto_candles(pair.replace("/", ""), timeframe)
+    return fetch_forex_candles(pair, {"30m": "30min", "15m": "15min", "5m": "5min", "1m": "1min"}[timeframe])
+
+
+def _load_frames(pair: str, market_mode: str, now_utc: datetime, automatic: bool):
+    """Load only the selected market and cache each timeframe until its candle period changes."""
+    key = (market_mode, pair)
+    frames = {}
+    periods = {"30m": _period_start(now_utc, 1800), "15m": _period_start(now_utc, 900), "5m": _period_start(now_utc, 300), "1m": _period_start(now_utc, 60)}
+
+    with _CACHE_LOCK:
+        cached = _CACHE.get(key, {}) if automatic else {}
+
+    for tf in ("30m", "15m", "5m", "1m"):
+        if automatic and cached.get(tf) is not None and cached.get(f"{tf}_period") == periods[tf]:
+            frames[tf] = cached[tf]
+        else:
+            frames[tf] = _fetch_frame(pair, market_mode, tf)
 
     if automatic:
         with _CACHE_LOCK:
-            _CACHE[key] = {"entry_frame": frame, "entry_period": current_period}
-    return frame
+            _CACHE[key] = {}
+            for tf in ("30m", "15m", "5m", "1m"):
+                _CACHE[key][tf] = frames[tf]
+                _CACHE[key][f"{tf}_period"] = periods[tf]
+
+    return frames
+
+
+def _mtf_direction_allows(frames: dict, side: str) -> bool:
+    """Use 30m+15m for directional agreement and 5m for entry confirmation."""
+    wanted = "buy" if side == "BUY" else "sell"
+    higher = [timeframe_components(frames[tf], wanted) for tf in ("30m", "15m")]
+    entry = timeframe_components(frames["5m"], wanted)
+
+    # Both higher timeframes must agree with the proposed 1m direction.
+    if not all(bool(part["trend"]) for part in higher):
+        return False
+
+    # The 5m timeframe must show a same-direction trigger. This is deliberately
+    # lighter than the full MTF score gate so valid 1m entries are not erased.
+    return bool(entry["trigger"])
 
 
 def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) -> dict:
-    """Generate a pure 1m MMC signal for only the selected market.
+    """Generate a 1m entry only when 30m/15m direction and 5m trigger agree.
 
-    The 30m/15m/5m MTF engine is intentionally not called here. The latest
-    closed 1m candle is analyzed and any valid signal is an entry for the
-    next 1m candle, never the candle currently forming.
-
-    Automatic mode may continue running every minute, but it is still limited
-    to one unresolved entry at a time for the selected market. This prevents a
-    delayed candle/result response from stacking consecutive 1m trades.
-
-    After a confirmed LOSS, the selected market is locked. The lock is removed
-    only after a later NO_TRADE observation, so a new BUY/SELL must come from a
-    genuinely fresh MMC setup rather than the losing setup continuing.
+    Only the selected market is fetched. Higher timeframes are cached in AUTO
+    mode according to their candle boundaries, while the 1m frame refreshes
+    once per minute. The entry remains the next 1m candle, never the current
+    running candle.
     """
     pair = pair.strip().upper()
     market_mode = market_mode.strip().lower()
@@ -76,18 +92,11 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     signal_at_utc = datetime.now(timezone.utc)
     next_candle_utc = _next_candle_boundary_utc(signal_at_utc, 60)
 
-    # Resolve any due previous entry before deciding whether this market remains
-    # locked. If the database is unavailable, the existing live signal path must
-    # continue working normally.
     try:
         settle_pending()
     except Exception:
         pass
 
-    # Never create a second BUY/SELL while an earlier entry for this exact
-    # market is still unresolved. This is especially important in AUTO SIGNAL:
-    # if the provider is a few seconds late publishing the just-closed candle,
-    # the next automatic request must wait instead of opening another trade.
     pending_reason = pending_trade_reason(market_mode, requested_pair)
     if pending_reason:
         signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
@@ -99,42 +108,34 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
             f"({next_candle_utc.strftime('%H:%M:%S')} UTC), কিন্তু আগের trade settle না হওয়া পর্যন্ত BUY/SELL বন্ধ।"
         )
         return {
-            "pair": requested_pair,
-            "requested_pair": requested_pair,
-            "market_mode": market_mode,
-            "source": "Binance" if market_mode == "crypto" else "Twelve Data",
-            "signal": "NO_TRADE",
-            "buy_score": 0,
-            "sell_score": 0,
-            "reason": reason_text,
+            "pair": requested_pair, "requested_pair": requested_pair, "market_mode": market_mode,
+            "source": "Binance" if market_mode == "crypto" else "Twelve Data", "signal": "NO_TRADE",
+            "buy_score": 0, "sell_score": 0, "reason": reason_text,
             "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
-            "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
-            "candle_time": None,
-            "analysis_candle_time_utc": None,
-            "entry_price": None,
-            "entry_price_type": "pending_trade_block",
-            "entry_time_utc": next_candle_utc.isoformat(timespec="seconds"),
-            "entry_time_bd": entry_time_text,
-            "entry_delay_seconds": 0,
-            "timeframe": "1m pure MMC entry",
-            "entry_timeframe": "1m",
-            "automatic": automatic,
+            "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": None,
+            "analysis_candle_time_utc": None, "entry_price": None, "entry_price_type": "pending_trade_block",
+            "entry_time_utc": next_candle_utc.isoformat(timespec="seconds"), "entry_time_bd": entry_time_text,
+            "entry_delay_seconds": 0, "timeframe": "30m + 15m + 5m confirmation / 1m entry",
+            "entry_timeframe": "1m", "automatic": automatic,
         }
 
-    entry_frame = _load_1m_frame(requested_pair, market_mode, signal_at_utc, automatic)
+    frames = _load_frames(requested_pair, market_mode, signal_at_utc, automatic)
+    entry_frame = frames["1m"]
     result = generate_1m_signal(entry_frame)
 
-    # LOSS lock is market/pair-wide: while locked, no BUY/SELL is allowed. A
-    # NO_TRADE observation clears the lock; that observation itself remains
-    # NO_TRADE. The next fresh valid MMC setup can then signal.
+    # Final MTF direction filter: a 1m BUY/SELL is valid only when 30m and 15m
+    # agree with it and 5m provides a same-direction trigger.
+    if result.action in {"BUY", "SELL"} and not _mtf_direction_allows(frames, result.action):
+        direction = "BUY" if result.action == "BUY" else "SELL"
+        result = Signal(
+            "NO_TRADE", result.buy_score, result.sell_score,
+            f"১ মিনিটে {direction} setup পাওয়া গেলেও ৩০m ও ১৫m একই দিকে নিশ্চিত নয় অথবা ৫m confirmation নেই; তাই MTF filter-এর কারণে entry বাতিল করা হয়েছে।",
+        )
+
     loss_reason = loss_lock_reason(market_mode, requested_pair, result.action)
     if loss_reason and result.action in {"BUY", "SELL"}:
         result = Signal("NO_TRADE", result.buy_score, result.sell_score, loss_reason)
 
-    # Prevent repeated BUY/SELL entries while the same strong support/resistance
-    # level is still active. The guard is deliberately outside the MMC engine:
-    # if PostgreSQL is unavailable it fails open and the original signal path is
-    # preserved.
     if result.action in {"BUY", "SELL"}:
         block_reason = check_reentry_guard(entry_frame, market_mode, requested_pair, result.action)
         if block_reason:
@@ -158,25 +159,15 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     )
 
     return {
-        "pair": requested_pair,
-        "requested_pair": requested_pair,
-        "market_mode": market_mode,
-        "source": "Binance" if market_mode == "crypto" else "Twelve Data",
-        "signal": result.action,
-        "buy_score": result.buy_score,
-        "sell_score": result.sell_score,
-        "reason": reason_text,
+        "pair": requested_pair, "requested_pair": requested_pair, "market_mode": market_mode,
+        "source": "Binance" if market_mode == "crypto" else "Twelve Data", "signal": result.action,
+        "buy_score": result.buy_score, "sell_score": result.sell_score, "reason": reason_text,
         "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
-        "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
-        "candle_time": candle_time,
-        "analysis_candle_time_utc": candle_time,
-        "entry_price": entry_price,
-        "entry_price_type": "last_closed_1m_close_reference",
-        "entry_time_utc": next_candle_utc.isoformat(),
-        "entry_time_bd": entry_time_text,
-        "entry_delay_seconds": 0,
-        "timeframe": "1m pure MMC entry",
-        "entry_timeframe": "1m",
+        "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": candle_time,
+        "analysis_candle_time_utc": candle_time, "entry_price": entry_price,
+        "entry_price_type": "last_closed_1m_close_reference", "entry_time_utc": next_candle_utc.isoformat(),
+        "entry_time_bd": entry_time_text, "entry_delay_seconds": 0,
+        "timeframe": "30m + 15m + 5m confirmation / 1m entry", "entry_timeframe": "1m",
         "automatic": automatic,
     }
 
