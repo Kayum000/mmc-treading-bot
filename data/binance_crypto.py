@@ -29,8 +29,13 @@ def _http_json(url: str) -> object:
         return json.load(response)
 
 
-def _fetch_binance_payload(symbol: str, limit: int) -> list:
-    params = urlencode({"symbol": symbol.upper(), "interval": INTERVAL, "limit": limit})
+def _fetch_binance_payload(symbol: str, limit: int, start_ms: int | None = None, end_ms: int | None = None) -> list:
+    params_dict = {"symbol": symbol.upper(), "interval": INTERVAL, "limit": min(limit, 1000)}
+    if start_ms is not None:
+        params_dict["startTime"] = start_ms
+    if end_ms is not None:
+        params_dict["endTime"] = end_ms
+    params = urlencode(params_dict)
     last_error = None
     for base_url in BINANCE_BASE_URLS:
         try:
@@ -47,9 +52,14 @@ def _fetch_binance_payload(symbol: str, limit: int) -> list:
     raise RuntimeError(f"Binance market data unavailable: {last_error}")
 
 
-def _fetch_bybit_payload(symbol: str, limit: int) -> list:
+def _fetch_bybit_payload(symbol: str, limit: int, start_ms: int | None = None, end_ms: int | None = None) -> list:
     """Fallback public 1m spot-candle source when Binance is unreachable."""
-    params = urlencode({"category": "spot", "symbol": symbol.upper(), "interval": "1", "limit": min(limit, 1000)})
+    params_dict = {"category": "spot", "symbol": symbol.upper(), "interval": "1", "limit": min(limit, 1000)}
+    if start_ms is not None:
+        params_dict["start"] = start_ms
+    if end_ms is not None:
+        params_dict["end"] = end_ms
+    params = urlencode(params_dict)
     payload = _http_json(f"{BYBIT_BASE_URL}/v5/market/kline?{params}")
     if not isinstance(payload, dict) or payload.get("retCode") != 0:
         message = payload.get("retMsg", "Bybit API error") if isinstance(payload, dict) else "Bybit API error"
@@ -108,5 +118,28 @@ def fetch_crypto_candles(symbol: str, interval: str = INTERVAL, limit: int = 200
 
     df = _closed_candles(df)
     if df.empty:
-        raise RuntimeError("ক্রিপ্টো বাজারে কোনো সম্পূর্ণ বন্ধ 1m ক্যান্ডেল পাওয়া যায়নি")
+        raise RuntimeError("ক্রিপ্টো বাজারে কোনো সম্পূর্ণ বন্ধ 1m candle পাওয়া যায়নি")
+    return df.reset_index(drop=True)
+
+
+def fetch_crypto_candle_at(symbol: str, entry_time: datetime) -> pd.DataFrame:
+    """Fetch the exact historical 1m candle for a settlement timestamp."""
+    symbol = symbol.strip().upper().replace("/", "")
+    target = entry_time if entry_time.tzinfo else entry_time.replace(tzinfo=timezone.utc)
+    target = target.astimezone(timezone.utc).replace(second=0, microsecond=0)
+    start_ms = int(target.timestamp() * 1000)
+    end_ms = start_ms + (_INTERVAL_SECONDS * 1000) - 1
+    errors = []
+    try:
+        df = _binance_frame(_fetch_binance_payload(symbol, 5, start_ms=start_ms, end_ms=end_ms))
+    except Exception as exc:
+        errors.append(f"Binance: {exc}")
+        try:
+            df = _bybit_frame(_fetch_bybit_payload(symbol, 5, start_ms=start_ms, end_ms=end_ms))
+        except Exception as fallback_exc:
+            errors.append(f"বিকল্প উৎস: {fallback_exc}")
+            raise RuntimeError("ঐতিহাসিক ক্রিপ্টো candle আনা যায়নি। " + " | ".join(errors)) from fallback_exc
+    df = df.loc[pd.to_datetime(df["timestamp"], utc=True) == pd.Timestamp(target)]
+    if df.empty:
+        raise RuntimeError(f"Crypto candle not found for {target.isoformat()}")
     return df.reset_index(drop=True)
