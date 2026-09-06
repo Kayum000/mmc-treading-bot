@@ -72,8 +72,11 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     signal_at_utc = datetime.now(timezone.utc)
     next_candle_utc = _next_candle_boundary_utc(signal_at_utc)
 
+    # Fetch the selected market once, then let settlement use that same closed
+    # snapshot. This removes the old double-fetch race at the minute boundary.
+    entry_frame = _load_frame(pair, market_mode, signal_at_utc, automatic)
     try:
-        settle_pending()
+        settle_pending({(market_mode, pair): entry_frame})
     except Exception:
         pass
 
@@ -95,7 +98,6 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
             "timeframe": "Clean MMC / 1m", "entry_timeframe": "1m", "automatic": automatic,
         }
 
-    entry_frame = _load_frame(pair, market_mode, signal_at_utc, automatic)
     result = generate_signal(entry_frame)
 
     level_info = level_for_side(entry_frame, result.action) if result.action in {"BUY", "SELL"} else None
