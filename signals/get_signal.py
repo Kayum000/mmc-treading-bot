@@ -56,6 +56,36 @@ def _load_frame(pair: str, market_mode: str, now_utc: datetime, automatic: bool)
     return frame
 
 
+def _bengali_reason(reason: str) -> str:
+    """Translate strategy/protection reason text for the UI without changing logic."""
+    text = str(reason or "").strip()
+    replacements = (
+        ("Valid Supply/Demand origin → dynamic impulse measure → 50% equilibrium → AB=CD mirror → structure confluence → rejection → confirmation একসঙ্গে তৈরি হয়নি; তাই signal নেই।",
+         "বৈধ Supply/Demand Origin → বাজারের প্রকৃত Impulse Distance পরিমাপ → ৫০% Equilibrium → AB=CD Mirror → Structure Confluence → Rejection → Confirmation—সবগুলো শর্ত একসঙ্গে পূরণ হয়নি; তাই কোনো Signal নেই।"),
+        ("Support rejection হয়েছে, কিন্তু valid Supply/Demand origin, dynamic impulse distance, AB=CD mirror এবং সম্পূর্ণ bullish confirmation একসঙ্গে হয়নি; BUY বন্ধ।",
+         "Support Rejection হয়েছে, কিন্তু বৈধ Supply/Demand Origin, বাজারের প্রকৃত Impulse Distance, AB=CD Mirror এবং সম্পূর্ণ Bullish Confirmation—সবগুলো একসঙ্গে পূরণ হয়নি; তাই BUY Signal বন্ধ।"),
+        ("Resistance rejection হয়েছে, কিন্তু valid Supply/Demand origin, dynamic impulse distance, AB=CD mirror এবং সম্পূর্ণ bearish confirmation একসঙ্গে হয়নি; SELL বন্ধ।",
+         "Resistance Rejection হয়েছে, কিন্তু বৈধ Supply/Demand Origin, বাজারের প্রকৃত Impulse Distance, AB=CD Mirror এবং সম্পূর্ণ Bearish Confirmation—সবগুলো একসঙ্গে পূরণ হয়নি; তাই SELL Signal বন্ধ।"),
+        ("একই candle-এ দুই দিকের Mirror MMC confirmation এসেছে; তাই entry নেই।",
+         "একই Candle-এ BUY ও SELL—দুই দিকের Mirror MMC Confirmation এসেছে; তাই কোনো Entry নেই।"),
+        ("পরিষ্কার MMC যাচাইয়ের জন্য পর্যাপ্ত বন্ধ ১ মিনিটের ক্যান্ডেল নেই।",
+         "পরিষ্কার MMC যাচাইয়ের জন্য পর্যাপ্ত বন্ধ ১-মিনিটের Candle নেই।"),
+        ("পরবর্তী 1m candle-এ entry।", "পরবর্তী ১-মিনিটের Candle-এ Entry।"),
+        ("supply-origin", "Supply-Origin"),
+        ("demand-origin", "Demand-Origin"),
+        ("dynamic mirror distance", "বাজারের প্রকৃত Mirror Distance"),
+        ("50% equilibrium", "৫০% Equilibrium"),
+        ("AB=CD projected mirror target", "AB=CD অনুযায়ী Mirror Target"),
+        ("structure confluence", "Structure Confluence"),
+        ("rejection", "Rejection"),
+        ("bullish confirmation", "Bullish Confirmation"),
+        ("bearish confirmation", "Bearish Confirmation"),
+    )
+    for source, translated in replacements:
+        text = text.replace(source, translated)
+    return text
+
+
 def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) -> dict:
     """Generate one clean-MMC next-1m-candle entry for the selected market.
 
@@ -87,7 +117,7 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
             "pair": pair, "requested_pair": pair, "market_mode": market_mode,
             "source": "Binance" if market_mode == "crypto" else "Twelve Data", "signal": "NO_TRADE",
             "buy_score": 0, "sell_score": 0,
-            "reason": f"{pending_reason} এন্ট্রি হবে {entry_time_text} বাংলাদেশ সময় ({next_candle_utc.strftime('%H:%M:%S')} UTC)।",
+            "reason": f"{_bengali_reason(pending_reason)} এন্ট্রি হবে {entry_time_text} বাংলাদেশ সময় ({next_candle_utc.strftime('%H:%M:%S')} UTC)।",
             "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
             "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": None,
             "analysis_candle_time_utc": None, "entry_price": None, "entry_price_type": "pending_trade_block",
@@ -122,7 +152,7 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     entry_bd = next_candle_utc.astimezone(timezone(timedelta(hours=6)))
     entry_time_text = entry_bd.strftime("%d %b %Y, %H:%M:%S")
     reason_text = (
-        f"কারণ ও বিস্তারিত যাচাই: {result.reason} "
+        f"{_bengali_reason(result.reason)} "
         f"এন্ট্রি হবে পরবর্তী ১-মিনিটের Candle-এ, সময় {entry_time_text} বাংলাদেশ সময় "
         f"({next_candle_utc.strftime('%H:%M:%S')} UTC)। এটি চলমান Candle-এর জন্য নয়।"
     )
