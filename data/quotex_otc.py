@@ -27,23 +27,24 @@ def _run(value):
 
 def _client():
     try:
-        from quotexapi.stable_api import Quotex
-    except ImportError as exc:
-        raise RuntimeError("Quotex data library is not installed on the server.") from exc
+        from quotexpy import Quotex
+    except ImportError:
+        try:
+            from quotexapi.stable_api import Quotex
+        except ImportError as exc:
+            raise RuntimeError("Quotex data library is not installed on the server.") from exc
+
     email = os.getenv("QUOTEX_EMAIL", "").strip()
     password = os.getenv("QUOTEX_PASSWORD", "")
     ssid = os.getenv("QUOTEX_SSID", "").strip()
-    email_pass = os.getenv("QUOTEX_EMAIL_PASS", "").strip()
     if not ssid and (not email or not password):
         raise RuntimeError("Quotex OTC চালাতে QUOTEX_EMAIL/QUOTEX_PASSWORD বা QUOTEX_SSID সেট করুন।")
+
     kwargs = {"lang": os.getenv("QUOTEX_LANG", "en")}
     if ssid:
-        kwargs["set_ssid"] = ssid
-    else:
-        kwargs.update(email=email, password=password)
-        if email_pass:
-            kwargs["email_pass"] = email_pass
-    return Quotex(**kwargs)
+        # quotexpy 1.40.7 expects the session token as `ssid`.
+        kwargs["ssid"] = ssid
+    return Quotex(email=email, password=password, **kwargs)
 
 
 def _normalise_rows(payload):
@@ -75,6 +76,16 @@ def _normalise_rows(payload):
     return rows
 
 
+def _get_candles(client, asset: str, end_ts: float, offset: int):
+    """Support both quotexpy 1.40.x and the older stable_api signature."""
+    params = list(inspect.signature(client.get_candles).parameters.values())
+    if len(params) == 3:
+        # quotexpy: get_candles(asset, offset, period)
+        return _run(client.get_candles(asset, offset, _PERIOD))
+    # older stable_api/pyquotex style: get_candles(asset, end_time, offset, period)
+    return _run(client.get_candles(asset, end_ts, offset, _PERIOD))
+
+
 def _fetch_sync(asset: str, count: int = 200):
     client = _client()
     try:
@@ -85,7 +96,7 @@ def _fetch_sync(asset: str, count: int = 200):
             raise RuntimeError(f"Quotex connection failed: {reason}")
         end_ts = time.time()
         offset = _PERIOD * max(count + 20, 220)
-        payload = _run(client.get_candles(asset, end_ts, offset, _PERIOD))
+        payload = _get_candles(client, asset, end_ts, offset)
         rows = _normalise_rows(payload)
         if not rows:
             raise RuntimeError(f"Quotex returned no candle data for {asset}.")
@@ -104,18 +115,22 @@ def _fetch_sync(asset: str, count: int = 200):
 
 def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 200) -> pd.DataFrame:
     asset = str(asset).strip()
-    if asset not in OTC_PAIRS:
+    canonical = next((item for item in OTC_PAIRS if item.lower() == asset.lower()), "")
+    if not canonical:
         raise ValueError("Unsupported Quotex OTC market")
     if interval != "1m":
         raise ValueError("Only the 1m timeframe is supported for Quotex OTC MMC")
-    return _fetch_sync(asset, count=count)
+    return _fetch_sync(canonical, count=count)
 
 
 def quotex_status(asset: str) -> dict:
     started = time.time()
     try:
-        df = fetch_quotex_candles(asset, "1m", 40)
+        canonical = next((item for item in OTC_PAIRS if item.lower() == str(asset).strip().lower()), "")
+        if not canonical:
+            raise ValueError("Unsupported Quotex OTC market")
+        df = fetch_quotex_candles(canonical, "1m", 40)
         latest = pd.Timestamp(df.iloc[-1]["timestamp"]).strftime("%d %b %Y, %H:%M:%S UTC")
-        return {"ok": True, "connected": True, "asset": asset, "timeframe": "1m", "closed_candles": len(df), "latest_closed_candle": latest, "source": "Quotex OTC", "latency_ms": int((time.time() - started) * 1000)}
+        return {"ok": True, "connected": True, "asset": canonical, "timeframe": "1m", "closed_candles": len(df), "latest_closed_candle": latest, "source": "Quotex OTC", "latency_ms": int((time.time() - started) * 1000)}
     except Exception as exc:
         return {"ok": False, "connected": False, "asset": asset, "timeframe": "1m", "error": str(exc), "source": "Quotex OTC", "latency_ms": int((time.time() - started) * 1000)}
