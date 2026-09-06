@@ -155,4 +155,5 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 }})();
 </script>
 """
-        return response.set_data(html.replace(marker, script + marker))
+        response.set_data(html.replace(marker, script + marker))
+        return response
