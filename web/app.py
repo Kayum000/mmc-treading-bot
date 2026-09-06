@@ -327,7 +327,7 @@ def add_dashboard_assets(response):
   const refresh=document.getElementById('performance-refresh');
   if(!box||!toggle||!body||!history)return;
   const esc=v=>String(v??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
-  const price=v=>v==null?'—':Number(v).toFixed(5).replace(/0+$/,'').replace(/\.$/,'');
+  const price=v=>v==null?'—':Number(v).toFixed(5).replace(/0+$/,'').replace(/\\.$/,'');
   const time=v=>{const d=new Date(v);if(Number.isNaN(d.getTime()))return '—';return new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Dhaka',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(d)};
   async function loadPerformance(){
     error.hidden=true;
