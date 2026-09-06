@@ -10,6 +10,7 @@ from data.twelve_data_forex import fetch_forex_candles
 from data.binance_crypto import fetch_crypto_candles
 from strategy.signal import generate_1m_signal, Signal
 from strategy.reentry_guard import check_reentry_guard
+from performance import settle_pending, loss_lock_reason
 
 _CACHE = {}
 _CACHE_LOCK = threading.Lock()
@@ -55,6 +56,10 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     The 30m/15m/5m MTF engine is intentionally not called here. The latest
     closed 1m candle is analyzed and any valid signal is an entry for the
     next 1m candle, never the candle currently forming.
+
+    After a confirmed LOSS, the selected market is locked. The lock is removed
+    only after a later NO_TRADE observation, so a new BUY/SELL must come from a
+    genuinely fresh MMC setup rather than the losing setup continuing.
     """
     pair = pair.strip().upper()
     market_mode = market_mode.strip().lower()
@@ -65,8 +70,24 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
 
     requested_pair = pair
     signal_at_utc = datetime.now(timezone.utc)
+
+    # Resolve any due previous entry before deciding whether this market remains
+    # locked. If the database is unavailable, the existing live signal path must
+    # continue working normally.
+    try:
+        settle_pending()
+    except Exception:
+        pass
+
     entry_frame = _load_1m_frame(requested_pair, market_mode, signal_at_utc, automatic)
     result = generate_1m_signal(entry_frame)
+
+    # LOSS lock is market/pair-wide: while locked, no BUY/SELL is allowed. A
+    # NO_TRADE observation clears the lock; that observation itself remains
+    # NO_TRADE. The next fresh valid MMC setup can then signal.
+    loss_reason = loss_lock_reason(market_mode, requested_pair, result.action)
+    if loss_reason and result.action in {"BUY", "SELL"}:
+        result = Signal("NO_TRADE", result.buy_score, result.sell_score, loss_reason)
 
     # Prevent repeated BUY/SELL entries while the same strong support/resistance
     # level is still active. The guard is deliberately outside the MMC engine:
