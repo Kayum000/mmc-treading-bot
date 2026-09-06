@@ -78,6 +78,28 @@ def generate_signal(frames: dict[str, pd.DataFrame]) -> Signal:
     return Signal("NO_TRADE", buy, sell, diagnostic)
 
 
+def _recent_momentum_ok(work: pd.DataFrame, side: str) -> bool:
+    """Reject reversal entries when short-term momentum is still against them.
+
+    A support/resistance wick alone can appear during a continuing impulse.
+    We allow a normal one/two-candle pullback, but block entries when the last
+    four closes show persistent directional pressure and the fast EMA is also
+    sloping in that same adverse direction.
+    """
+    if len(work) < 6:
+        return True
+
+    closes = work["close"].astype(float).iloc[-4:]
+    fast = work["ema_fast"].astype(float)
+    fast_slope = float(fast.iloc[-1] - fast.iloc[-4])
+    down_steps = int((closes.diff().iloc[1:] < 0).sum())
+    up_steps = int((closes.diff().iloc[1:] > 0).sum())
+
+    if side == "buy":
+        return not (down_steps >= 3 and fast_slope < 0)
+    return not (up_steps >= 3 and fast_slope > 0)
+
+
 def generate_1m_signal(df: pd.DataFrame) -> Signal:
     """Pure 1-minute MMC entry using recent CLOSED candles.
 
@@ -99,6 +121,7 @@ def generate_1m_signal(df: pd.DataFrame) -> Signal:
     close = float(work["close"].iloc[-1])
     fast = float(work["ema_fast"].iloc[-1])
     trend = float(work["ema_trend"].iloc[-1])
+    latest_open = float(work["open"].iloc[-1]) if "open" in work.columns else close
     structure = market_structure(work, CONFIG.swing_lookback)
     sweep = liquidity_sweep(work, CONFIG.sweep_lookback)
     impulse = displacement(work)
@@ -143,11 +166,10 @@ def generate_1m_signal(df: pd.DataFrame) -> Signal:
     buy_trend = close > trend and fast > trend
     sell_trend = close < trend and fast < trend
 
-    # Strong level rejection is now mandatory for every 1m entry. This removes
-    # the old permissive OR-path where BOS/sweep/displacement could trigger a
-    # trade without a tested strong support/resistance level.
-    buy_level = buy_level_rejection_recent
-    sell_level = sell_level_rejection_recent
+    # Strong level rejection is mandatory for every 1m entry. In addition,
+    # require the latest rejection candle body to point in the trade direction.
+    buy_level = buy_level_rejection_recent and close > latest_open
+    sell_level = sell_level_rejection_recent and close < latest_open
 
     # Require at least TWO confirmations among BOS, liquidity sweep and
     # displacement within the recent closed-candle setup. strong_level_rejection
@@ -157,29 +179,34 @@ def generate_1m_signal(df: pd.DataFrame) -> Signal:
     buy_confirmation_count = int(buy_sweep_recent) + int(bullish_move_recent) + int(bullish_bos_recent)
     sell_confirmation_count = int(sell_sweep_recent) + int(bearish_move_recent) + int(bearish_bos_recent)
 
-    buy_valid = buy_trend and buy_level and buy_confirmation_count >= 2
-    sell_valid = sell_trend and sell_level and sell_confirmation_count >= 2
+    # Anti-chase filter: a wick at support/resistance is not enough if the
+    # short-term impulse is still pressing strongly in the opposite direction.
+    buy_momentum_ok = _recent_momentum_ok(work, "buy")
+    sell_momentum_ok = _recent_momentum_ok(work, "sell")
+
+    buy_valid = buy_trend and buy_level and buy_confirmation_count >= 2 and buy_momentum_ok
+    sell_valid = sell_trend and sell_level and sell_confirmation_count >= 2 and sell_momentum_ok
 
     if buy_valid and not sell_valid:
         return Signal(
             "BUY",
             buy_score,
             sell_score,
-            "১ মিনিটের কঠোর এমএমসি: সর্বশেষ বন্ধ হওয়া ক্যান্ডেলে শক্তিশালী support rejection হয়েছে এবং সাম্প্রতিক setup-এ liquidity sweep, displacement ও BOS-এর মধ্যে অন্তত দুটি bullish confirmation পাওয়া গেছে। Trend-ও bullish। তাই পরবর্তী ১ মিনিটের ক্যান্ডেলকে BUY entry হিসেবে ধরা হয়েছে।",
+            "১ মিনিটের কঠোর এমএমসি: সর্বশেষ বন্ধ হওয়া ক্যান্ডেলে bullish support rejection হয়েছে, অন্তত দুটি bullish confirmation মিলেছে এবং short-term momentum BUY-এর বিপরীতে শক্তিশালী নয়। তাই পরবর্তী ১ মিনিটের ক্যান্ডেলকে BUY entry হিসেবে ধরা হয়েছে।",
         )
     if sell_valid and not buy_valid:
         return Signal(
             "SELL",
             buy_score,
             sell_score,
-            "১ মিনিটের কঠোর এমএমসি: সর্বশেষ বন্ধ হওয়া ক্যান্ডেলে শক্তিশালী resistance rejection হয়েছে এবং সাম্প্রতিক setup-এ liquidity sweep, displacement ও BOS-এর মধ্যে অন্তত দুটি bearish confirmation পাওয়া গেছে। Trend-ও bearish। তাই পরবর্তী ১ মিনিটের ক্যান্ডেলকে SELL entry হিসেবে ধরা হয়েছে।",
+            "১ মিনিটের কঠোর এমএমসি: সর্বশেষ বন্ধ হওয়া ক্যান্ডেলে bearish resistance rejection হয়েছে, অন্তত দুটি bearish confirmation মিলেছে এবং short-term momentum SELL-এর বিপরীতে শক্তিশালী নয়। তাই পরবর্তী ১ মিনিটের ক্যান্ডেলকে SELL entry হিসেবে ধরা হয়েছে।",
         )
     if buy_valid and sell_valid:
-        return Signal("NO_TRADE", buy_score, sell_score, "১ মিনিটের শক্তিশালী level ও দুই বা তার বেশি confirmation—দুই দিকেই একসঙ্গে বৈধ হয়েছে; তাই দ্ব্যর্থক অবস্থায় entry দেওয়া হয়নি।")
+        return Signal("NO_TRADE", buy_score, sell_score, "১ মিনিটের শক্তিশালী level, confirmation ও momentum filter—দুই দিকেই একসঙ্গে বৈধ হয়েছে; তাই দ্ব্যর্থক অবস্থায় entry দেওয়া হয়নি।")
 
     return Signal(
         "NO_TRADE",
         buy_score,
         sell_score,
-        "১ মিনিটের কঠোর MMC filter পূরণ হয়নি: strong support/resistance level, latest trend এবং অন্তত দুটি একই-direction confirmation একসঙ্গে না পাওয়া পর্যন্ত entry দেওয়া হবে না।",
+        "১ মিনিটের কঠোর MMC filter পূরণ হয়নি: strong support/resistance level, latest trend, candle direction, অন্তত দুটি একই-direction confirmation এবং বিপরীত short-term momentum filter—সব একসঙ্গে না পাওয়া পর্যন্ত entry দেওয়া হবে না।",
     )
