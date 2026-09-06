@@ -5,7 +5,7 @@ import os
 from datetime import datetime, timezone, timedelta
 
 from data.twelve_data_forex import fetch_forex_candles
-from data.binance_crypto import fetch_crypto_candles
+from data.binance_crypto import fetch_crypto_candles, fetch_crypto_candle_at
 from strategy.mmc import level_for_side, final_confirmation
 
 RETENTION = timedelta(hours=24)
@@ -86,9 +86,6 @@ def init_db() -> None:
                 CREATE INDEX IF NOT EXISTS mmc_loss_locks_created_idx
                 ON mmc_loss_locks (created_at DESC)
             """)
-            # Performance is a rolling 24h view.  Loss protection is deliberately
-            # NOT expired here: one LOSS stays locked until a new strong level
-            # plus fresh MMC confirmation clears it.
             cur.execute("DELETE FROM mmc_signal_performance WHERE signal_time_utc < NOW() - INTERVAL '24 hours'")
         conn.commit()
 
@@ -111,12 +108,7 @@ def _clear_loss_lock(mode: str, pair: str) -> None:
 
 
 def loss_lock_reason(mode: str, pair: str, signal_action: str, frame=None, level_info=None) -> str | None:
-    """After one LOSS, allow a signal only on a new strong level + fresh MMC confirmation.
-
-    NO_TRADE never clears this lock. The old losing level is persisted, and a
-    new entry is permitted only when the current confirmed level is materially
-    different and the current frame has a fresh same-direction MMC confirmation.
-    """
+    """After one LOSS, allow a signal only on a new strong level + fresh MMC confirmation."""
     action = str(signal_action).upper()
     if action not in {"BUY", "SELL", "NO_TRADE"}:
         return None
@@ -146,8 +138,6 @@ def loss_lock_reason(mode: str, pair: str, signal_action: str, frame=None, level
             )
         return None
     except Exception:
-        # Protection fails closed: if the lock state cannot be read reliably,
-        # do not allow a new BUY/SELL signal through.
         if action in {"BUY", "SELL"}:
             return "LOSS_LOCKED: loss-protection state যাচাই করা যায়নি; নিরাপত্তার জন্য signal OFF রাখা হয়েছে।"
         return None
@@ -203,16 +193,27 @@ def record_signal(result: dict) -> None:
 def _frame_for_market(mode: str, pair: str):
     if mode == "crypto":
         return fetch_crypto_candles(pair.replace("/", ""), "1m", limit=200)
-    return fetch_forex_candles(pair, "1min", outputsize=200)
+    return fetch_forex_candles(pair, "1min", outputsize=2000)
 
 
-def _candle_from_frame(frame, entry_time: datetime):
-    if frame is None or frame.empty:
-        return None
-    target = _minute_start(entry_time)
-    timestamps = frame["timestamp"].apply(_minute_start)
-    matches = frame.loc[timestamps == target]
-    return matches.iloc[-1] if not matches.empty else None
+def _candle_from_frame(frame, entry_time: datetime, mode: str | None = None, pair: str | None = None):
+    if frame is not None and not frame.empty:
+        target = _minute_start(entry_time)
+        timestamps = frame["timestamp"].apply(_minute_start)
+        matches = frame.loc[timestamps == target]
+        if not matches.empty:
+            return matches.iloc[-1]
+    # A pending entry can be older than the normal live-data window. Fetch only
+    # the exact historical candle needed for settlement instead of incorrectly
+    # leaving the trade PENDING forever.
+    if mode == "crypto" and pair:
+        try:
+            historical = fetch_crypto_candle_at(pair.replace("/", ""), entry_time)
+            if historical is not None and not historical.empty:
+                return historical.iloc[-1]
+        except Exception:
+            return None
+    return None
 
 
 def _candle_color(candle) -> str:
@@ -252,7 +253,7 @@ def settle_pending() -> None:
                     except Exception:
                         frames[key] = None
                 entry_time = _minute_start(entry_time)
-                candle = _candle_from_frame(frames[key], entry_time)
+                candle = _candle_from_frame(frames[key], entry_time, mode, pair)
                 if candle is None:
                     continue
                 outcome = _outcome_from_color(signal, _candle_color(candle))
@@ -282,7 +283,6 @@ def settle_pending() -> None:
                             waiting_for_new_level=TRUE,
                             created_at=NOW()
                     """, (mode, pair, signal, entry_time, level_type, level_price))
-            # Keep performance history at 24h.  Do not delete loss locks here.
             cur.execute("DELETE FROM mmc_signal_performance WHERE signal_time_utc < NOW() - INTERVAL '24 hours'")
         conn.commit()
 
