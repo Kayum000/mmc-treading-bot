@@ -1,12 +1,11 @@
-"""Persistent one-entry lock for each active MMC support/resistance level."""
+"""Persistent one-entry lock for each active clean MMC level."""
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
 
 import pandas as pd
 
-from strategy.mmc_clean import get_mmc_levels, strong_level_rejection
+from strategy.mmc import get_mmc_levels, strong_level_rejection
 
 
 def _db_url() -> str:
@@ -79,7 +78,7 @@ def _save_lock(mode: str, pair: str, side: str, level_type: str, level_price: fl
 
 
 def check_reentry_guard(frame: pd.DataFrame, mode: str, pair: str, side: str) -> str | None:
-    """Block repeated entries while the same clean MMC level remains valid."""
+    """Allow one entry per clean MMC level until that level is invalidated."""
     side = str(side).upper()
     if side not in {"BUY", "SELL"}:
         return None
@@ -99,7 +98,7 @@ def check_reentry_guard(frame: pd.DataFrame, mode: str, pair: str, side: str) ->
                     _delete_lock(mode, pair, side)
                 else:
                     return (
-                        f"REENTRY_BLOCKED: একই active strong {level_type} level থেকে আগের {side} signal ইতিমধ্যে দেওয়া হয়েছে; "
+                        f"REENTRY_BLOCKED: একই active strong {level_type} level থেকে আগের {side} signal দেওয়া হয়েছে; "
                         "level invalidated না হওয়া পর্যন্ত নতুন entry বন্ধ।"
                     )
 
@@ -109,6 +108,7 @@ def check_reentry_guard(frame: pd.DataFrame, mode: str, pair: str, side: str) ->
         levels = get_mmc_levels(frame)
         if levels is None:
             return None
+
         if side == "BUY":
             level_price = float(levels["support"])
             tolerance = float(levels["tolerance"])
