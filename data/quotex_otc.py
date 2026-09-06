@@ -26,7 +26,7 @@ def _run(value):
 
 
 def _install_selenium_browser_fallback():
-    """Launch the Docker-provided Chromium/driver instead of UC auto-downloading one."""
+    """Launch a Render-safe Chromium/driver instead of UC auto-downloading one."""
     import undetected_chromedriver as uc
     from selenium import webdriver
     from selenium.webdriver.chrome.service import Service
@@ -48,8 +48,6 @@ def _install_selenium_browser_fallback():
         headless = kwargs.pop("headless", True)
         browser_executable_path = kwargs.pop("browser_executable_path", None)
 
-        # If a caller uses positional UC arguments we cannot safely reinterpret
-        # them as Selenium arguments; preserve the original behavior in that case.
         if args:
             return original(*args, options=options, **kwargs)
 
@@ -71,7 +69,9 @@ def _install_selenium_browser_fallback():
             options.binary_location = browser_path
 
         if headless:
-            options.add_argument("--headless=new")
+            # Old headless mode is more compatible with the Chrome builds
+            # available on Render's native Python runtime.
+            options.add_argument("--headless")
         for flag in (
             "--no-sandbox",
             "--disable-setuid-sandbox",
@@ -80,16 +80,24 @@ def _install_selenium_browser_fallback():
             "--disable-software-rasterizer",
             "--disable-extensions",
             "--disable-background-networking",
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-breakpad",
+            "--disable-crash-reporter",
+            "--disable-features=UseDBus,Translate,MediaRouter",
+            "--disable-ipc-flooding-protection",
+            "--disable-notifications",
+            "--disable-popup-blocking",
             "--disable-sync",
+            "--metrics-recording-only",
             "--no-first-run",
             "--no-default-browser-check",
-            "--disable-crash-reporter",
-            "--remote-debugging-pipe",
-            "--window-size=1920,1080",
+            "--remote-debugging-port=0",
+            "--window-size=1280,720",
         ):
             options.add_argument(flag)
 
-        user_data = "/tmp/mmc-chrome"
+        user_data = f"/tmp/mmc-chrome-{os.getpid()}"
         Path(user_data).mkdir(parents=True, exist_ok=True)
         options.add_argument(f"--user-data-dir={user_data}")
 
@@ -107,7 +115,7 @@ def _install_selenium_browser_fallback():
             detail = ""
             if log_path.exists():
                 try:
-                    detail = log_path.read_text(errors="replace")[-4000:]
+                    detail = log_path.read_text(errors="replace")[-5000:]
                 except Exception:
                     pass
             if detail:
