@@ -1,13 +1,25 @@
-"""Single canonical MMC strategy engine.
+"""Single canonical clean MMC strategy engine.
 
-No indicators and no multi-timeframe logic live here.  The engine uses only
-price action: confirmed support/resistance, liquidity sweeps, displacement,
-and rejection/confirmation.  The caller decides whether the final confirmed
-setup becomes the next 1-minute entry.
+Only this module contains MMC decision logic. It is deliberately single-
+timeframe and uses completed 1-minute price action only: strong
+support/resistance, liquidity sweep, displacement, and confirmation.
+There is no EMA/RSI/MACD and no multi-timeframe logic.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pandas as pd
+
+from config import CONFIG
+
+
+@dataclass(frozen=True)
+class Signal:
+    action: str
+    buy_score: int
+    sell_score: int
+    reason: str
 
 
 def _valid(df: pd.DataFrame, minimum: int) -> bool:
@@ -46,7 +58,7 @@ def liquidity_sweep(df: pd.DataFrame, lookback: int = 10) -> str:
 
 
 def displacement(df: pd.DataFrame) -> str:
-    """Return direction only for a real body-quality/range-expansion candle."""
+    """Return direction for a real body-quality/range-expansion candle."""
     if not _valid(df, 3):
         return "none"
     previous = df.iloc[-2]
@@ -94,7 +106,7 @@ def _cluster_levels(values: list[float], tolerance: float) -> list[dict]:
 
 
 def get_mmc_levels(df: pd.DataFrame, lookback: int = 20) -> dict | None:
-    """Return only confirmed support/resistance clusters; never use whole-range extremes."""
+    """Return confirmed support/resistance clusters; never use raw extremes."""
     if not _valid(df, lookback + 5):
         return None
     prior = df.iloc[-lookback - 1:-1].copy()
@@ -128,7 +140,7 @@ def get_mmc_levels(df: pd.DataFrame, lookback: int = 20) -> dict | None:
 
 
 def strong_level_rejection(df: pd.DataFrame, lookback: int = 20) -> str:
-    """Confirm a strong level rejection: level + wick + reclaim + direction."""
+    """Confirm a strong level rejection: strong level + wick + reclaim + direction."""
     levels = get_mmc_levels(df, lookback)
     if levels is None:
         return "none"
@@ -173,32 +185,8 @@ def strong_level_rejection(df: pd.DataFrame, lookback: int = 20) -> str:
     return "none"
 
 
-def breakout_retest_role_reversal(df: pd.DataFrame, lookback: int = 10) -> str:
-    """Confirm a recent breakout followed by a same-level retest and reclaim."""
-    if not _valid(df, lookback + 5):
-        return "none"
-    recent = df.iloc[-lookback * 3:].reset_index(drop=True)
-    last_idx = len(recent) - 1
-    ranges = (recent["high"].astype(float) - recent["low"].astype(float)).clip(lower=0)
-    tolerance = max(float(ranges.tail(lookback).median()) * 0.10, 1e-12)
-
-    for breakout_idx in range(max(lookback, last_idx - 3), last_idx):
-        prior = recent.iloc[breakout_idx - lookback:breakout_idx]
-        breakout = recent.iloc[breakout_idx]
-        last = recent.iloc[last_idx]
-        resistance = float(prior["high"].max())
-        support = float(prior["low"].min())
-        if float(breakout["close"]) > resistance:
-            if float(last["low"]) <= resistance + tolerance and float(last["close"]) > resistance and float(last["close"]) >= float(last["open"]):
-                return "bullish_role_reversal"
-        if float(breakout["close"]) < support:
-            if float(last["high"]) >= support - tolerance and float(last["close"]) < support and float(last["close"]) <= float(last["open"]):
-                return "bearish_role_reversal"
-    return "none"
-
-
 def final_confirmation(df: pd.DataFrame, side: str, lookback: int = 20) -> bool:
-    """Return True only when the latest closed candle confirms a fresh MMC level setup."""
+    """Require strong level rejection plus same-direction fresh confirmation."""
     wanted = str(side).lower()
     rejection = strong_level_rejection(df, lookback)
     if wanted == "buy":
@@ -210,3 +198,70 @@ def final_confirmation(df: pd.DataFrame, side: str, lookback: int = 20) -> bool:
             liquidity_sweep(df, 10) == "sell_side_rejection" or displacement(df) == "bearish"
         )
     return False
+
+
+def generate_signal(df: pd.DataFrame) -> Signal:
+    """Generate one signal from the latest closed 1m candle only.
+
+    Rules: strong support + bullish MMC confirmation -> BUY; strong
+    resistance + bearish MMC confirmation -> SELL. A level touch by itself
+    can never produce an entry. The caller assigns the next 1-minute candle
+    as the entry candle.
+    """
+    minimum = max(CONFIG.sweep_lookback + 1, CONFIG.level_lookback + 5, 23)
+    if not _valid(df, minimum):
+        return Signal("NO_TRADE", 0, 0, "পরিষ্কার MMC যাচাইয়ের জন্য পর্যাপ্ত বন্ধ ১ মিনিটের ক্যান্ডেল নেই।")
+
+    structure = market_structure(df, CONFIG.swing_lookback)
+    sweep = liquidity_sweep(df, CONFIG.sweep_lookback)
+    impulse = displacement(df)
+    rejection = strong_level_rejection(df, CONFIG.level_lookback)
+
+    buy_score = (
+        2 * int(structure == "bullish_bos")
+        + 2 * int(sweep == "buy_side_rejection")
+        + int(impulse == "bullish")
+        + 3 * int(rejection == "strong_support_rejection")
+    )
+    sell_score = (
+        2 * int(structure == "bearish_bos")
+        + 2 * int(sweep == "sell_side_rejection")
+        + int(impulse == "bearish")
+        + 3 * int(rejection == "strong_resistance_rejection")
+    )
+
+    buy_confirmation = (
+        rejection == "strong_support_rejection"
+        and final_confirmation(df, "buy", CONFIG.level_lookback)
+        and ((sweep == "buy_side_rejection" and impulse == "bullish") or structure == "bullish_bos")
+    )
+    sell_confirmation = (
+        rejection == "strong_resistance_rejection"
+        and final_confirmation(df, "sell", CONFIG.level_lookback)
+        and ((sweep == "sell_side_rejection" and impulse == "bearish") or structure == "bearish_bos")
+    )
+
+    if buy_confirmation and not sell_confirmation:
+        return Signal("BUY", buy_score, sell_score, "ক্লিন MMC BUY: শক্ত support level-এ rejection এবং bullish confirmation পাওয়া গেছে। পরবর্তী 1m candle-এ entry।")
+    if sell_confirmation and not buy_confirmation:
+        return Signal("SELL", buy_score, sell_score, "ক্লিন MMC SELL: শক্ত resistance level-এ rejection এবং bearish confirmation পাওয়া গেছে। পরবর্তী 1m candle-এ entry।")
+    if buy_confirmation and sell_confirmation:
+        return Signal("NO_TRADE", buy_score, sell_score, "একই candle-এ দুই দিকের MMC confirmation এসেছে; তাই entry নেই।")
+    if rejection == "strong_support_rejection":
+        return Signal("NO_TRADE", buy_score, sell_score, "Support rejection হয়েছে, কিন্তু সম্পূর্ণ bullish confirmation হয়নি; BUY বন্ধ।")
+    if rejection == "strong_resistance_rejection":
+        return Signal("NO_TRADE", buy_score, sell_score, "Resistance rejection হয়েছে, কিন্তু সম্পূর্ণ bearish confirmation হয়নি; SELL বন্ধ।")
+    return Signal("NO_TRADE", buy_score, sell_score, "শক্ত MMC support/resistance rejection এবং confirmation একসঙ্গে তৈরি হয়নি; তাই signal নেই।")
+
+
+def level_for_side(df: pd.DataFrame, side: str) -> tuple[str, float] | None:
+    """Return the canonical strong level used by a confirmed BUY/SELL setup."""
+    levels = get_mmc_levels(df, CONFIG.level_lookback)
+    if not levels:
+        return None
+    side = str(side).upper()
+    if side == "BUY" and levels.get("support") is not None and levels.get("support_touches", 0) >= 2:
+        return "support", float(levels["support"])
+    if side == "SELL" and levels.get("resistance") is not None and levels.get("resistance_touches", 0) >= 2:
+        return "resistance", float(levels["resistance"])
+    return None
