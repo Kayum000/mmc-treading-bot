@@ -96,6 +96,15 @@ def _mirror(df,side,lookback=20):
 
 def get_mirror_projection(df,side,lookback=20): return _mirror(df,str(side).upper(),lookback)
 
+def level_for_side(df, side, lookback=20):
+    """Return the canonical Mirror MMC level for BUY/SELL as (type, price)."""
+    side=str(side).upper()
+    if side not in {'BUY','SELL'}: return None
+    mirror=get_mirror_projection(df,side,lookback)
+    if not mirror: return None
+    level_type='supply-origin' if side=='SELL' else 'demand-origin'
+    return level_type, float(mirror['zone'])
+
 def strong_level_rejection(df,lookback=20):
     if df is None or df.empty:return 'none'
     r=df.iloc[-1]; hi,lo=float(r['high']),float(r['low']);o,c=float(r['open']),float(r['close']);rg=_rng(r);b=abs(c-o);up=hi-max(o,c);dn=min(o,c)-lo;s=liquidity_sweep(df,min(10,len(df)-1));imp=displacement(df)
@@ -195,13 +204,11 @@ def final_confirmation(df,side,lookback=20):
 def generate_signal(df):
     minimum=max(CONFIG.sweep_lookback+1,CONFIG.level_lookback+5,27)
     if not _valid(df,minimum):return Signal('NO_TRADE',0,0,'পরিষ্কার MMC যাচাইয়ের জন্য পর্যাপ্ত বন্ধ ১ মিনিটের ক্যান্ডেল নেই।')
-    buy_m=get_mirror_projection(df,'BUY',CONFIG.level_lookback);sell_m=get_mirror_projection(df,'SELL',CONFIG.level_lookback);st=market_structure(df,CONFIG.swing_lookback);sw=liquidity_sweep(df,CONFIG.sweep_lookback);imp=displacement(df);rej=strong_level_rejection(df,CONFIG.level_lookback)
-    buy=bool(buy_m and final_confirmation(df,'buy',CONFIG.level_lookback) and ((sw=='buy_side_rejection' and imp=='bullish') or st=='bullish_bos'))
-    sell=bool(sell_m and final_confirmation(df,'sell',CONFIG.level_lookback) and ((sw=='sell_side_rejection' and imp=='bearish') or st=='bearish_bos'))
-    bs,ss,v=concept_scores(df,buy_m or sell_m)
-    if buy and not sell:
-        m=buy_m;return Signal('BUY',bs,ss,f"ক্লিন Mirror MMC BUY: supply-origin {m['origin']:.8f} → support {m['zone']:.8f}, dynamic mirror distance {m['distance']:.8f}, 50% equilibrium {m['equilibrium']:.8f}, AB=CD projected mirror target {m['mirror_target']:.8f}; supporting MMC votes {bs}/22। Final direction শুধু মূল Mirror MMC confirmation থেকে। পরবর্তী 1m candle-এ entry।")
-    if sell and not buy:
-        m=sell_m;return Signal('SELL',bs,ss,f"ক্লিন Mirror MMC SELL: demand-origin {m['origin']:.8f} → resistance {m['zone']:.8f}, dynamic mirror distance {m['distance']:.8f}, 50% equilibrium {m['equilibrium']:.8f}, AB=CD projected mirror target {m['mirror_target']:.8f}; supporting MMC votes {ss}/22। Final direction শুধু মূল Mirror MMC confirmation থেকে। পরবর্তী 1m candle-এ entry।")
-    if buy and sell:return Signal('NO_TRADE',bs,ss,f'একই candle-এ দুই দিকের মূল Mirror MMC confirmation এসেছে; তাই entry নেই। Supporting votes: BUY {bs}/22 বনাম SELL {ss}/22।')
-    return Signal('NO_TRADE',bs,ss,f'মূল Mirror MMC final confirmation তৈরি হয়নি; তাই signal নেই। Supporting MMC votes: BUY {bs}/22, SELL {ss}/22।')
+    buy_m=get_mirror_projection(df,'BUY',CONFIG.level_lookback);sell_m=get_mirror_projection(df,'SELL',CONFIG.level_lookback);st=market_structure(df,CONFIG.swing_lookback);sw=liquidity_sweep(df,CONFIG.sweep_lookback);imp=displacement(df);bv,sv,_=concept_scores(df)
+    if final_confirmation(df,'buy',CONFIG.level_lookback) and not final_confirmation(df,'sell',CONFIG.level_lookback):
+        return Signal('BUY',bv,sv,f'Mirror MMC BUY confirmed; supporting concept votes {bv}/22 vs {sv}/22. Final direction is controlled only by the main Mirror MMC.')
+    if final_confirmation(df,'sell',CONFIG.level_lookback) and not final_confirmation(df,'buy',CONFIG.level_lookback):
+        return Signal('SELL',bv,sv,f'Mirror MMC SELL confirmed; supporting concept votes {bv}/22 vs {sv}/22. Final direction is controlled only by the main Mirror MMC.')
+    if buy_m and sell_m and st=='neutral' and sw=='none' and imp=='none':
+        return Signal('NO_TRADE',bv,sv,'একই সময়ে দুই দিকের Mirror MMC setup পরিষ্কার নয়; তাই কোনো Entry নেই।')
+    return Signal('NO_TRADE',bv,sv,f'Valid Supply/Demand origin → dynamic impulse measure → 50% equilibrium → AB=CD mirror → structure confluence → rejection → confirmation একসঙ্গে তৈরি হয়নি; তাই signal নেই। Supporting votes: BUY {bv}/22, SELL {sv}/22.')
