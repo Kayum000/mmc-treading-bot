@@ -1,4 +1,4 @@
-"""Crypto candle adapter for MMC signals."""
+"""Crypto candle adapter for the clean MMC strategy."""
 from __future__ import annotations
 
 import json
@@ -90,7 +90,7 @@ def _bybit_frame(payload: list, interval: str) -> pd.DataFrame:
     return df[["timestamp", "open", "high", "low", "close"]].dropna().sort_values("timestamp")
 
 
-def fetch_crypto_candles(symbol: str, interval: str = "5m", limit: int = 200) -> pd.DataFrame:
+def fetch_crypto_candles(symbol: str, interval: str = "1m", limit: int = 200) -> pd.DataFrame:
     if interval not in INTERVALS:
         raise ValueError(f"Unsupported interval: {interval}")
     symbol = symbol.strip().upper().replace("/", "")
@@ -112,8 +112,3 @@ def fetch_crypto_candles(symbol: str, interval: str = "5m", limit: int = 200) ->
     if df.empty:
         raise RuntimeError(f"ক্রিপ্টো বাজারে কোনো সম্পূর্ণ বন্ধ {interval} ক্যান্ডেল পাওয়া যায়নি")
     return df.reset_index(drop=True)
-
-
-def fetch_crypto_multi_timeframe(symbol: str) -> dict[str, pd.DataFrame]:
-    """Fetch closed 30m/15m/5m candles for the selected crypto pair."""
-    return {label: fetch_crypto_candles(symbol, interval) for label in ("30m", "15m", "5m")}
