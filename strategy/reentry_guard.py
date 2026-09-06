@@ -1,4 +1,4 @@
-"""Persistent one-entry lock for each active strong support/resistance level."""
+"""Persistent one-entry lock for each active MMC support/resistance level."""
 from __future__ import annotations
 
 import os
@@ -6,10 +6,10 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-from strategy.mmc import strong_level_rejection
+from strategy.mmc_clean import strong_level_rejection
 
 _LOOKBACK = 20
-_TOLERANCE_FACTOR = 0.20
+_TOLERANCE_FACTOR = 0.08
 
 
 def _db_url() -> str:
@@ -41,24 +41,17 @@ def _minute_start(value) -> datetime:
 
 
 def _level_before_latest(frame: pd.DataFrame, side: str):
-    """Calculate the strong level immediately before the latest closed candle."""
     if frame is None or frame.empty or "timestamp" not in frame:
         return None
-
     work = frame.copy()
     timestamps = work["timestamp"].apply(_minute_start)
     prior = work.loc[timestamps < timestamps.iloc[-1]].tail(_LOOKBACK)
     if len(prior) < _LOOKBACK:
         return None
-
-    avg_range = float((prior["high"] - prior["low"]).mean())
+    avg_range = float((prior["high"] - prior["low"]).median())
     if avg_range <= 0:
         return None
-
-    if side == "SELL":
-        level = float(prior["high"].max())
-    else:
-        level = float(prior["low"].min())
+    level = float(prior["high"].max()) if side == "SELL" else float(prior["low"].min())
     tolerance = max(avg_range * _TOLERANCE_FACTOR, 1e-12)
     return level, tolerance
 
@@ -119,51 +112,38 @@ def _save_lock(mode: str, pair: str, side: str, level_type: str, level_price: fl
 
 
 def check_reentry_guard(frame: pd.DataFrame, mode: str, pair: str, side: str) -> str | None:
-    """Allow only one entry while a strong level remains active.
-
-    A persistent lock is created when a confirmed strong-level signal is allowed.
-    Further clicks/signals from that same market/direction are blocked until the
-    locked level is decisively invalidated by a closed-candle price break.
-    """
+    """Block repeated entries while the same MMC level remains valid."""
     side = str(side).upper()
     if side not in {"BUY", "SELL"}:
         return None
-
     try:
         _ensure_table()
         lock = _get_lock(mode, pair, side)
-
         if lock:
             level_type, level_price, tolerance = lock
             if frame is not None and not frame.empty:
                 latest_close = float(frame.iloc[-1]["close"])
-                if side == "SELL":
-                    invalidated = latest_close > float(level_price) + float(tolerance)
-                else:
-                    invalidated = latest_close < float(level_price) - float(tolerance)
+                invalidated = (
+                    latest_close > float(level_price) + float(tolerance)
+                    if side == "SELL"
+                    else latest_close < float(level_price) - float(tolerance)
+                )
                 if invalidated:
                     _delete_lock(mode, pair, side)
                 else:
                     return (
-                        f"REENTRY_BLOCKED: একই active strong {level_type} level থেকে "
-                        f"আগের {side} signal ইতিমধ্যে দেওয়া হয়েছে; level invalidated "
-                        "না হওয়া পর্যন্ত নতুন entry বন্ধ।"
+                        f"REENTRY_BLOCKED: একই active strong {level_type} level থেকে আগের {side} signal ইতিমধ্যে দেওয়া হয়েছে; "
+                        "level invalidated না হওয়া পর্যন্ত নতুন entry বন্ধ।"
                     )
 
-        # Only lock genuine strong-level rejection signals. Ordinary MMC signals
-        # are not artificially limited by this layer.
-        rejection = strong_level_rejection(frame)
         expected = "strong_support_rejection" if side == "BUY" else "strong_resistance_rejection"
-        if rejection != expected:
+        if strong_level_rejection(frame) != expected:
             return None
-
         info = _level_before_latest(frame, side)
         if info is None:
             return None
         level_price, tolerance = info
-        level_type = "support" if side == "BUY" else "resistance"
-        _save_lock(mode, pair, side, level_type, level_price, tolerance)
+        _save_lock(mode, pair, side, "support" if side == "BUY" else "resistance", level_price, tolerance)
         return None
     except Exception:
-        # Protection must never crash the live signal endpoint.
         return None
