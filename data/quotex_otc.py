@@ -45,7 +45,7 @@ def _install_selenium_browser_fallback():
         kwargs.pop("suppress_welcome", None)
         kwargs.pop("no_sandbox", None)
         kwargs.pop("user_multi_procs", None)
-        headless = kwargs.pop("headless", True)
+        kwargs.pop("headless", None)
         browser_executable_path = kwargs.pop("browser_executable_path", None)
 
         if args:
@@ -68,11 +68,10 @@ def _install_selenium_browser_fallback():
         if browser_path:
             options.binary_location = browser_path
 
-        if headless:
-            # Old headless mode is more compatible with the Chrome builds
-            # available on Render's native Python runtime.
-            options.add_argument("--headless")
-        for flag in (
+        # quotexpy may explicitly pass headless=False. Render has no X server,
+        # so force headless mode regardless of the upstream value.
+        flags = (
+            "--headless",
             "--no-sandbox",
             "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
@@ -92,9 +91,10 @@ def _install_selenium_browser_fallback():
             "--metrics-recording-only",
             "--no-first-run",
             "--no-default-browser-check",
-            "--remote-debugging-port=0",
+            "--remote-debugging-pipe",
             "--window-size=1280,720",
-        ):
+        )
+        for flag in flags:
             options.add_argument(flag)
 
         user_data = f"/tmp/mmc-chrome-{os.getpid()}"
