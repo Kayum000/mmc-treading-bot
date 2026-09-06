@@ -3,11 +3,10 @@
 Data-only integration: this module never places trades. Credentials are read
 from environment variables and the returned frame contains closed OHLC candles.
 
-The OTC adapter intentionally uses the WebSocket-based ``pyquotex`` client.
-The previous ``quotexpy==1.40.7`` browser/Selenium path could start Chromium on
-Render and push the single 512 MB service over its memory limit. Keeping the
-browser out of this module also removes the Chrome/ChromeDriver compatibility
-failure from the signal-data path.
+The OTC adapter uses the WebSocket-based ``pyquotex`` client. It does not
+launch Chromium/Selenium. Quotex can still reject Render's outbound IP with
+HTTP 403/Cloudflare access protection; that condition is handled as a short
+circuit so dashboard polling cannot create a reconnect/login storm.
 """
 from __future__ import annotations
 
@@ -29,6 +28,11 @@ _CANDLE_CACHE: dict[tuple[str, int], tuple[float, pd.DataFrame]] = {}
 _CANDLE_CACHE_TTL = 15.0
 _STATUS_CACHE: dict[str, tuple[float, dict]] = {}
 _STATUS_CACHE_TTL = 15.0
+# When Quotex/Cloudflare rejects the Render egress IP, do not retry every
+# dashboard poll. A short circuit keeps the service stable and memory-light.
+_AUTH_BLOCK_UNTIL = 0.0
+_AUTH_BLOCK_ERROR = ""
+_AUTH_BLOCK_TTL = float(os.getenv("QUOTEX_AUTH_BLOCK_TTL", "90"))
 
 
 def _memory_rss_mb() -> float:
@@ -68,19 +72,27 @@ def _client():
     if not email or not password:
         raise RuntimeError("Quotex OTC চালাতে QUOTEX_EMAIL/QUOTEX_PASSWORD সেট করুন।")
 
-    # Keep session data in /tmp so credentials/session state do not grow the
-    # repository working tree. pyquotex uses this as local session storage;
-    # it is not a browser profile.
     session_root = "/tmp/mmc-quotex"
     os.makedirs(session_root, exist_ok=True)
-    return Quotex(
-        email=email,
-        password=password,
-        lang=os.getenv("QUOTEX_LANG", "en"),
-        root_path=session_root,
-        user_data_dir="session",
-        period_default=_PERIOD,
-    )
+
+    # pyquotex's HTTP login layer uses a browser-like Firefox UA by default.
+    # Allow an explicit UA/proxy to be supplied through Render environment
+    # variables without ever logging credentials or proxy details.
+    user_agent = os.getenv("QUOTEX_USER_AGENT", "").strip() or None
+    proxy = os.getenv("QUOTEX_PROXY", "").strip() or None
+    kwargs = {
+        "email": email,
+        "password": password,
+        "lang": os.getenv("QUOTEX_LANG", "en"),
+        "root_path": session_root,
+        "user_data_dir": "session",
+        "period_default": _PERIOD,
+    }
+    if user_agent:
+        kwargs["user_agent"] = user_agent
+    if proxy:
+        kwargs["proxies"] = proxy
+    return Quotex(**kwargs)
 
 
 def _normalise_rows(payload):
@@ -113,7 +125,14 @@ def _normalise_rows(payload):
     return rows
 
 
+def _is_access_block(error: object) -> bool:
+    text = str(error).lower()
+    return "403" in text or "forbidden" in text or "access page" in text or "cloudflare" in text
+
+
 def _fetch_sync(asset: str, count: int = 200):
+    global _AUTH_BLOCK_UNTIL, _AUTH_BLOCK_ERROR
+
     canonical = next((item for item in OTC_PAIRS if item.lower() == str(asset).strip().lower()), "")
     if not canonical:
         raise ValueError("Unsupported Quotex OTC market")
@@ -123,17 +142,20 @@ def _fetch_sync(asset: str, count: int = 200):
     if cached and now - cached[0] < _CANDLE_CACHE_TTL:
         return cached[1].copy(deep=True)
 
-    # Serialise only the Quotex network client. This avoids overlapping login /
-    # websocket sessions while preserving the rest of the Flask application.
+    if now < _AUTH_BLOCK_UNTIL:
+        raise RuntimeError(
+            _AUTH_BLOCK_ERROR
+            or "Quotex access is temporarily blocked; retry will resume automatically."
+        )
+
     with _QUOTEX_LOCK:
         now = time.monotonic()
         cached = _CANDLE_CACHE.get(cache_key)
         if cached and now - cached[0] < _CANDLE_CACHE_TTL:
             return cached[1].copy(deep=True)
+        if now < _AUTH_BLOCK_UNTIL:
+            raise RuntimeError(_AUTH_BLOCK_ERROR or "Quotex access is temporarily blocked.")
 
-        # Keep a guard against a bad upstream response/restart loop consuming
-        # the remaining Render memory. Unlike the old browser path, this should
-        # normally stay far below the 512 MB service limit.
         rss = _memory_rss_mb()
         max_rss = float(os.getenv("QUOTEX_MAX_RSS_MB", "430"))
         if rss >= max_rss:
@@ -149,11 +171,17 @@ def _fetch_sync(asset: str, count: int = 200):
             ok = check[0] if isinstance(check, tuple) else bool(check)
             if not ok:
                 reason = check[1] if isinstance(check, tuple) and len(check) > 1 else "unknown connection error"
-                raise RuntimeError(f"Quotex connection failed: {reason}")
+                message = f"Quotex connection failed: {reason}"
+                if _is_access_block(message):
+                    _AUTH_BLOCK_ERROR = (
+                        "Quotex returned HTTP 403/Forbidden during access. "
+                        "This is an upstream access block (often Cloudflare/egress-IP based), "
+                        "not a Render dashboard error. OTC requests are paused briefly to avoid retry storms."
+                    )
+                    _AUTH_BLOCK_UNTIL = time.monotonic() + _AUTH_BLOCK_TTL
+                    raise RuntimeError(_AUTH_BLOCK_ERROR)
+                raise RuntimeError(message)
 
-            # pyquotex's candle API uses seconds for offset/period. Request a
-            # small window because the signal engine only needs the latest
-            # closed candles; this avoids unnecessary WebSocket payloads.
             offset = _PERIOD * max(count + 20, 220)
             payload = _run(
                 client.get_candles(
@@ -176,8 +204,15 @@ def _fetch_sync(asset: str, count: int = 200):
                     f"Quotex returned only {len(df)} closed 1m candles for {canonical}; "
                     "at least 27 are required."
                 )
+            _AUTH_BLOCK_UNTIL = 0.0
+            _AUTH_BLOCK_ERROR = ""
             _CANDLE_CACHE[cache_key] = (time.monotonic(), df)
             return df.copy(deep=True)
+        except Exception as exc:
+            if _is_access_block(exc):
+                _AUTH_BLOCK_ERROR = str(exc)
+                _AUTH_BLOCK_UNTIL = time.monotonic() + _AUTH_BLOCK_TTL
+            raise
         finally:
             if client is not None:
                 try:
