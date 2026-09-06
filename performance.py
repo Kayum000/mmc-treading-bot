@@ -172,6 +172,39 @@ def loss_lock_reason(mode: str, pair: str, signal_action: str) -> str | None:
     return None
 
 
+def pending_trade_reason(mode: str, pair: str) -> str | None:
+    """Block new BUY/SELL generation while this market has an unresolved entry.
+
+    This is intentionally checked before creating another automatic signal. It
+    prevents a slow market-data response at the exact candle boundary from
+    causing overlapping 1-minute entries and the consecutive-loss pattern that
+    can otherwise appear in AUTO SIGNAL mode.
+    """
+    try:
+        init_db()
+        with _connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT signal, entry_time_utc
+                    FROM mmc_signal_performance
+                    WHERE market_mode=%s AND pair=%s AND result='PENDING'
+                    ORDER BY entry_time_utc ASC
+                    LIMIT 1
+                """, (mode, pair))
+                row = cur.fetchone()
+        if not row:
+            return None
+        signal, entry_time = row
+        return (
+            f"PENDING_LOCK: এই {mode.upper()} {pair} market-এ আগের {signal} "
+            f"entry এখনো settle হয়নি ({_minute_start(entry_time).isoformat()})। "
+            "আগের 1-minute candle-এর WIN/LOSS নিশ্চিত না হওয়া পর্যন্ত নতুন BUY/SELL বন্ধ।"
+        )
+    except Exception:
+        # Preserve the existing fail-open behavior if PostgreSQL is unavailable.
+        return None
+
+
 def record_signal(result: dict) -> None:
     """Persist a BUY/SELL signal without ever breaking the live signal path."""
     signal = str(result.get("signal", "")).upper()
