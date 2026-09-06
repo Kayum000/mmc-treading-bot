@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from pathlib import Path
 
 import pandas as pd
 
@@ -25,9 +26,10 @@ def _run(value):
 
 
 def _install_selenium_browser_fallback():
-    """Replace UC's broken auto-downloader with Selenium Manager when needed."""
+    """Use a known Linux Chromium binary when UC cannot launch its driver."""
     import undetected_chromedriver as uc
     from selenium import webdriver
+    from selenium.webdriver.chrome.service import Service
 
     if getattr(uc, "_mmc_selenium_fallback", False):
         return
@@ -46,7 +48,6 @@ def _install_selenium_browser_fallback():
         headless = kwargs.pop("headless", True)
         browser_executable_path = kwargs.pop("browser_executable_path", None)
         if args:
-            # qxbroker does not pass positional arguments; keep a safe fallback.
             return original(*args, options=options, **kwargs)
 
         if options is None:
@@ -56,10 +57,31 @@ def _install_selenium_browser_fallback():
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
+        options.add_argument("--disable-software-rasterizer")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-background-networking")
+        options.add_argument("--disable-sync")
+        options.add_argument("--no-first-run")
+        options.add_argument("--no-default-browser-check")
         options.add_argument("--window-size=1920,1080")
-        if browser_executable_path:
-            options.binary_location = browser_executable_path
-        return webdriver.Chrome(options=options)
+
+        browser_path = browser_executable_path or os.getenv("CHROME_BIN", "")
+        if not browser_path:
+            for candidate in (
+                "/usr/bin/chromium",
+                "/usr/bin/chromium-browser",
+                "/usr/bin/google-chrome",
+                "/usr/bin/google-chrome-stable",
+            ):
+                if Path(candidate).exists():
+                    browser_path = candidate
+                    break
+        if browser_path:
+            options.binary_location = browser_path
+
+        driver_path = os.getenv("CHROMEDRIVER_BIN", "")
+        service = Service(driver_path) if driver_path and Path(driver_path).exists() else None
+        return webdriver.Chrome(service=service, options=options)
 
     uc.Chrome = _chrome_fallback
     uc._mmc_selenium_fallback = True
@@ -67,7 +89,6 @@ def _install_selenium_browser_fallback():
 
 def _client():
     try:
-        # quotexpy 1.40.7 exposes Quotex from the package root.
         from quotexpy import Quotex
     except Exception as exc:
         raise RuntimeError(
@@ -80,9 +101,6 @@ def _client():
     if not ssid and (not email or not password):
         raise RuntimeError("Quotex OTC চালাতে QUOTEX_EMAIL/QUOTEX_PASSWORD বা QUOTEX_SSID সেট করুন।")
 
-    # If SSID is supplied, quotexpy connects directly and no browser is needed.
-    # With email/password, Selenium Manager handles Chrome + chromedriver instead
-    # of undetected-chromedriver's failing Linux auto-download path on Render.
     if not ssid:
         try:
             _install_selenium_browser_fallback()
@@ -110,7 +128,6 @@ def _normalise_rows(payload):
             ts = item.get("time", item.get("timestamp", item.get("from")))
             op, hi, lo, cl = item.get("open"), item.get("high"), item.get("low"), item.get("close")
         elif isinstance(item, (list, tuple)) and len(item) >= 5:
-            # quotexpy returns [time, open, close, high, low].
             ts, op, cl, hi, lo = item[:5]
         else:
             continue
