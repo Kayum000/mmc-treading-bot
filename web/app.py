@@ -7,7 +7,7 @@ import time
 from flask import Flask, jsonify, render_template, request, redirect, url_for, session
 
 from signals.get_signal import get_signal
-from performance import record_signal, get_performance
+from performance import record_signal, get_performance, clear_performance_history
 from data.twelve_data_forex import fetch_api_usage, get_credit_usage
 from data.news_direction import get_news_direction_for_pair
 from data.news_events import get_weekly_news_events_for_pair
@@ -201,9 +201,11 @@ def auto_signal():
         return jsonify({"ok": False, "error": str(exc)}), 502
 
 
-@app.route("/performance", methods=["GET"])
+@app.route("/performance", methods=["GET", "POST"])
 def performance():
-    """Return the last 24h confirmed BUY/SELL performance and settle due entries."""
+    """Return performance or clear only confirmed history without touching protection state."""
+    if request.method == "POST":
+        return jsonify(clear_performance_history())
     return jsonify(get_performance())
 
 
@@ -295,7 +297,7 @@ def add_dashboard_assets(response):
       <div><span>LOSS</span><strong id="perf-losses">—</strong></div>
       <div><span>Win Rate</span><strong id="perf-rate">—</strong></div>
     </div>
-    <div class="performance-subhead"><span>Last 24 Hours — BUY/SELL only</span><button type="button" id="performance-refresh">↻</button></div>
+    <div class="performance-subhead"><span>Last 24 Hours — BUY/SELL only</span><div class="performance-actions"><button type="button" id="performance-refresh" title="Refresh">↻</button><button type="button" id="performance-clear" title="Clear confirmed history">Clear</button></div></div>
     <div id="performance-history" class="performance-history"><div class="performance-empty">Performance দেখতে খুলুন।</div></div>
     <div id="performance-error" class="performance-error" hidden></div>
   </div>
@@ -309,13 +311,13 @@ def add_dashboard_assets(response):
 .performance-summary>div{padding:8px 5px;text-align:center;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc}
 .performance-summary span{display:block;font-size:11px;color:#64748b}.performance-summary strong{display:block;font-size:17px;margin-top:2px}
 .performance-subhead{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:10px 0 6px;font-size:12px;font-weight:800;color:#475569}
-.performance-subhead button{padding:5px 9px;font-size:13px;background:#172033;color:#fff;border:0;border-radius:7px}
+.performance-actions{display:flex;gap:5px}.performance-subhead button{padding:5px 9px;font-size:13px;background:#172033;color:#fff;border:0;border-radius:7px}.performance-subhead button:hover{opacity:.9}
 .performance-history{display:grid;gap:5px;max-height:260px;overflow:auto}
 .performance-item{display:grid;grid-template-columns:1.1fr .7fr 1fr .9fr .8fr;gap:5px;align-items:center;padding:7px 6px;border:1px solid #e2e8f0;border-radius:8px;font-size:11px;background:#fff}
 .performance-item .pair{font-weight:900}.performance-item .signal-buy{color:#16803c;font-weight:900}.performance-item .signal-sell{color:#dc2626;font-weight:900}.performance-item .win{color:#16803c;font-weight:900}.performance-item .loss{color:#dc2626;font-weight:900}
 .performance-empty{padding:10px;border-radius:8px;background:#f8fafc;color:#64748b;font-size:12px;text-align:center}
 .performance-error{margin-top:7px;padding:8px;border-radius:8px;background:#fff1f2;color:#b42318;border:1px solid #fecdd3;font-size:11px}
-@media(max-width:600px){.performance-summary strong{font-size:16px}.performance-item{grid-template-columns:1fr .55fr 1fr .75fr .65fr;font-size:10px;padding:6px 4px}.performance-toggle{font-size:15px}}
+@media(max-width:600px){.performance-summary strong{font-size:16px}.performance-item{grid-template-columns:1fr .55fr 1fr .75fr .65fr;font-size:10px;padding:6px 4px}.performance-toggle{font-size:15px}.performance-subhead{align-items:flex-start}.performance-actions button{padding:5px 7px}}
 </style>
 <script>
 (() => {
@@ -325,6 +327,7 @@ def add_dashboard_assets(response):
   const history=document.getElementById('performance-history');
   const error=document.getElementById('performance-error');
   const refresh=document.getElementById('performance-refresh');
+  const clear=document.getElementById('performance-clear');
   if(!box||!toggle||!body||!history)return;
   const esc=v=>String(v??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
   const price=v=>v==null?'—':Number(v).toFixed(5).replace(/0+$/,'').replace(/\\.$/,'');
@@ -345,8 +348,19 @@ def add_dashboard_assets(response):
       history.innerHTML=rows.map(x=>`<div class="performance-item"><span class="pair">${esc(x.pair)}<br><small>${esc(String(x.market_mode||'').toUpperCase())}</small></span><span class="${x.signal==='BUY'?'signal-buy':'signal-sell'}">${esc(x.signal)}</span><span>${esc(time(x.entry_time_utc))}</span><span>${esc(price(x.entry_price))}<br>${esc(price(x.result_price))}</span><span class="${x.result==='WIN'?'win':'loss'}">${esc(x.result)}</span></div>`).join('');
     }catch(e){history.innerHTML='<div class="performance-empty">Performance data এখন পাওয়া যাচ্ছে না।</div>';error.textContent=e.message||'Performance error';error.hidden=false;}
   }
+  async function clearPerformance(){
+    if(!window.confirm('Confirmed Performance history clear করবেন? PENDING entry এবং LOSS protection clear হবে না.'))return;
+    error.hidden=true;
+    try{
+      const r=await fetch('/performance',{method:'POST',cache:'no-store',headers:{'Accept':'application/json'},credentials:'same-origin'});
+      const d=await r.json();
+      if(!r.ok||!d.ok)throw new Error(d.error||'Performance clear করা যায়নি।');
+      await loadPerformance();
+    }catch(e){error.textContent=e.message||'Performance clear error';error.hidden=false;}
+  }
   toggle.addEventListener('click',()=>{const open=toggle.getAttribute('aria-expanded')==='true';toggle.setAttribute('aria-expanded',String(!open));body.hidden=open;document.getElementById('performance-chevron').textContent=open?'▼':'▲';if(!open)loadPerformance()});
   refresh.addEventListener('click',loadPerformance);
+  clear.addEventListener('click',clearPerformance);
 })();
 </script>
 '''
