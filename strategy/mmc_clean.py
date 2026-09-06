@@ -83,7 +83,7 @@ def _cluster_levels(values, tolerance: float):
 
 
 def get_mmc_levels(df: pd.DataFrame, lookback: int = 20):
-    """Return confirmed support/resistance clusters; no whole-range fallback."""
+    """Return confirmed support/resistance clusters without whole-range fallback."""
     if not _valid(df, lookback + 5):
         return None
     prior = df.iloc[-lookback - 1:-1].copy()
@@ -96,25 +96,23 @@ def get_mmc_levels(df: pd.DataFrame, lookback: int = 20):
     swing_highs, swing_lows = _swing_levels(prior)
     resistance_clusters = _cluster_levels(swing_highs, tolerance)
     support_clusters = _cluster_levels(swing_lows, tolerance)
-    if not resistance_clusters or not support_clusters:
+    if not resistance_clusters and not support_clusters:
         return None
 
     latest_close = float(df.iloc[-1]["close"])
     resistance_candidates = [x for x in resistance_clusters if x["price"] >= latest_close - tolerance]
     support_candidates = [x for x in support_clusters if x["price"] <= latest_close + tolerance]
-    if not resistance_candidates or not support_candidates:
-        return None
 
     strong_res = [x for x in resistance_candidates if x["touches"] >= 2]
     strong_sup = [x for x in support_candidates if x["touches"] >= 2]
-    resistance = min(strong_res or resistance_candidates, key=lambda x: abs(x["price"] - latest_close))
-    support = min(strong_sup or support_candidates, key=lambda x: abs(x["price"] - latest_close))
+    resistance = min(strong_res or resistance_candidates, key=lambda x: abs(x["price"] - latest_close)) if resistance_candidates else None
+    support = min(strong_sup or support_candidates, key=lambda x: abs(x["price"] - latest_close)) if support_candidates else None
     return {
-        "resistance": float(resistance["price"]),
-        "support": float(support["price"]),
+        "resistance": float(resistance["price"]) if resistance else None,
+        "support": float(support["price"]) if support else None,
         "tolerance": tolerance,
-        "resistance_touches": int(resistance["touches"]),
-        "support_touches": int(support["touches"]),
+        "resistance_touches": int(resistance["touches"]) if resistance else 0,
+        "support_touches": int(support["touches"]) if support else 0,
     }
 
 
@@ -123,6 +121,7 @@ def strong_level_rejection(df: pd.DataFrame, lookback: int = 20) -> str:
     levels = get_mmc_levels(df, lookback)
     if levels is None:
         return "none"
+
     resistance = levels["resistance"]
     support = levels["support"]
     tolerance = levels["tolerance"]
@@ -141,7 +140,8 @@ def strong_level_rejection(df: pd.DataFrame, lookback: int = 20) -> str:
     impulse = displacement(df)
 
     sell = (
-        resistance_touches >= 2
+        resistance is not None
+        and resistance_touches >= 2
         and high >= resistance - tolerance
         and close < resistance
         and close <= low + candle_range * 0.48
@@ -149,7 +149,8 @@ def strong_level_rejection(df: pd.DataFrame, lookback: int = 20) -> str:
         and (sweep == "sell_side_rejection" or impulse == "bearish")
     )
     buy = (
-        support_touches >= 2
+        support is not None
+        and support_touches >= 2
         and low <= support + tolerance
         and close > support
         and close >= low + candle_range * 0.52
