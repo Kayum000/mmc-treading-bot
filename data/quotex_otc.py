@@ -24,12 +24,52 @@ def _run(value):
     return value
 
 
+def _install_selenium_browser_fallback():
+    """Replace UC's broken auto-downloader with Selenium Manager when needed."""
+    import undetected_chromedriver as uc
+    from selenium import webdriver
+
+    if getattr(uc, "_mmc_selenium_fallback", False):
+        return
+
+    original = uc.Chrome
+
+    def _chrome_fallback(*args, **kwargs):
+        options = kwargs.pop("options", None)
+        kwargs.pop("use_subprocess", None)
+        kwargs.pop("driver_executable_path", None)
+        kwargs.pop("version_main", None)
+        kwargs.pop("patcher_force_close", None)
+        kwargs.pop("suppress_welcome", None)
+        kwargs.pop("no_sandbox", None)
+        kwargs.pop("user_multi_procs", None)
+        headless = kwargs.pop("headless", True)
+        browser_executable_path = kwargs.pop("browser_executable_path", None)
+        if args:
+            # qxbroker does not pass positional arguments; keep a safe fallback.
+            return original(*args, options=options, **kwargs)
+
+        if options is None:
+            options = uc.ChromeOptions()
+        if headless:
+            options.add_argument("--headless=new")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--window-size=1920,1080")
+        if browser_executable_path:
+            options.binary_location = browser_executable_path
+        return webdriver.Chrome(options=options)
+
+    uc.Chrome = _chrome_fallback
+    uc._mmc_selenium_fallback = True
+
+
 def _client():
     try:
         # quotexpy 1.40.7 exposes Quotex from the package root.
         from quotexpy import Quotex
     except Exception as exc:
-        # Do not misreport a dependency/import failure as "not installed".
         raise RuntimeError(
             f"Quotex data library load failed: {type(exc).__name__}: {exc}"
         ) from exc
@@ -39,6 +79,17 @@ def _client():
     ssid = os.getenv("QUOTEX_SSID", "").strip()
     if not ssid and (not email or not password):
         raise RuntimeError("Quotex OTC চালাতে QUOTEX_EMAIL/QUOTEX_PASSWORD বা QUOTEX_SSID সেট করুন।")
+
+    # If SSID is supplied, quotexpy connects directly and no browser is needed.
+    # With email/password, Selenium Manager handles Chrome + chromedriver instead
+    # of undetected-chromedriver's failing Linux auto-download path on Render.
+    if not ssid:
+        try:
+            _install_selenium_browser_fallback()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Quotex browser fallback load failed: {type(exc).__name__}: {exc}"
+            ) from exc
 
     kwargs = {"lang": os.getenv("QUOTEX_LANG", "en")}
     if ssid:
@@ -85,8 +136,6 @@ def _fetch_sync(asset: str, count: int = 200):
             reason = check[1] if isinstance(check, tuple) and len(check) > 1 else "unknown connection error"
             raise RuntimeError(f"Quotex connection failed: {reason}")
 
-        # quotexpy 1.40.7 uses the async public method:
-        # get_candles(asset, offset_seconds, period_seconds).
         offset = _PERIOD * max(count + 20, 220)
         payload = _run(client.get_candles(asset, offset, _PERIOD))
         rows = _normalise_rows(payload)
