@@ -2,6 +2,10 @@
 
 Only confirmed BUY/SELL signals are stored. Results are evaluated from the
 exact next 1-minute candle after that candle has fully closed.
+
+A LOSS also creates a persistent market/pair lock. The lock is cleared only
+after a later signal check produces NO_TRADE (meaning the previous setup has
+fully disappeared); only a subsequent fresh valid MMC setup can then signal.
 """
 from __future__ import annotations
 
@@ -71,10 +75,101 @@ def init_db() -> None:
                 ON mmc_signal_performance (signal_time_utc DESC)
             """)
             cur.execute("""
+                CREATE TABLE IF NOT EXISTS mmc_loss_locks (
+                    market_mode VARCHAR(16) NOT NULL,
+                    pair VARCHAR(32) NOT NULL,
+                    loss_signal VARCHAR(8) NOT NULL CHECK (loss_signal IN ('BUY','SELL')),
+                    loss_entry_time_utc TIMESTAMPTZ NOT NULL,
+                    waiting_for_neutral BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (market_mode, pair)
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS mmc_loss_locks_created_idx
+                ON mmc_loss_locks (created_at DESC)
+            """)
+            cur.execute("""
                 DELETE FROM mmc_signal_performance
                 WHERE signal_time_utc < NOW() - INTERVAL '24 hours'
             """)
+            cur.execute("""
+                DELETE FROM mmc_loss_locks
+                WHERE created_at < NOW() - INTERVAL '24 hours'
+            """)
         conn.commit()
+
+
+def _set_loss_lock(mode: str, pair: str, signal: str, entry_time_utc: datetime) -> None:
+    """Persist a lock after a confirmed LOSS."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO mmc_loss_locks
+                    (market_mode, pair, loss_signal, loss_entry_time_utc, waiting_for_neutral)
+                VALUES (%s,%s,%s,%s,TRUE)
+                ON CONFLICT (market_mode, pair) DO UPDATE SET
+                    loss_signal=EXCLUDED.loss_signal,
+                    loss_entry_time_utc=EXCLUDED.loss_entry_time_utc,
+                    waiting_for_neutral=TRUE,
+                    created_at=NOW()
+            """, (mode, pair, signal, _minute_start(entry_time_utc)))
+        conn.commit()
+
+
+def _get_loss_lock(mode: str, pair: str):
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT loss_signal, loss_entry_time_utc, waiting_for_neutral
+                FROM mmc_loss_locks
+                WHERE market_mode=%s AND pair=%s
+            """, (mode, pair))
+            return cur.fetchone()
+
+
+def _clear_loss_lock(mode: str, pair: str) -> None:
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                DELETE FROM mmc_loss_locks
+                WHERE market_mode=%s AND pair=%s
+            """, (mode, pair))
+        conn.commit()
+
+
+def loss_lock_reason(mode: str, pair: str, signal_action: str) -> str | None:
+    """Enforce LOSS -> neutral setup -> fresh valid setup sequencing.
+
+    While locked, BUY/SELL is blocked. A later NO_TRADE observation clears the
+    lock, proving that the losing setup is no longer active. That NO_TRADE call
+    itself never becomes a trade; a later fresh valid setup may signal normally.
+    """
+    action = str(signal_action).upper()
+    if action not in {"BUY", "SELL", "NO_TRADE"}:
+        return None
+    try:
+        init_db()
+        lock = _get_loss_lock(mode, pair)
+        if not lock:
+            return None
+
+        loss_signal, loss_entry_time, waiting_for_neutral = lock
+        if action == "NO_TRADE" and waiting_for_neutral:
+            _clear_loss_lock(mode, pair)
+            return None
+
+        if action in {"BUY", "SELL"}:
+            return (
+                f"LOSS_LOCKED: এই {mode.upper()} {pair} market-এ সর্বশেষ "
+                f"{loss_signal} entry LOSS হয়েছে ({_minute_start(loss_entry_time).isoformat()})। "
+                "আগের setup পুরোপুরি শেষ হয়ে একটি NO TRADE state না আসা পর্যন্ত নতুন signal বন্ধ। "
+                "তারপর নতুন valid MMC setup এলে signal দেওয়া হবে।"
+            )
+    except Exception:
+        # Database protection must never break the live signal endpoint.
+        return None
+    return None
 
 
 def record_signal(result: dict) -> None:
@@ -175,7 +270,6 @@ def settle_pending() -> None:
                 candle_color = _candle_color(candle)
                 outcome = _outcome_from_color(signal, candle_color)
                 if outcome is None:
-                    # Doji has no candle color; keep it unresolved.
                     continue
 
                 candle_open = float(candle["open"])
@@ -195,9 +289,27 @@ def settle_pending() -> None:
                     row_id,
                 ))
 
+                if outcome == "LOSS":
+                    # The loss lock is written in the same DB transaction as the
+                    # result, so the loss cannot be resolved without protection.
+                    cur.execute("""
+                        INSERT INTO mmc_loss_locks
+                            (market_mode, pair, loss_signal, loss_entry_time_utc, waiting_for_neutral)
+                        VALUES (%s,%s,%s,%s,TRUE)
+                        ON CONFLICT (market_mode, pair) DO UPDATE SET
+                            loss_signal=EXCLUDED.loss_signal,
+                            loss_entry_time_utc=EXCLUDED.loss_entry_time_utc,
+                            waiting_for_neutral=TRUE,
+                            created_at=NOW()
+                    """, (mode, pair, signal, entry_time))
+
             cur.execute("""
                 DELETE FROM mmc_signal_performance
                 WHERE signal_time_utc < NOW() - INTERVAL '24 hours'
+            """)
+            cur.execute("""
+                DELETE FROM mmc_loss_locks
+                WHERE created_at < NOW() - INTERVAL '24 hours'
             """)
         conn.commit()
 
