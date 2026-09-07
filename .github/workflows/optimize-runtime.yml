@@ -1,0 +1,41 @@
+name: Optimize runtime polling
+
+on:
+  workflow_dispatch:
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch frontend polling and duplicate news status
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path('web/static/candle_timer.js')
+          s = p.read_text(encoding='utf-8')
+          # Remove the duplicate Market Status important-news box entirely.
+          s = re.sub(r'\n  function ensureStatusBox\(\) \{.*?\n  \}\n\n  function updateStatusImportant\(source, directionData\) \{.*?\n  \}\n', '\n', s, flags=re.S)
+          s = re.sub(r'\n      #important-news-status\{.*?\n      #important-news-status \\.ins-meta\{[^\n]*\}\n', '\n', s, flags=re.S)
+          s = s.replace('    updateStatusImportant(directionSource, directionForSource(directionSource));\n', '')
+          s = s.replace('      updateStatusImportant(null, null);\n', '')
+          # News hero is visual only; refresh it less often to reduce DOM work.
+          s = s.replace('  setInterval(renderHero, 5000);', '  setInterval(renderHero, 15000);')
+          p.write_text(s, encoding='utf-8')
+          PY
+      - name: Commit optimization
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/static/candle_timer.js
+          git diff --cached --quiet || git commit -m "Reduce frontend polling and remove duplicate news status"
+          git push
+      - name: Remove temporary workflow
+        if: success()
+        run: |
+          git rm .github/workflows/optimize-runtime.yml
+          git commit -m "Remove temporary optimization workflow"
+          git push
