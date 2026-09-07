@@ -27,4 +27,7 @@ RUN find . -type f -name '*.py' -exec sed -i \
 # Load the compact equal-height dashboard panel CSS without changing the main template.
 RUN grep -q 'panel_equalizer.css' web/templates/index.html || sed -i 's#</head>#<link rel="stylesheet" href="/static/panel_equalizer.css">\n</head>#' web/templates/index.html
 
+# Load broker-style chart tools without altering the existing dashboard template.
+RUN grep -q 'chart_tools.js' web/templates/index.html || sed -i 's#</body>#<script src="/static/chart_tools.js" defer></script>\n</body>#' web/templates/index.html
+
 CMD ["python", "main.py"]
