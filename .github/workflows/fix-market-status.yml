@@ -6,7 +6,6 @@ permissions:
   contents: write
 jobs:
   fix:
-    if: ${{ !startsWith(github.event.head_commit.message, 'Remove duplicate Market Status news box') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +25,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add web/templates/index.html .github/workflows/fix-market-status.yml
+          git add web/templates/index.html
           git rm .github/workflows/fix-market-status.yml
           git commit -m 'Remove duplicate Market Status news box'
           git push
