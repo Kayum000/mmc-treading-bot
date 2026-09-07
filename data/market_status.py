@@ -59,9 +59,7 @@ def _pre_news_direction_for_event(event: dict, real_pairs: list[str], crypto_pai
     if not currency or not event_time:
         return {"available": False}
 
-    mode = "real"
-    pairs = real_pairs
-    affected_pairs = [p for p in pairs if _pair_matches_currency(p, currency)]
+    affected_pairs = [p for p in real_pairs if _pair_matches_currency(p, currency)]
     if not affected_pairs:
         return {"available": False, "event_time_utc": event_time}
 
@@ -109,7 +107,7 @@ def _global_pre_news_direction(mode: str, real_pairs: list[str], crypto_pairs: l
 
     try:
         all_news = get_all_news_events(mode, real_pairs, crypto_pairs) or {}
-        event = (all_news.get("events") or [None])[0]
+        _, event = _next_news(all_news.get("events", []), datetime.now(timezone.utc))
         if not event:
             return {"available": False, "reason": "No upcoming news event is available."}
         return _pre_news_direction_for_event(event, real_pairs, crypto_pairs)
