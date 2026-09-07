@@ -197,11 +197,44 @@ def _distribution(df,side):
 def concept_scores(df,mirror=None):
     bv=_gen_votes(df,'BUY');sv=_gen_votes(df,'SELL');return sum(bv.values()),sum(sv.values()),{'BUY':bv,'SELL':sv}
 
+def _relaxed_confirmation(df, side, lookback, score, opposite_score):
+    """Allow a clean MMC entry when the full rejection pattern is absent but
+    the Mirror setup is present, price is near the mirror zone, and direction
+    has independent confirmation. This prevents the old gate from producing
+    NO_TRADE almost all the time while keeping ambiguous setups blocked.
+    """
+    side=str(side).upper()
+    mirror=get_mirror_projection(df,side,lookback)
+    if not mirror:
+        return False
+    close=float(df.iloc[-1]['close'])
+    proximity=max(float(mirror['tolerance'])*2.5, _atr(df)*0.25)
+    near_zone=abs(close-float(mirror['zone']))<=proximity
+    if not near_zone:
+        return False
+    want='buy_side_rejection' if side=='BUY' else 'sell_side_rejection'
+    want_imp='bullish' if side=='BUY' else 'bearish'
+    sweep=liquidity_sweep(df,10)==want
+    imp=displacement(df)==want_imp
+    rejection=_rejection(df,side)
+    structure=market_structure(df,CONFIG.swing_lookback)==('bullish_bos' if side=='BUY' else 'bearish_bos')
+    margin=score-opposite_score
+    return margin>=2 and score>=5 and (sweep or imp or rejection or structure)
+
 def final_confirmation(df,side,lookback=20):
-    side=str(side).lower();m=get_mirror_projection(df,side.upper(),lookback);r=strong_level_rejection(df,lookback)
+    side=str(side).lower()
+    mirror=get_mirror_projection(df,side.upper(),lookback)
+    if not mirror:
+        return False
+    r=strong_level_rejection(df,lookback)
     expected='strong_support_rejection' if side=='buy' else 'strong_resistance_rejection'
     confirm=liquidity_sweep(df,10)==('buy_side_rejection' if side=='buy' else 'sell_side_rejection') or displacement(df)==('bullish' if side=='buy' else 'bearish')
-    return bool(m and m['structure_confluence'] and r==expected and confirm)
+    if r==expected and confirm:
+        return True
+    bv,sv,_=concept_scores(df)
+    score=bv if side=='buy' else sv
+    opposite=sv if side=='buy' else bv
+    return _relaxed_confirmation(df,side,lookback,score,opposite)
 
 def generate_signal(df):
     minimum=max(CONFIG.sweep_lookback+1,CONFIG.level_lookback+5,27)
