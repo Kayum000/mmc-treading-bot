@@ -198,17 +198,16 @@ def concept_scores(df,mirror=None):
     bv=_gen_votes(df,'BUY');sv=_gen_votes(df,'SELL');return sum(bv.values()),sum(sv.values()),{'BUY':bv,'SELL':sv}
 
 def _relaxed_confirmation(df, side, lookback, score, opposite_score):
-    """Allow a clean MMC entry when the full rejection pattern is absent but
-    the Mirror setup is present, price is near the mirror zone, and direction
-    has independent confirmation. This prevents the old gate from producing
-    NO_TRADE almost all the time while keeping ambiguous setups blocked.
+    """Allow valid Mirror MMC entries when the full rejection pattern is absent.
+    The Mirror setup remains mandatory, but the old proximity/score gate was too
+    restrictive and could suppress otherwise confirmed entries.
     """
     side=str(side).upper()
     mirror=get_mirror_projection(df,side,lookback)
     if not mirror:
         return False
     close=float(df.iloc[-1]['close'])
-    proximity=max(float(mirror['tolerance'])*2.5, _atr(df)*0.25)
+    proximity=max(float(mirror['tolerance'])*4.0, _atr(df)*0.60)
     near_zone=abs(close-float(mirror['zone']))<=proximity
     if not near_zone:
         return False
@@ -218,8 +217,9 @@ def _relaxed_confirmation(df, side, lookback, score, opposite_score):
     imp=displacement(df)==want_imp
     rejection=_rejection(df,side)
     structure=market_structure(df,CONFIG.swing_lookback)==('bullish_bos' if side=='BUY' else 'bearish_bos')
+    candle=_dir(df.iloc[-1])==want_imp
     margin=score-opposite_score
-    return margin>=2 and score>=5 and (sweep or imp or rejection or structure)
+    return margin>=1 and score>=4 and (sweep or imp or rejection or structure or candle)
 
 def final_confirmation(df,side,lookback=20):
     side=str(side).lower()
