@@ -49,16 +49,6 @@
       #important-news-hero .important-news-queue-item.nearest{border:2px solid #dc2626;background:#fff7ed}
       #important-news-hero .important-news-queue-item strong{display:block;font-size:11px;margin-bottom:2px}
       #important-news-hero .important-news-queue-item span{display:block;font-size:11px;font-weight:800;margin-top:2px}
-      #important-news-status{margin:8px 0 3px;padding:9px;border:2px solid #f59e0b;border-radius:9px;background:#fff8dc}
-      #important-news-status .ins-heading{font-size:17px;font-weight:900;color:#9a5b00;margin-bottom:4px}
-      #important-news-status .ins-title{font-size:15px;font-weight:900;line-height:1.3;margin-bottom:4px}
-      #important-news-status .ins-time{font-size:13px;font-weight:900;line-height:1.3}
-      #important-news-status .ins-count{font-size:14px;font-weight:900;margin-top:3px}
-      #important-news-status .ins-direction{font-size:20px;font-weight:1000;text-align:center;margin-top:5px;padding:5px;border-radius:8px;border:2px solid #cbd5e1;background:#fff}
-      #important-news-status .ins-direction.up{color:#15803d;border-color:#86efac;background:#f0fdf4}
-      #important-news-status .ins-direction.down{color:#dc2626;border-color:#fca5a5;background:#fef2f2}
-      #important-news-status .ins-direction.wait{color:#92400e;border-color:#fcd34d;background:#fffbeb}
-      #important-news-status .ins-meta{font-size:11px;line-height:1.3;color:#334155;margin-top:4px}
       @media(max-width:600px){#important-news-hero{padding:9px}#important-news-hero .important-news-heading{font-size:18px}#important-news-hero .important-news-title{font-size:16px}#important-news-hero .important-news-time{font-size:13px}#important-news-hero .important-news-direction{font-size:22px}}
     `;
     document.head.appendChild(style);
@@ -77,7 +67,7 @@
     const strong = node?.querySelector('strong');
     let title = strong ? strong.textContent.trim() : (node?.textContent || '').trim();
     title = title.replace(/^🚨\s*/, '').replace(/^[^—]+—\s*/, '');
-    return title || 'নির্ধারিত নিউজ';
+    return title || 'Scheduled News';
   }
 
   function allNewsSources(content) {
@@ -97,24 +87,23 @@
     const ms = Date.parse(iso);
     if (!Number.isFinite(ms)) return '';
     const bd = new Date(ms + 6 * 60 * 60 * 1000);
-    return `${bd.getUTCFullYear()}-${pad(bd.getUTCMonth()+1)}-${pad(bd.getUTCDate())} ${pad(bd.getUTCHours())}:${pad(bd.getUTCMinutes())}:${pad(bd.getUTCSeconds())} বাংলাদেশ সময়`;
+    return `${bd.getUTCFullYear()}-${pad(bd.getUTCMonth()+1)}-${pad(bd.getUTCDate())} ${pad(bd.getUTCHours())}:${pad(bd.getUTCMinutes())}:${pad(bd.getUTCSeconds())} Bangladesh Time`;
   }
 
   function countdownText(ms) {
     const seconds = Math.max(0, Math.ceil((ms - Date.now()) / 1000));
-    if (seconds <= 0) return 'সময় পার হয়েছে';
+    if (seconds <= 0) return 'Event time reached';
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = seconds % 60;
-    if (h > 0) return `আর ${h} ঘণ্টা ${m} মিনিট`;
-    return `আর ${m} মিনিট ${s} সেকেন্ড`;
+    if (h > 0) return `In ${h}h ${m}m`;
+    return `In ${m}m ${s}s`;
   }
 
   function directionForSource(source) {
     if (!source || !lastDirectionData?.event) return null;
     return eventTime(source) === String(lastDirectionData.event.event_time_utc || '') ? lastDirectionData : null;
   }
-
 
   function ensureHero() {
     let hero = document.getElementById('important-news-hero');
@@ -125,13 +114,13 @@
     hero.id = 'important-news-hero';
     hero.setAttribute('role', 'status');
     hero.innerHTML = `
-      <div class="important-news-heading">🚨 নিকটতম নিউজ</div>
+      <div class="important-news-heading">🚨 NEAREST NEWS</div>
       <div class="important-news-title"></div>
       <div class="important-news-time"></div>
       <div class="important-news-time important-news-bd"></div>
       <div class="important-news-count"></div>
-      <div class="important-news-direction wait">⏸ WAIT — দিক এখনো নিশ্চিত নয়</div>
-      <div class="important-news-queue-label">পরের নিউজগুলো — অল্প সময় বাকি থাকা আগে:</div>
+      <div class="important-news-direction wait">⏸ WAIT — Direction not confirmed</div>
+      <div class="important-news-queue-label">Upcoming News — nearest first:</div>
       <div class="important-news-queue"></div>
       <div class="important-news-source"></div>
     `;
@@ -176,7 +165,7 @@
     const directionData = directionForSource(directionSource);
     const direction = String(directionData?.event?.direction || 'WAIT').toUpperCase();
     const directionNode = box.querySelector('.important-news-direction');
-    const directionText = direction === 'UP' ? '⬆ UP — উপরে' : direction === 'DOWN' ? '⬇ DOWN — নিচে' : '⏸ WAIT — দিক এখনো নিশ্চিত নয়';
+    const directionText = direction === 'UP' ? '⬆ UP' : direction === 'DOWN' ? '⬇ DOWN' : '⏸ WAIT — Direction not confirmed';
     const directionClass = `important-news-direction ${direction.toLowerCase()}`;
     if (directionNode.className !== directionClass) directionNode.className = directionClass;
     if (directionNode.textContent !== directionText) directionNode.textContent = directionText;
@@ -184,8 +173,8 @@
     if (queueKey !== lastHeroQueueKey) {
       lastHeroQueueKey = queueKey;
       const queue = box.querySelector('.important-news-queue');
-      queue.innerHTML = items.map((item, i) => `<div class="important-news-queue-item ${i===0?'nearest':''}"><strong>${i===0?'🔴 সবচেয়ে কাছের':'🕒 পরবর্তী'}</strong><div>${escapeText(titleOf(item.node))}</div><span>UTC: ${escapeText(eventTime(item.node))} — ${escapeText(countdownText(item.ms))}</span></div>`).join('');
-      box.querySelector('.important-news-source').textContent = `মোট ${items.length}টি আসন্ন নিউজ • সবগুলো সময় অনুযায়ী সাজানো।`;
+      queue.innerHTML = items.map((item, i) => `<div class="important-news-queue-item ${i===0?'nearest':''}"><strong>${i===0?'🔴 Nearest':'🕒 Next'}</strong><div>${escapeText(titleOf(item.node))}</div><span>UTC: ${escapeText(eventTime(item.node))} — ${escapeText(countdownText(item.ms))}</span></div>`).join('');
+      box.querySelector('.important-news-source').textContent = `${items.length} upcoming news event(s) • sorted by time.`;
     } else {
       const queue = box.querySelector('.important-news-queue');
       Array.from(queue.children).forEach((node, i) => {
@@ -202,7 +191,12 @@
     const content = document.getElementById('news-content');
     const important = importantSources(content);
     const source = important[0]?.node;
-    if (!source) { updateStatusImportant(null, null); return; }
+    if (!source) {
+      lastDirectionKey = '';
+      lastDirectionData = null;
+      renderHero();
+      return;
+    }
     const key = `${eventTime(source)}|${document.getElementById('pair')?.value || ''}`;
     if (directionRequestInFlight || (key === lastDirectionKey && lastDirectionData?.needed)) return;
     directionRequestInFlight = true;
@@ -211,10 +205,8 @@
       const data = await response.json();
       if (data?.needed) { lastDirectionKey = key; lastDirectionData = data; }
       else { lastDirectionKey = ''; lastDirectionData = null; }
-      updateStatusImportant(source, data?.needed ? data : null);
       renderHero();
     } catch (_) {
-      updateStatusImportant(source, directionForSource(source));
       renderHero();
     } finally { directionRequestInFlight = false; }
   }
