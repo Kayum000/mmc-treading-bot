@@ -11,6 +11,7 @@
   let chartRequestInFlight = false;
   let chartSymbol = '';
   let chartInterval = '1m';
+  let lastChartBars = [];
 
   function renderClock() {
     const el = document.querySelector('[data-bd-clock]');
@@ -127,17 +128,7 @@
     hero = document.createElement('div');
     hero.id = 'important-news-hero';
     hero.setAttribute('role', 'status');
-    hero.innerHTML = `
-      <div class="important-news-heading">🚨 NEAREST NEWS</div>
-      <div class="important-news-title"></div>
-      <div class="important-news-time"></div>
-      <div class="important-news-time important-news-bd"></div>
-      <div class="important-news-count"></div>
-      <div class="important-news-direction wait">⏸ WAIT — Direction not confirmed</div>
-      <div class="important-news-queue-label">Upcoming News — nearest first:</div>
-      <div class="important-news-queue"></div>
-      <div class="important-news-source"></div>
-    `;
+    hero.innerHTML = `<div class="important-news-heading">🚨 NEAREST NEWS</div><div class="important-news-title"></div><div class="important-news-time"></div><div class="important-news-time important-news-bd"></div><div class="important-news-count"></div><div class="important-news-direction wait">⏸ WAIT — Direction not confirmed</div><div class="important-news-queue-label">Upcoming News — nearest first:</div><div class="important-news-queue"></div><div class="important-news-source"></div>`;
     content.insertBefore(hero, content.firstChild);
     return hero;
   }
@@ -148,208 +139,76 @@
     injectStyles();
     const items = allNewsSources(content);
     const hero = document.getElementById('important-news-hero');
-    if (!items.length) {
-      if (hero) hero.remove();
-      lastHeroEventKey = '';
-      lastHeroQueueKey = '';
-      return;
-    }
-
-    const first = items[0];
-    const firstTime = eventTime(first.node);
+    if (!items.length) { if (hero) hero.remove(); lastHeroEventKey=''; lastHeroQueueKey=''; return; }
+    const first = items[0], firstTime = eventTime(first.node);
     const eventKey = `${firstTime}|${titleOf(first.node)}`;
-    const queueKey = items.map(x => `${eventTime(x.node)}|${titleOf(x.node)}|${x.node.className}`).join('||');
-    const box = ensureHero();
-    if (!box) return;
-
-    const important = importantSources(content);
-    const directionSource = important[0]?.node || null;
-
-    if (eventKey !== lastHeroEventKey) {
-      lastHeroEventKey = eventKey;
-      box.querySelector('.important-news-title').textContent = titleOf(first.node);
-      box.querySelector('.important-news-time').textContent = `🕒 REAL MARKET TIME (UTC): ${firstTime}`;
-      box.querySelector('.important-news-bd').textContent = `🇧🇩 ${formatBd(firstTime)}`;
-    }
-
-    const countNode = box.querySelector('.important-news-count');
-    const countText = `⏱ ${countdownText(first.ms)}`;
-    if (countNode.textContent !== countText) countNode.textContent = countText;
-
-    const directionData = directionForSource(directionSource);
-    const direction = String(directionData?.event?.direction || 'WAIT').toUpperCase();
-    const directionNode = box.querySelector('.important-news-direction');
-    const directionText = direction === 'UP' ? '⬆ UP' : direction === 'DOWN' ? '⬇ DOWN' : '⏸ WAIT — Direction not confirmed';
-    const directionClass = `important-news-direction ${direction.toLowerCase()}`;
-    if (directionNode.className !== directionClass) directionNode.className = directionClass;
-    if (directionNode.textContent !== directionText) directionNode.textContent = directionText;
-
-    if (queueKey !== lastHeroQueueKey) {
-      lastHeroQueueKey = queueKey;
-      const queue = box.querySelector('.important-news-queue');
-      queue.innerHTML = items.map((item, i) => `<div class="important-news-queue-item ${i===0?'nearest':''}"><strong>${i===0?'🔴 Nearest':'🕒 Next'}</strong><div>${escapeText(titleOf(item.node))}</div><span>UTC: ${escapeText(eventTime(item.node))} — ${escapeText(countdownText(item.ms))}</span></div>`).join('');
-      box.querySelector('.important-news-source').textContent = `${items.length} upcoming news event(s) • sorted by time.`;
-    } else {
-      const queue = box.querySelector('.important-news-queue');
-      Array.from(queue.children).forEach((node, i) => {
-        const item = items[i];
-        if (!item) return;
-        const span = node.querySelector('span');
-        const text = `UTC: ${eventTime(item.node)} — ${countdownText(item.ms)}`;
-        if (span && span.textContent !== text) span.textContent = text;
-      });
-    }
+    const queueKey = items.map(x=>`${eventTime(x.node)}|${titleOf(x.node)}|${x.node.className}`).join('||');
+    const box = ensureHero(); if (!box) return;
+    const important = importantSources(content), directionSource = important[0]?.node || null;
+    if (eventKey !== lastHeroEventKey) { lastHeroEventKey=eventKey; box.querySelector('.important-news-title').textContent=titleOf(first.node); box.querySelector('.important-news-time').textContent=`🕒 REAL MARKET TIME (UTC): ${firstTime}`; box.querySelector('.important-news-bd').textContent=`🇧🇩 ${formatBd(firstTime)}`; }
+    const countNode=box.querySelector('.important-news-count'), countText=`⏱ ${countdownText(first.ms)}`; if(countNode.textContent!==countText) countNode.textContent=countText;
+    const directionData=directionForSource(directionSource), direction=String(directionData?.event?.direction||'WAIT').toUpperCase(), directionNode=box.querySelector('.important-news-direction');
+    const directionText=direction==='UP'?'⬆ UP':direction==='DOWN'?'⬇ DOWN':'⏸ WAIT — Direction not confirmed';
+    const directionClass=`important-news-direction ${direction.toLowerCase()}`; if(directionNode.className!==directionClass) directionNode.className=directionClass; if(directionNode.textContent!==directionText) directionNode.textContent=directionText;
+    if(queueKey!==lastHeroQueueKey){lastHeroQueueKey=queueKey;const queue=box.querySelector('.important-news-queue');queue.innerHTML=items.map((item,i)=>`<div class="important-news-queue-item ${i===0?'nearest':''}"><strong>${i===0?'🔴 Nearest':'🕒 Next'}</strong><div>${escapeText(titleOf(item.node))}</div><span>UTC: ${escapeText(eventTime(item.node))} — ${escapeText(countdownText(item.ms))}</span></div>`).join('');box.querySelector('.important-news-source').textContent=`${items.length} upcoming news event(s) • sorted by time.`;}else{const queue=box.querySelector('.important-news-queue');Array.from(queue.children).forEach((node,i)=>{const item=items[i];if(!item)return;const span=node.querySelector('span'),text=`UTC: ${eventTime(item.node)} — ${countdownText(item.ms)}`;if(span&&span.textContent!==text)span.textContent=text;});}
   }
 
   async function checkAlphaDirection() {
-    const content = document.getElementById('news-content');
-    const important = importantSources(content);
-    const source = important[0]?.node;
-    if (!source) {
-      lastDirectionKey = '';
-      lastDirectionData = null;
-      renderHero();
-      return;
-    }
-    const key = `${eventTime(source)}|${document.getElementById('pair')?.value || ''}`;
-    if (directionRequestInFlight || (key === lastDirectionKey && lastDirectionData?.needed)) return;
-    directionRequestInFlight = true;
-    try {
-      const response = await fetch('/news-direction', {method:'GET', cache:'no-store', headers:{'Accept':'application/json'}});
-      const data = await response.json();
-      if (data?.needed) { lastDirectionKey = key; lastDirectionData = data; }
-      else { lastDirectionKey = ''; lastDirectionData = null; }
-      renderHero();
-    } catch (_) {
-      renderHero();
-    } finally { directionRequestInFlight = false; }
+    const content=document.getElementById('news-content'), important=importantSources(content), source=important[0]?.node;
+    if(!source){lastDirectionKey='';lastDirectionData=null;renderHero();return;}
+    const key=`${eventTime(source)}|${document.getElementById('pair')?.value||''}`;
+    if(directionRequestInFlight||(key===lastDirectionKey&&lastDirectionData?.needed))return;
+    directionRequestInFlight=true;
+    try{const response=await fetch('/news-direction',{method:'GET',cache:'no-store',headers:{'Accept':'application/json'}});const data=await response.json();if(data?.needed){lastDirectionKey=key;lastDirectionData=data;}else{lastDirectionKey='';lastDirectionData=null;}renderHero();}catch(_){renderHero();}finally{directionRequestInFlight=false;}
   }
 
   function ensureChart() {
-    const panel = document.getElementById('result-container');
-    const pair = document.getElementById('pair')?.value || '';
-    if (!panel || !pair) return null;
+    const panel=document.getElementById('result-container'), pair=document.getElementById('pair')?.value||'';
+    if(!panel||!pair)return null;
     injectStyles();
-    let chart = document.getElementById('live-market-chart');
-    if (!chart) {
-      chart = document.createElement('section');
-      chart.id = 'live-market-chart';
-      chart.innerHTML = `
-        <div class="chart-head"><div class="chart-title">📈 LIVE CHART</div><div class="chart-price" id="chart-price">—</div></div>
-        <div class="chart-controls"><button type="button" data-chart-tf="1m" class="active">1M</button><button type="button" data-chart-tf="5m">5M</button><button type="button" data-chart-tf="15m">15M</button><button type="button" data-chart-tf="30m">30M</button><button type="button" data-chart-tf="1h">1H</button></div>
-        <div class="chart-canvas-wrap"><canvas id="live-market-canvas"></canvas></div>
-        <div class="chart-status" id="chart-status">Waiting for live market data…</div>
-      `;
-      panel.appendChild(chart);
-      chart.querySelectorAll('[data-chart-tf]').forEach(btn => btn.addEventListener('click', () => {
-        chartInterval = btn.dataset.chartTf || '1m';
-        chart.querySelectorAll('[data-chart-tf]').forEach(b => b.classList.toggle('active', b === btn));
-        loadLiveChart(true);
-      }));
-      window.addEventListener('resize', drawLiveChart, {passive:true});
-    }
+    let chart=document.getElementById('live-market-chart');
+    if(!chart){chart=document.createElement('section');chart.id='live-market-chart';chart.innerHTML=`<div class="chart-head"><div class="chart-title">📈 LIVE CHART</div><div class="chart-price" id="chart-price">—</div></div><div class="chart-controls"><button type="button" data-chart-tf="1m" class="active">1M</button><button type="button" data-chart-tf="5m">5M</button><button type="button" data-chart-tf="15m">15M</button><button type="button" data-chart-tf="30m">30M</button><button type="button" data-chart-tf="1h">1H</button></div><div class="chart-canvas-wrap"><canvas id="live-market-canvas"></canvas></div><div class="chart-status" id="chart-status">Waiting for live market data…</div>`;panel.appendChild(chart);chart.querySelectorAll('[data-chart-tf]').forEach(btn=>btn.addEventListener('click',()=>{chartInterval=btn.dataset.chartTf||'1m';chart.querySelectorAll('[data-chart-tf]').forEach(b=>b.classList.toggle('active',b===btn));loadLiveChart(true);}));window.addEventListener('resize',drawLiveChart,{passive:true});}
     return chart;
   }
 
-  function resizeCanvas(canvas) {
-    const rect = canvas.getBoundingClientRect();
-    const ratio = Math.max(1, window.devicePixelRatio || 1);
-    const w = Math.max(320, Math.floor(rect.width * ratio));
-    const h = Math.max(220, Math.floor(rect.height * ratio));
-    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
-    return {w, h, ratio};
+  function resizeCanvas(canvas){const rect=canvas.getBoundingClientRect(),ratio=Math.max(1,window.devicePixelRatio||1),w=Math.max(320,Math.floor(rect.width*ratio)),h=Math.max(220,Math.floor(rect.height*ratio));if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}return{w,h,ratio};}
+
+  function drawLiveChart(){
+    const canvas=document.getElementById('live-market-canvas');if(!canvas||!lastChartBars.length)return;
+    const {w,h,ratio}=resizeCanvas(canvas),ctx=canvas.getContext('2d');ctx.clearRect(0,0,w,h);
+    const padX=42*ratio,padTop=14*ratio,padBottom=24*ratio,plotW=w-padX-8*ratio,plotH=h-padTop-padBottom;
+    const highs=lastChartBars.map(b=>b.high),lows=lastChartBars.map(b=>b.low),max=Math.max(...highs),min=Math.min(...lows),span=Math.max(max-min,max*0.00001),y=p=>padTop+(max-p)/span*plotH,step=plotW/Math.max(1,lastChartBars.length),bodyW=Math.max(2*ratio,Math.min(12*ratio,step*.62));
+    ctx.strokeStyle='#334155';ctx.lineWidth=ratio;
+    for(let i=0;i<5;i++){const gy=padTop+i*plotH/4;ctx.beginPath();ctx.moveTo(padX,gy);ctx.lineTo(w-8*ratio,gy);ctx.stroke();ctx.fillStyle='#94a3b8';ctx.font=`${10*ratio}px Arial`;const pv=max-span*i/4;ctx.fillText(pv.toFixed(Math.max(2,Math.min(5,String(pv).split('.')[1]?.length||2))),3*ratio,gy-2*ratio);}
+    lastChartBars.forEach((b,i)=>{const x=padX+i*step+step/2,yo=y(b.open),yc=y(b.close),yh=y(b.high),yl=y(b.low),up=b.close>=b.open;ctx.strokeStyle=up?'#22c55e':'#ef4444';ctx.fillStyle=ctx.strokeStyle;ctx.lineWidth=Math.max(1,ratio);ctx.beginPath();ctx.moveTo(x,yh);ctx.lineTo(x,yl);ctx.stroke();const top=Math.min(yo,yc),bh=Math.max(ratio,Math.abs(yc-yo));ctx.fillRect(x-bodyW/2,top,bodyW,bh);});
+    const last=lastChartBars[lastChartBars.length-1];ctx.fillStyle='#f8fafc';ctx.font=`${11*ratio}px Arial`;ctx.fillText(`LIVE • ${chartSymbol} • ${chartInterval.toUpperCase()}`,padX,h-7*ratio);
   }
 
-  let lastChartBars = [];
-
-  function drawLiveChart() {
-    const canvas = document.getElementById('live-market-canvas');
-    if (!canvas || !lastChartBars.length) return;
-    const {w,h,ratio} = resizeCanvas(canvas);
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0,0,w,h);
-    const padX = 42 * ratio, padTop = 14 * ratio, padBottom = 24 * ratio;
-    const plotW = w - padX - 8 * ratio, plotH = h - padTop - padBottom;
-    const highs = lastChartBars.map(b => b.high), lows = lastChartBars.map(b => b.low);
-    const max = Math.max(...highs), min = Math.min(...lows), span = Math.max(max-min, max*0.00001);
-    const y = p => padTop + (max-p) / span * plotH;
-    const step = plotW / Math.max(1,lastChartBars.length);
-    const bodyW = Math.max(2*ratio, Math.min(12*ratio, step*0.62));
-    ctx.strokeStyle = '#334155'; ctx.lineWidth = 1*ratio;
-    for (let i=0;i<5;i++) { const gy=padTop+i*plotH/4; ctx.beginPath(); ctx.moveTo(padX,gy); ctx.lineTo(w-8*ratio,gy); ctx.stroke(); ctx.fillStyle='#94a3b8'; ctx.font=`${10*ratio}px Arial`; const pv=max-(span*i/4); ctx.fillText(pv.toFixed(Math.max(2, Math.min(5, String(pv).split('.')[1]?.length||2))), 3*ratio, gy-2*ratio); }
-    lastChartBars.forEach((b,i) => {
-      const x=padX+i*step+step/2, yo=y(b.open), yc=y(b.close), yh=y(b.high), yl=y(b.low);
-      const up=b.close>=b.open;
-      ctx.strokeStyle=up?'#22c55e':'#ef4444'; ctx.fillStyle=ctx.strokeStyle; ctx.lineWidth=Math.max(1,ratio);
-      ctx.beginPath();ctx.moveTo(x,yh);ctx.lineTo(x,yl);ctx.stroke();
-      const top=Math.min(yo,yc), bh=Math.max(1*ratio,Math.abs(yc-yo));ctx.fillRect(x-bodyW/2,top,bodyW,bh);
-    });
-    const last=lastChartBars[lastChartBars.length-1];
-    ctx.fillStyle='#f8fafc';ctx.font=`${11*ratio}px Arial`;ctx.fillText(`LIVE • ${chartSymbol} • ${chartInterval.toUpperCase()}`,padX, h-7*ratio);
+  async function loadLiveChart(force=false){
+    const pair=document.getElementById('pair')?.value||'',chart=ensureChart();if(!pair||!chart||chartRequestInFlight)return;
+    if(!force&&pair===chartSymbol&&lastChartBars.length)return;
+    chartSymbol=pair;chartRequestInFlight=true;const status=document.getElementById('chart-status');
+    try{const symbol=encodeURIComponent(pair.replace('/','').toUpperCase()),interval=encodeURIComponent(chartInterval),response=await fetch(`https://biquote.io/api/${symbol}/ohlc?interval=${interval}&limit=120`,{cache:'no-store',headers:{Accept:'application/json'}});if(!response.ok)throw new Error(`HTTP ${response.status}`);const payload=await response.json(),bars=Array.isArray(payload?.bars)?payload.bars:[];lastChartBars=bars.map(b=>({time:Date.parse(b.openTime),open:+b.open,high:+b.high,low:+b.low,close:+b.close,isOpen:!!b.isOpen})).filter(b=>Number.isFinite(b.time)&&Number.isFinite(b.open)&&Number.isFinite(b.high)&&Number.isFinite(b.low)&&Number.isFinite(b.close)&&!b.isOpen).sort((a,b)=>a.time-b.time);if(!lastChartBars.length)throw new Error('No closed candles');const latest=lastChartBars[lastChartBars.length-1],price=document.getElementById('chart-price');if(price)price.textContent=`${latest.close} • ${new Date(latest.time).toISOString().replace('T',' ').replace('.000Z',' UTC')}`;if(status)status.textContent=`LIVE • BiQuote • ${chartSymbol} • ${chartInterval.toUpperCase()} • ${lastChartBars.length} closed candles`;drawLiveChart();}catch(err){if(status)status.textContent=`Live chart unavailable: ${err.message||'data error'}`;}finally{chartRequestInFlight=false;}
   }
 
-  async function loadLiveChart(force=false) {
-    const pair = document.getElementById('pair')?.value || '';
-    const chart = ensureChart();
-    if (!pair || !chart || chartRequestInFlight) return;
-    if (!force && pair === chartSymbol && lastChartBars.length) return;
-    chartSymbol = pair;
-    chartRequestInFlight = true;
-    const status = document.getElementById('chart-status');
-    try {
-      const symbol = encodeURIComponent(pair.replace('/','').toUpperCase());
-      const interval = encodeURIComponent(chartInterval);
-      const response = await fetch(`https://biquote.io/api/${symbol}/ohlc?interval=${interval}&limit=120`, {cache:'no-store', headers:{Accept:'application/json'}});
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const payload = await response.json();
-      const bars = Array.isArray(payload?.bars) ? payload.bars : [];
-      lastChartBars = bars.map(b => ({time:Date.parse(b.openTime),open:+b.open,high:+b.high,low:+b.low,close:+b.close,isOpen:!!b.isOpen})).filter(b => Number.isFinite(b.time)&&Number.isFinite(b.open)&&Number.isFinite(b.high)&&Number.isFinite(b.low)&&Number.isFinite(b.close)&&!b.isOpen).sort((a,b)=>a.time-b.time);
-      if (!lastChartBars.length) throw new Error('No closed candles');
-      const latest = lastChartBars[lastChartBars.length-1];
-      const price = document.getElementById('chart-price');
-      if (price) price.textContent = `${latest.close} • ${new Date(latest.time).toISOString().replace('T',' ').replace('.000Z',' UTC')}`;
-      if (status) status.textContent = `LIVE • BiQuote • ${chartSymbol} • ${chartInterval.toUpperCase()} • ${lastChartBars.length} closed candles`;
-      drawLiveChart();
-    } catch (err) {
-      if (status) status.textContent = `Live chart unavailable: ${err.message || 'data error'}`;
-    } finally { chartRequestInFlight = false; }
+  function syncChartToMarket(){
+    const pair=document.getElementById('pair')?.value||'';
+    if(!pair){document.getElementById('live-market-chart')?.remove();chartSymbol='';lastChartBars=[];if(chartTimer)clearInterval(chartTimer);chartTimer=null;return;}
+    if(pair!==chartSymbol){lastChartBars=[];loadLiveChart(true);}
+    if(chartTimer)clearInterval(chartTimer);
+    chartTimer=window.setInterval(()=>loadLiveChart(true),15000);
   }
 
-  function syncChartToMarket() {
-    const pair = document.getElementById('pair')?.value || '';
-    if (!pair) {
-      document.getElementById('live-market-chart')?.remove();
-      chartSymbol=''; lastChartBars=[];
-      return;
-    }
-    if (pair !== chartSymbol) { lastChartBars=[]; loadLiveChart(true); }
-    if (chartTimer) clearInterval(chartTimer);
-    chartTimer = window.setInterval(() => loadLiveChart(true), 15000);
-  }
-
-  function render() { renderClock(); renderEntryCountdown(); renderHero(); syncChartToMarket(); }
+  function render(){renderClock();renderEntryCountdown();renderHero();}
   render();
-  window.setInterval(render, 1000);
-  window.setInterval(checkAlphaDirection, 30000);
+  window.setInterval(render,1000);
+  window.setInterval(checkAlphaDirection,30000);
 
-  const content = document.getElementById('news-content');
-  if (content && 'MutationObserver' in window) {
-    let timer = null;
-    const observer = new MutationObserver(() => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => { renderHero(); checkAlphaDirection(); }, 80);
-    });
-    observer.observe(content, {childList:true, subtree:true});
-  }
+  const content=document.getElementById('news-content');
+  if(content&&'MutationObserver' in window){let timer=null;const observer=new MutationObserver(()=>{window.clearTimeout(timer);timer=window.setTimeout(()=>{renderHero();checkAlphaDirection();},80);});observer.observe(content,{childList:true,subtree:true});}
 
-  const pairSelect = document.getElementById('pair');
-  if (pairSelect) pairSelect.addEventListener('change', () => { chartSymbol=''; lastChartBars=[]; syncChartToMarket(); });
+  const pairSelect=document.getElementById('pair');
+  if(pairSelect){pairSelect.addEventListener('change',()=>{chartSymbol='';lastChartBars=[];syncChartToMarket();});syncChartToMarket();}
 
-  if (!document.getElementById('english-ui-script')) {
-    const script = document.createElement('script');
-    script.id = 'english-ui-script';
-    script.src = '/static/english_ui.js';
-    script.defer = true;
-    document.head.appendChild(script);
-  }
+  if(!document.getElementById('english-ui-script')){const script=document.createElement('script');script.id='english-ui-script';script.src='/static/english_ui.js';script.defer=true;document.head.appendChild(script);}
 })();
