@@ -1,8 +1,8 @@
 (() => {
   'use strict';
 
-  // Stabilize dashboard polling: keep /news-direction and /performance from
-  // generating repeated requests when the UI or MutationObservers refresh.
+  // Stabilize dashboard polling: keep /news-direction and GET /performance
+  // from generating repeated requests when the UI or MutationObservers refresh.
   const originalFetch = window.fetch.bind(window);
   let lastDirectionRequestAt = 0;
   let lastDirectionRequestKey = '';
@@ -12,9 +12,12 @@
 
   window.fetch = function(input, init) {
     const url = typeof input === 'string' ? input : (input?.url || '');
+    const method = String(init?.method || (typeof input !== 'string' && input?.method) || 'GET').toUpperCase();
     const now = Date.now();
 
-    if (url.includes('/performance')) {
+    // Only throttle GET. POST /performance is the Clear History action and
+    // must always reach the server.
+    if (url.includes('/performance') && method === 'GET') {
       const mode = document.getElementById('mode')?.value || 'real';
       const pair = document.getElementById('pair')?.value || '';
       const key = `${url}|${mode}|${pair}`;
@@ -35,7 +38,7 @@
       return performanceInFlight;
     }
 
-    if (!url.includes('/news-direction')) return originalFetch(input, init);
+    if (!url.includes('/news-direction') || method !== 'GET') return originalFetch(input, init);
 
     const pair = document.getElementById('pair')?.value || '';
     const key = `${url}|${pair}`;
