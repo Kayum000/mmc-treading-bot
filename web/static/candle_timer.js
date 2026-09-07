@@ -7,6 +7,10 @@
   let lastDirectionData = null;
   let lastHeroEventKey = '';
   let lastHeroQueueKey = '';
+  let chartTimer = null;
+  let chartRequestInFlight = false;
+  let chartSymbol = '';
+  let chartInterval = '1m';
 
   function renderClock() {
     const el = document.querySelector('[data-bd-clock]');
@@ -49,7 +53,17 @@
       #important-news-hero .important-news-queue-item.nearest{border:2px solid #dc2626;background:#fff7ed}
       #important-news-hero .important-news-queue-item strong{display:block;font-size:11px;margin-bottom:2px}
       #important-news-hero .important-news-queue-item span{display:block;font-size:11px;font-weight:800;margin-top:2px}
-      @media(max-width:600px){#important-news-hero{padding:9px}#important-news-hero .important-news-heading{font-size:18px}#important-news-hero .important-news-title{font-size:16px}#important-news-hero .important-news-time{font-size:13px}#important-news-hero .important-news-direction{font-size:22px}}
+      #live-market-chart{margin-top:16px;border:1px solid #cbd5e1;border-radius:12px;background:#0f172a;overflow:hidden;color:#e2e8f0}
+      #live-market-chart .chart-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;background:#111827;flex-wrap:wrap}
+      #live-market-chart .chart-title{font-size:17px;font-weight:900}
+      #live-market-chart .chart-price{font-size:13px;font-weight:900}
+      #live-market-chart .chart-controls{display:flex;gap:5px;flex-wrap:wrap;padding:8px 10px;background:#1e293b}
+      #live-market-chart .chart-controls button{font-size:12px;padding:6px 9px;border-radius:7px;background:#334155;color:#e2e8f0;border:1px solid #475569}
+      #live-market-chart .chart-controls button.active{background:#2563eb;border-color:#2563eb;color:#fff}
+      #live-market-chart .chart-canvas-wrap{position:relative;height:360px;width:100%;background:#0f172a}
+      #live-market-chart canvas{display:block;width:100%;height:100%}
+      #live-market-chart .chart-status{padding:7px 10px;font-size:11px;color:#94a3b8;background:#111827}
+      @media(max-width:600px){#important-news-hero{padding:9px}#important-news-hero .important-news-heading{font-size:18px}#important-news-hero .important-news-title{font-size:16px}#important-news-hero .important-news-time{font-size:13px}#important-news-hero .important-news-direction{font-size:22px}#live-market-chart .chart-canvas-wrap{height:300px}}
     `;
     document.head.appendChild(style);
   }
@@ -211,7 +225,109 @@
     } finally { directionRequestInFlight = false; }
   }
 
-  function render() { renderClock(); renderEntryCountdown(); renderHero(); }
+  function ensureChart() {
+    const panel = document.getElementById('result-container');
+    const pair = document.getElementById('pair')?.value || '';
+    if (!panel || !pair) return null;
+    injectStyles();
+    let chart = document.getElementById('live-market-chart');
+    if (!chart) {
+      chart = document.createElement('section');
+      chart.id = 'live-market-chart';
+      chart.innerHTML = `
+        <div class="chart-head"><div class="chart-title">📈 LIVE CHART</div><div class="chart-price" id="chart-price">—</div></div>
+        <div class="chart-controls"><button type="button" data-chart-tf="1m" class="active">1M</button><button type="button" data-chart-tf="5m">5M</button><button type="button" data-chart-tf="15m">15M</button><button type="button" data-chart-tf="30m">30M</button><button type="button" data-chart-tf="1h">1H</button></div>
+        <div class="chart-canvas-wrap"><canvas id="live-market-canvas"></canvas></div>
+        <div class="chart-status" id="chart-status">Waiting for live market data…</div>
+      `;
+      panel.appendChild(chart);
+      chart.querySelectorAll('[data-chart-tf]').forEach(btn => btn.addEventListener('click', () => {
+        chartInterval = btn.dataset.chartTf || '1m';
+        chart.querySelectorAll('[data-chart-tf]').forEach(b => b.classList.toggle('active', b === btn));
+        loadLiveChart(true);
+      }));
+      window.addEventListener('resize', drawLiveChart, {passive:true});
+    }
+    return chart;
+  }
+
+  function resizeCanvas(canvas) {
+    const rect = canvas.getBoundingClientRect();
+    const ratio = Math.max(1, window.devicePixelRatio || 1);
+    const w = Math.max(320, Math.floor(rect.width * ratio));
+    const h = Math.max(220, Math.floor(rect.height * ratio));
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    return {w, h, ratio};
+  }
+
+  let lastChartBars = [];
+
+  function drawLiveChart() {
+    const canvas = document.getElementById('live-market-canvas');
+    if (!canvas || !lastChartBars.length) return;
+    const {w,h,ratio} = resizeCanvas(canvas);
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0,0,w,h);
+    const padX = 42 * ratio, padTop = 14 * ratio, padBottom = 24 * ratio;
+    const plotW = w - padX - 8 * ratio, plotH = h - padTop - padBottom;
+    const highs = lastChartBars.map(b => b.high), lows = lastChartBars.map(b => b.low);
+    const max = Math.max(...highs), min = Math.min(...lows), span = Math.max(max-min, max*0.00001);
+    const y = p => padTop + (max-p) / span * plotH;
+    const step = plotW / Math.max(1,lastChartBars.length);
+    const bodyW = Math.max(2*ratio, Math.min(12*ratio, step*0.62));
+    ctx.strokeStyle = '#334155'; ctx.lineWidth = 1*ratio;
+    for (let i=0;i<5;i++) { const gy=padTop+i*plotH/4; ctx.beginPath(); ctx.moveTo(padX,gy); ctx.lineTo(w-8*ratio,gy); ctx.stroke(); ctx.fillStyle='#94a3b8'; ctx.font=`${10*ratio}px Arial`; const pv=max-(span*i/4); ctx.fillText(pv.toFixed(Math.max(2, Math.min(5, String(pv).split('.')[1]?.length||2))), 3*ratio, gy-2*ratio); }
+    lastChartBars.forEach((b,i) => {
+      const x=padX+i*step+step/2, yo=y(b.open), yc=y(b.close), yh=y(b.high), yl=y(b.low);
+      const up=b.close>=b.open;
+      ctx.strokeStyle=up?'#22c55e':'#ef4444'; ctx.fillStyle=ctx.strokeStyle; ctx.lineWidth=Math.max(1,ratio);
+      ctx.beginPath();ctx.moveTo(x,yh);ctx.lineTo(x,yl);ctx.stroke();
+      const top=Math.min(yo,yc), bh=Math.max(1*ratio,Math.abs(yc-yo));ctx.fillRect(x-bodyW/2,top,bodyW,bh);
+    });
+    const last=lastChartBars[lastChartBars.length-1];
+    ctx.fillStyle='#f8fafc';ctx.font=`${11*ratio}px Arial`;ctx.fillText(`LIVE • ${chartSymbol} • ${chartInterval.toUpperCase()}`,padX, h-7*ratio);
+  }
+
+  async function loadLiveChart(force=false) {
+    const pair = document.getElementById('pair')?.value || '';
+    const chart = ensureChart();
+    if (!pair || !chart || chartRequestInFlight) return;
+    if (!force && pair === chartSymbol && lastChartBars.length) return;
+    chartSymbol = pair;
+    chartRequestInFlight = true;
+    const status = document.getElementById('chart-status');
+    try {
+      const symbol = encodeURIComponent(pair.replace('/','').toUpperCase());
+      const interval = encodeURIComponent(chartInterval);
+      const response = await fetch(`https://biquote.io/api/${symbol}/ohlc?interval=${interval}&limit=120`, {cache:'no-store', headers:{Accept:'application/json'}});
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      const bars = Array.isArray(payload?.bars) ? payload.bars : [];
+      lastChartBars = bars.map(b => ({time:Date.parse(b.openTime),open:+b.open,high:+b.high,low:+b.low,close:+b.close,isOpen:!!b.isOpen})).filter(b => Number.isFinite(b.time)&&Number.isFinite(b.open)&&Number.isFinite(b.high)&&Number.isFinite(b.low)&&Number.isFinite(b.close)&&!b.isOpen).sort((a,b)=>a.time-b.time);
+      if (!lastChartBars.length) throw new Error('No closed candles');
+      const latest = lastChartBars[lastChartBars.length-1];
+      const price = document.getElementById('chart-price');
+      if (price) price.textContent = `${latest.close} • ${new Date(latest.time).toISOString().replace('T',' ').replace('.000Z',' UTC')}`;
+      if (status) status.textContent = `LIVE • BiQuote • ${chartSymbol} • ${chartInterval.toUpperCase()} • ${lastChartBars.length} closed candles`;
+      drawLiveChart();
+    } catch (err) {
+      if (status) status.textContent = `Live chart unavailable: ${err.message || 'data error'}`;
+    } finally { chartRequestInFlight = false; }
+  }
+
+  function syncChartToMarket() {
+    const pair = document.getElementById('pair')?.value || '';
+    if (!pair) {
+      document.getElementById('live-market-chart')?.remove();
+      chartSymbol=''; lastChartBars=[];
+      return;
+    }
+    if (pair !== chartSymbol) { lastChartBars=[]; loadLiveChart(true); }
+    if (chartTimer) clearInterval(chartTimer);
+    chartTimer = window.setInterval(() => loadLiveChart(true), 15000);
+  }
+
+  function render() { renderClock(); renderEntryCountdown(); renderHero(); syncChartToMarket(); }
   render();
   window.setInterval(render, 1000);
   window.setInterval(checkAlphaDirection, 30000);
@@ -226,7 +342,9 @@
     observer.observe(content, {childList:true, subtree:true});
   }
 
-  // Load the English-only UI normalizer after the dashboard DOM is ready.
+  const pairSelect = document.getElementById('pair');
+  if (pairSelect) pairSelect.addEventListener('change', () => { chartSymbol=''; lastChartBars=[]; syncChartToMarket(); });
+
   if (!document.getElementById('english-ui-script')) {
     const script = document.createElement('script');
     script.id = 'english-ui-script';
