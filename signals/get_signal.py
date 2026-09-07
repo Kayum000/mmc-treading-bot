@@ -6,7 +6,7 @@ import threading
 
 import pandas as pd
 
-from data.twelve_data_forex import fetch_forex_candles
+from data.biquote_forex import fetch_forex_candles
 from data.binance_crypto import fetch_crypto_candles
 from strategy.mmc import Signal, generate_signal, level_for_side
 from strategy.reentry_guard import check_reentry_guard
@@ -170,7 +170,7 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         entry_time_text = entry_bd.strftime("%d %b %Y, %H:%M:%S")
         return {
             "pair": pair, "requested_pair": pair, "market_mode": market_mode,
-            "source": "Binance" if market_mode == "crypto" else "Twelve Data", "signal": "NO_TRADE",
+            "source": "Binance" if market_mode == "crypto" else "BiQuote", "signal": "NO_TRADE",
             "buy_score": 0, "sell_score": 0,
             "reason": f"{_bengali_reason(pending_reason)} প্রবেশ হবে {entry_time_text} বাংলাদেশ সময় ({next_candle_utc.strftime('%H:%M:%S')} UTC)।",
             "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
@@ -214,7 +214,7 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
 
     return {
         "pair": pair, "requested_pair": pair, "market_mode": market_mode,
-        "source": "Binance" if market_mode == "crypto" else "Twelve Data", "signal": result.action,
+        "source": "Binance" if market_mode == "crypto" else "BiQuote", "signal": result.action,
         "buy_score": result.buy_score, "sell_score": result.sell_score, "reason": reason_text,
         "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
         "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": candle_time,
