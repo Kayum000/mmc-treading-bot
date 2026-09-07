@@ -44,6 +44,10 @@
       #important-news-hero .important-news-queue-item strong{font-size:10px!important;margin-bottom:1px!important}
       #important-news-hero .important-news-queue-item span{font-size:10px!important;margin-top:1px!important}
       #important-news-hero .important-news-source{font-size:10px!important;margin-top:2px!important}
+      #performance-compact{overflow-anchor:none;scroll-behavior:auto;contain:layout paint;min-height:0;transition:none!important;animation:none!important}
+      #performance-compact *{scroll-behavior:auto!important;transition:none!important;animation:none!important}
+      #performance-toggle{min-height:42px;line-height:1.2;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+      #performance-compact .performance-summary{min-height:70px}
     `; document.head.appendChild(compactStyle);
   }
   const nativeInnerHTML = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
@@ -53,7 +57,7 @@
   function saveNews() { const newsNodes = Array.from(content.querySelectorAll(':scope > .news-alert, :scope > .news-list')).filter(node => !node.closest('#important-news-hero')); if (!newsNodes.length || !pair()) return; const times = allNews().map(x => timeOf(x.node)).filter(Boolean); if (!times.length) return; write(newsKey(), {html: newsNodes.map(node => node.outerHTML).join(''), eventTimes: times, savedAt: Date.now()}); }
   function restoreNews() { if (allNews().length || !pair()) return; const snapshot = read(newsKey()); if (!snapshot?.html || !Array.isArray(snapshot.eventTimes) || !snapshot.eventTimes.length) return; const newest = Math.max(...snapshot.eventTimes.map(Date.parse).filter(Number.isFinite)); if (!Number.isFinite(newest) || newest < Date.now() - MAX_PAST_MS) return; const holder = document.createElement('div'); holder.innerHTML = snapshot.html; Array.from(holder.children).forEach(node => { node.dataset.mmcLkg = '1'; node.dataset.mmcLkgSavedAt = String(snapshot.savedAt || ''); content.appendChild(node); }); }
   function saveDirection() { const source = currentSource(); if (!source || !pair()) return; const time = timeOf(source); const directionNodes = document.querySelectorAll('#important-news-hero .important-news-direction, #important-news-status .ins-direction'); let direction = ''; directionNodes.forEach(node => { const m = (node.textContent || '').match(/\b(UP|DOWN)\b/i); if (m) direction = m[1].toUpperCase(); }); if (!direction || !time) return; write(directionKey(), {eventTime: time, direction, savedAt: Date.now()}); }
-  function applyDirection() { const source = currentSource(); const saved = read(directionKey()); if (!source || !saved?.eventTime || !saved.direction || timeOf(source) !== saved.eventTime) return; const direction = saved.direction === 'UP' ? 'UP' : saved.direction === 'DOWN' ? 'DOWN' : ''; if (!direction) return; const text = direction === 'UP' ? '⬆ UP — উপরে' : '⬇ DOWN — নিচে'; document.querySelectorAll('#important-news-hero .important-news-direction, #important-news-status .ins-direction').forEach(node => { const classes = node.className.replace(/\b(up|down|wait)\b/gi, '').trim(); const cls = `${classes} ${direction.toLowerCase()}`.trim(); if (node.className !== cls) node.className = cls; if (node.textContent !== text) node.textContent = text; }); }
+  function applyDirection() { const source = currentSource(); const saved = read(directionKey()); if (!source || !saved?.eventTime || !saved.direction || timeOf(source) !== saved.eventTime) return; const direction = saved.direction === 'UP' ? 'UP' : saved.direction === 'DOWN' ? 'DOWN' : ''; if (!direction) return; const text = direction === 'UP' ? '⬆ UP — UP' : '⬇ DOWN — DOWN'; document.querySelectorAll('#important-news-hero .important-news-direction, #important-news-status .ins-direction').forEach(node => { const classes = node.className.replace(/\b(up|down|wait)\b/gi, '').trim(); const cls = `${classes} ${direction.toLowerCase()}`.trim(); if (node.className !== cls) node.className = cls; if (node.textContent !== text) node.textContent = text; }); }
   function clearOldDirectionForNewEvent() { const source = currentSource(); const saved = read(directionKey()); if (!source || !saved?.eventTime || timeOf(source) === saved.eventTime) return; try { localStorage.removeItem(directionKey()); } catch (_) {} }
   function markLkgNodes() { Array.from(content.querySelectorAll(':scope > .news-alert, :scope > .news-list li')).filter(node => node.dataset.mmcLkg === '1').forEach(node => { const title = node.querySelector('strong'); if (title && !title.textContent.includes('Last Known Good')) title.textContent = `🟡 Last Known Good — ${title.textContent.replace(/^🚨\s*/, '')}`; }); }
   function restorePanelScroll() { if (!panel) return; requestAnimationFrame(() => { if (Math.abs(panel.scrollTop - savedScrollTop) > 1) panel.scrollTop = savedScrollTop; }); }
@@ -63,11 +67,11 @@
     const panel = document.getElementById('market-status-panel'); if (!panel) return null;
     let box = document.getElementById('pre-news-direction-status'); if (box) return box;
     box = document.createElement('div'); box.id = 'pre-news-direction-status';
-    box.innerHTML = '<div class="ins-heading">🔮 আসন্ন নিউজ — Pre-News Direction</div><div class="ins-list"><div class="ins-empty">সব মার্কেটের মধ্যে সবচেয়ে কাছের আসন্ন নিউজের Market, সময়, Direction ও Percentage এখানে দেখানো হবে।</div></div>';
+    box.innerHTML = '<div class="ins-heading">🔮 Upcoming News — Pre-News Direction</div><div class="ins-list"><div class="ins-empty">The nearest upcoming news across configured markets, its market, time, direction and percentage are shown here.</div></div>';
     const note = panel.querySelector('.status-note'); panel.insertBefore(box, note || null); return box;
   }
   function esc(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
-  function bdTime(iso) { const d = new Date(iso); if (!Number.isFinite(d.getTime())) return 'সময় পাওয়া যায়নি'; return new Intl.DateTimeFormat('bn-BD', {timeZone:'Asia/Dhaka', dateStyle:'short', timeStyle:'short'}).format(d); }
+  function bdTime(iso) { const d = new Date(iso); if (!Number.isFinite(d.getTime())) return 'Time unavailable'; return new Intl.DateTimeFormat('en-US', {timeZone:'Asia/Dhaka', dateStyle:'short', timeStyle:'short'}).format(d); }
   async function refreshPreNewsDirection() {
     const box = ensurePreNewsStatusBox(); if (!box || !pair() || statusDirectionBusy) return;
     statusDirectionBusy = true;
@@ -76,7 +80,7 @@
       const data = await response.json(); const list = box.querySelector('.ins-list');
       const item = data?.pre_news_direction;
       if (!data?.ok || !item?.available || !item?.market || !item?.event_time_utc) {
-        list.innerHTML = '<div class="ins-empty">আসন্ন নিউজ পাওয়া যাচ্ছে না।</div>';
+        list.innerHTML = '<div class="ins-empty">No upcoming news is available.</div>';
         return;
       }
       const confidence = Number(item.confidence_pct);
@@ -84,29 +88,30 @@
       const dir = String(item.direction || 'WAIT').toUpperCase();
       const dirText = dir === 'BUY' ? '🟢 BUY' : dir === 'SELL' ? '🔴 SELL' : '⏸ WAIT';
       const dirClass = dir === 'BUY' ? 'ins-up' : dir === 'SELL' ? 'ins-down' : 'ins-wait';
-      list.innerHTML = `<div class="ins-item ${dirClass}"><div class="ins-row"><span>মার্কেট</span><strong>${esc(item.market)}</strong></div><div class="ins-row"><span>নিউজ সময়</span><strong>${esc(bdTime(item.event_time_utc))}</strong></div><div class="ins-row"><span>Direction</span><strong class="ins-direction">${dirText}</strong></div><div class="ins-row"><span>Percentage</span><strong>${confidenceText}</strong></div></div>`;
-    } catch (_) { const list = box.querySelector('.ins-list'); if (list) list.innerHTML = '<div class="ins-empty">Pre-News Direction এখন পাওয়া যাচ্ছে না।</div>'; }
+      const nextHtml = `<div class="ins-item ${dirClass}"><div class="ins-row"><span>Market</span><strong>${esc(item.market)}</strong></div><div class="ins-row"><span>News Time</span><strong>${esc(bdTime(item.event_time_utc))}</strong></div><div class="ins-row"><span>Direction</span><strong class="ins-direction">${dirText}</strong></div><div class="ins-row"><span>Percentage</span><strong>${confidenceText}</strong></div></div>`;
+      if (list.innerHTML !== nextHtml) list.innerHTML = nextHtml;
+    } catch (_) { const list = box.querySelector('.ins-list'); if (list) list.innerHTML = '<div class="ins-empty">Pre-News Direction is currently unavailable.</div>'; }
     finally { statusDirectionBusy = false; }
   }
   function setupPreNewsDirection() {
     ensurePreNewsStatusBox();
     if (!document.getElementById('pre-news-direction-style')) {
       const style = document.createElement('style'); style.id = 'pre-news-direction-style'; style.textContent = `
-        #pre-news-direction-status{margin-top:10px;padding:9px;border:1px solid #f3b72c;border-radius:10px;background:#fffdf8}
-        #pre-news-direction-status .ins-heading{font-size:15px;font-weight:900;margin-bottom:7px}
-        #pre-news-direction-status .ins-list{display:grid;gap:6px}
-        #pre-news-direction-status .ins-item{padding:7px 8px;border:1px solid #e2e8f0;border-radius:8px;background:#fff}
+        #pre-news-direction-status{margin-top:10px;padding:9px;border:1px solid #f3b72c;border-radius:10px;background:#fffdf8;contain:layout paint;overflow-anchor:none}
+        #pre-news-direction-status .ins-heading{font-size:15px;font-weight:900;margin-bottom:7px;min-height:18px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #pre-news-direction-status .ins-list{display:grid;gap:6px;min-height:78px}
+        #pre-news-direction-status .ins-item{padding:7px 8px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;min-height:78px}
         #pre-news-direction-status .ins-up{border-left:4px solid #16a34a}
         #pre-news-direction-status .ins-down{border-left:4px solid #dc2626}
         #pre-news-direction-status .ins-wait{border-left:4px solid #f59e0b}
-        #pre-news-direction-status .ins-row{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:12px;padding:2px 0}
+        #pre-news-direction-status .ins-row{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:12px;padding:2px 0;min-height:17px}
         #pre-news-direction-status .ins-row span{color:#64748b}
         #pre-news-direction-status .ins-row strong{font-size:13px;text-align:right}
         #pre-news-direction-status .ins-direction{font-size:18px!important;font-weight:900}
         #pre-news-direction-status .ins-up .ins-direction{color:#16803c}
         #pre-news-direction-status .ins-down .ins-direction{color:#dc2626}
         #pre-news-direction-status .ins-wait .ins-direction{color:#b7791f}
-        #pre-news-direction-status .ins-empty{font-size:11px;color:#64748b;line-height:1.3}
+        #pre-news-direction-status .ins-empty{font-size:11px;color:#64748b;line-height:1.3;min-height:78px;display:flex;align-items:center}
       `; document.head.appendChild(style);
     }
     clearInterval(statusDirectionTimer); refreshPreNewsDirection(); statusDirectionTimer = setInterval(refreshPreNewsDirection, 30000);
@@ -118,39 +123,48 @@
     const toggle = document.getElementById('performance-toggle');
     if (toggle) {
       const spans = toggle.querySelectorAll('span');
-      if (spans[0]) spans[0].textContent = '📊 গত ২৪ ঘণ্টার ফলাফল';
+      if (spans[0]) spans[0].textContent = '📊 Last 24 Hours Performance';
     }
     const summary = box.querySelectorAll('.performance-summary > div');
-    const labels = ['মোট', 'জয়', 'হার', 'জয়ের হার'];
+    const labels = ['Total', 'WIN', 'LOSS', 'Win Rate'];
     summary.forEach((item, i) => { const label = item.querySelector('span'); if (label && labels[i]) label.textContent = labels[i]; });
     const subhead = box.querySelector('.performance-subhead span');
-    if (subhead) subhead.textContent = 'গত ২৪ ঘণ্টার ফলাফল — শুধু কেনা ও বিক্রি';
+    if (subhead) subhead.textContent = 'Last 24 Hours — BUY/SELL only';
     box.querySelectorAll('.performance-item').forEach(item => {
       const pairNode = item.querySelector('.pair');
       if (pairNode) {
         const small = pairNode.querySelector('small');
-        if (small) small.textContent = String(small.textContent || '').toUpperCase() === 'CRYPTO' ? 'ক্রিপ্টো বাজার' : 'বাস্তব বাজার';
+        if (small) small.textContent = String(small.textContent || '').toUpperCase() === 'CRYPTO' ? 'CRYPTO MARKET' : 'REAL MARKET';
       }
       const signal = item.querySelector('.signal-buy, .signal-sell');
-      if (signal) signal.textContent = signal.textContent.trim() === 'BUY' ? 'কেনা' : signal.textContent.trim() === 'SELL' ? 'বিক্রি' : signal.textContent;
+      if (signal) signal.textContent = signal.textContent.trim() === 'BUY' ? 'BUY' : signal.textContent.trim() === 'SELL' ? 'SELL' : signal.textContent;
       const result = item.querySelector('.win, .loss');
-      if (result) result.textContent = result.textContent.trim() === 'WIN' ? 'জয়' : result.textContent.trim() === 'LOSS' ? 'হার' : result.textContent;
+      if (result) result.textContent = result.textContent.trim() === 'WIN' ? 'WIN' : result.textContent.trim() === 'LOSS' ? 'LOSS' : result.textContent;
     });
     const empty = box.querySelector('.performance-empty');
-    if (empty && /Performance|confirmed BUY\/SELL|Performance data|ফলাফল যাচাই/i.test(empty.textContent)) {
-      if (empty.textContent.includes('Performance দেখতে')) empty.textContent = 'ফলাফল দেখতে খুলুন।';
-      else if (empty.textContent.includes('confirmed BUY/SELL')) empty.textContent = 'শেষ ২৪ ঘণ্টায় কোনো নিশ্চিত কেনা/বিক্রির ফলাফল নেই।';
-      else if (empty.textContent.includes('Performance data')) empty.textContent = 'ফলাফলের তথ্য এখন পাওয়া যাচ্ছে না।';
-      else if (empty.textContent.includes('ফলাফল যাচাই')) empty.textContent = 'ফলাফল যাচাই হচ্ছে…';
+    if (empty && /Performance|confirmed BUY\/SELL|Performance data|ফলাফল যাচাই|ফলাফল দেখতে/i.test(empty.textContent)) {
+      if (empty.textContent.includes('Performance দেখতে')) empty.textContent = 'Open to view performance.';
+      else if (empty.textContent.includes('confirmed BUY/SELL')) empty.textContent = 'No confirmed BUY/SELL results in the last 24 hours.';
+      else if (empty.textContent.includes('Performance data')) empty.textContent = 'Performance data is currently unavailable.';
+      else if (empty.textContent.includes('ফলাফল যাচাই')) empty.textContent = 'Checking performance results…';
+      else if (empty.textContent.includes('ফলাফল দেখতে')) empty.textContent = 'Open to view performance.';
     }
     const error = document.getElementById('performance-error');
-    if (error && error.textContent.includes('Performance error')) error.textContent = 'ফলাফল দেখাতে সমস্যা হয়েছে।';
+    if (error && /Performance error|ফলাফল দেখাতে সমস্যা/.test(error.textContent)) error.textContent = 'Performance error: unable to load results.';
   }
 
   function tick() { if (!pair()) return; restoreNews(); const source = currentSource(); if (!source) return; clearOldDirectionForNewEvent(); markLkgNodes(); saveNews(); applyDirection(); saveDirection(); restorePanelScroll(); }
   if (panel) panel.addEventListener('scroll', () => { savedScrollTop = panel.scrollTop; }, {passive:true});
-  setupPreNewsDirection(); tick(); translatePerformance(); window.setInterval(tick, 1000); window.setInterval(translatePerformance, 500);
-  if ('MutationObserver' in window) { let timer = null; const observer = new MutationObserver(() => { window.clearTimeout(timer); window.requestAnimationFrame(() => { if (panel) panel.scrollTop = savedScrollTop; }); timer = window.setTimeout(tick, 80); translatePerformance(); }); observer.observe(content, {childList:true, subtree:true}); }
-  document.getElementById('pair')?.addEventListener('change', () => { window.setTimeout(tick, 100); window.setTimeout(refreshPreNewsDirection, 250); });
-  document.getElementById('mode')?.addEventListener('change', () => { window.setTimeout(tick, 100); window.setTimeout(refreshPreNewsDirection, 250); });
+  setupPreNewsDirection(); tick(); translatePerformance();
+  // Performance used to be translated every 500ms, which could repeatedly mutate its DOM and make the 24-hour section jump.
+  // Translate only when its content actually changes, with a small debounce.
+  let performanceTimer = null;
+  function schedulePerformanceTranslation() {
+    window.clearTimeout(performanceTimer);
+    performanceTimer = window.setTimeout(() => translatePerformance(), 120);
+  }
+  if ('MutationObserver' in window) { let timer = null; const observer = new MutationObserver(() => { window.clearTimeout(timer); window.requestAnimationFrame(() => { if (panel) panel.scrollTop = savedScrollTop; }); timer = window.setTimeout(tick, 80); schedulePerformanceTranslation(); }); observer.observe(content, {childList:true, subtree:true}); }
+  window.setInterval(tick, 1000);
+  document.getElementById('pair')?.addEventListener('change', () => { window.setTimeout(tick, 100); window.setTimeout(refreshPreNewsDirection, 250); schedulePerformanceTranslation(); });
+  document.getElementById('mode')?.addEventListener('change', () => { window.setTimeout(tick, 100); window.setTimeout(refreshPreNewsDirection, 250); schedulePerformanceTranslation(); });
 })();
