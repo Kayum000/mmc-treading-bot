@@ -1,8 +1,7 @@
 (() => {
   'use strict';
-  const HUB = 'https://biquote.io/hubs/tick';
-  const CDN = 'https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js';
-  const S = { connection:null, symbol:'', interval:'1m', bars:[], connected:false, connecting:false, retry:0, reconnectTimer:null, clockTimer:null, healthTimer:null, lastTickAt:0, scaleMin:null, scaleMax:null };
+  const HUB = 'wss://biquote.io/hubs/tick';
+  const S = { ws:null, symbol:'', interval:'1m', bars:[], connected:false, connecting:false, retry:0, reconnectTimer:null, clockTimer:null, healthTimer:null, lastTickAt:0, scaleMin:null, scaleMax:null, generation:0 };
   const MS = () => ({'1m':60000,'5m':300000,'15m':900000,'30m':1800000,'1h':3600000}[S.interval] || 60000);
   const num = v => Number(v);
   const sym = v => String(v || '').replace('/','').toUpperCase();
@@ -31,15 +30,6 @@
     const b=document.querySelector('.live-stream-badge');
     if(b){b.className='live-stream-badge '+(S.connected?'on':'off');b.textContent=S.connected?'● LIVE • BiQuote':'○ '+(S.connecting?'CONNECTING':'RETRYING');}
   };
-  function loadSignalR(){
-    return new Promise((resolve,reject)=>{
-      if(window.signalR) return resolve(window.signalR);
-      let s=document.querySelector('script[data-bi-quot-signalr]');
-      if(s){s.addEventListener('load',()=>window.signalR?resolve(window.signalR):reject(Error('SignalR unavailable')),{once:true});s.addEventListener('error',()=>reject(Error('SignalR CDN failed')),{once:true});return;}
-      s=document.createElement('script');s.src=CDN;s.async=false;s.dataset.biQuotSignalr='1';
-      s.onload=()=>window.signalR?resolve(window.signalR):reject(Error('SignalR unavailable'));s.onerror=()=>reject(Error('SignalR CDN failed'));document.head.appendChild(s);
-    });
-  }
   function bucket(t){return Math.floor(t/MS())*MS();}
   function mergeTick(t){
     if(tickSym(t)!==S.symbol)return false;
@@ -58,48 +48,72 @@
       if(!r.ok)throw Error(`OHLC ${r.status}`); const d=await r.json();
       S.bars=(Array.isArray(d?.bars)?d.bars:[]).map(b=>({t:Date.parse(b.openTime),o:num(b.open),h:num(b.high),l:num(b.low),c:num(b.close)})).filter(b=>Number.isFinite(b.t)&&[b.o,b.h,b.l,b.c].every(Number.isFinite)).slice(-240);
       S.scaleMin=null;S.scaleMax=null;window.__chartBarsLength=S.bars.length;window.__chartOffset=0;draw();countdown();
-    }catch(e){status('Waiting for BiQuote live stream…');}
+    }catch(e){status('BiQuote candle history unavailable — waiting for live stream…');}
+  }
+  function signalRMessage(type,target,arguments_,invocationId){
+    const m={type}; if(target)m.target=target; if(arguments_)m.arguments=arguments_; if(invocationId)m.invocationId=invocationId; return JSON.stringify(m)+'\x1e';
+  }
+  function parseFrames(raw){
+    return String(raw||'').split('\x1e').filter(Boolean).map(part=>{try{return JSON.parse(part);}catch(e){return null;}}).filter(Boolean);
   }
   async function stop(){
-    clearTimeout(S.reconnectTimer);clearInterval(S.healthTimer);S.healthTimer=null;
-    const c=S.connection;S.connection=null;S.connected=false;S.connecting=false;
-    if(c){try{if(S.symbol)await c.invoke('Unsubscribe',[S.symbol]);}catch(e){}try{await c.stop();}catch(e){}}
+    S.generation++; clearTimeout(S.reconnectTimer);clearInterval(S.healthTimer);S.healthTimer=null;
+    const ws=S.ws;S.ws=null;S.connected=false;S.connecting=false;
+    if(ws){try{ws.close(1000,'switch market');}catch(e){}}
   }
-  function makeConnection(signalR){
-    const c=new signalR.HubConnectionBuilder().withUrl(HUB).withAutomaticReconnect([0,1000,3000,5000,10000,15000]).configureLogging(signalR.LogLevel.Error).build();
-    c.on('ReceiveTick',mergeTick);
-    c.onreconnecting(()=>{S.connected=false;S.connecting=true;status('LIVE stream reconnecting…');});
-    c.onreconnected(async()=>{
-      try{await c.invoke('Subscribe',[S.symbol]);S.connected=true;S.connecting=false;S.retry=0;S.lastTickAt=Date.now();status('LIVE • BiQuote');}
-      catch(e){status('LIVE stream subscribe failed — retrying…');}
-    });
-    c.onclose(()=>{
-      if(c!==S.connection)return;
-      S.connected=false;S.connecting=false;status('LIVE stream disconnected — reconnecting…');
-      clearTimeout(S.reconnectTimer);S.reconnectTimer=setTimeout(connect,2000);
-    });
-    return c;
-  }
-  async function connect(){
-    if(!S.symbol || S.connecting)return;
-    S.connecting=true;status('Connecting to BiQuote live stream…');
-    try{
-      const signalR=await loadSignalR();
-      const old=S.connection;S.connection=null;if(old){try{await old.stop();}catch(e){}}
-      const c=makeConnection(signalR);S.connection=c;await c.start();
-      await c.invoke('Subscribe',[S.symbol]);S.connected=true;S.connecting=false;S.retry=0;S.lastTickAt=Date.now();status('LIVE • BiQuote');
-      clearInterval(S.healthTimer);
-      S.healthTimer=setInterval(()=>{
-        if(S.connection!==c || !S.connected)return;
-        if(S.lastTickAt && Date.now()-S.lastTickAt>15000){
-          status('LIVE stream stale — reconnecting…');
-          try{c.stop();}catch(e){}
+  function connect(){
+    if(!S.symbol || S.connecting || S.connected)return;
+    const generation=++S.generation;
+    S.connecting=true;S.connected=false;status('Connecting to BiQuote live stream…');
+    let ws;
+    try{ws=new WebSocket(HUB);}catch(e){scheduleRetry(generation);return;}
+    S.ws=ws;
+    let handshakeDone=false, subscribed=false, buffer='';
+    ws.onopen=()=>{
+      if(generation!==S.generation){try{ws.close();}catch(e){};return;}
+      ws.send('{"protocol":"json","version":1}\x1e');
+      status('BiQuote stream connected — subscribing…');
+    };
+    ws.onmessage=event=>{
+      if(generation!==S.generation)return;
+      buffer += typeof event.data === 'string' ? event.data : '';
+      const frames=parseFrames(buffer);
+      if(!buffer.endsWith('\x1e')){const idx=buffer.lastIndexOf('\x1e');if(idx>=0)buffer=buffer.slice(idx+1);return;} buffer='';
+      for(const msg of frames){
+        if(msg.type===6)continue;
+        if(!handshakeDone && msg.type===3){handshakeDone=true;continue;}
+        if(msg.type===3){if(msg.error){status('BiQuote subscription failed — retrying…');try{ws.close();}catch(e){}}continue;}
+        if(msg.type===1 && msg.target==='ReceiveTick'){
+          const args=Array.isArray(msg.arguments)?msg.arguments:[];
+          if(args[0])mergeTick(args[0]);
         }
-      },5000);
-    }catch(e){
-      S.connected=false;S.connecting=false;S.retry++;status('BiQuote live stream unavailable — retrying…');
-      clearTimeout(S.reconnectTimer);S.reconnectTimer=setTimeout(connect,Math.min(15000,2000+S.retry*1000));
-    }
+      }
+      if(handshakeDone && !subscribed){
+        subscribed=true;
+        try{ws.send(signalRMessage(1,'Subscribe',[[S.symbol]],'sub-'+Date.now()));}
+        catch(e){try{ws.close();}catch(_){}}
+      }
+    };
+    ws.onerror=()=>{if(generation===S.generation)status('BiQuote WebSocket error — retrying…');};
+    ws.onclose=()=>{
+      if(generation!==S.generation)return;
+      S.ws=null;S.connected=false;S.connecting=false;clearInterval(S.healthTimer);S.healthTimer=null;
+      status('BiQuote live stream disconnected — retrying…');scheduleRetry(generation);
+    };
+    const connectedTimer=setInterval(()=>{
+      if(generation!==S.generation||S.ws!==ws){clearInterval(connectedTimer);return;}
+      if(handshakeDone && subscribed && !S.connected){S.connected=true;S.connecting=false;S.retry=0;S.lastTickAt=Date.now();status('LIVE • BiQuote');clearInterval(connectedTimer);clearInterval(S.healthTimer);S.healthTimer=setInterval(()=>{
+        if(generation!==S.generation||S.ws!==ws||!S.connected)return;
+        if(S.lastTickAt && Date.now()-S.lastTickAt>20000){status('Live tick stale — reconnecting…');try{ws.close();}catch(e){}}
+      },5000);}
+    },100);
+    setTimeout(()=>clearInterval(connectedTimer),10000);
+  }
+  function scheduleRetry(generation){
+    if(generation!==S.generation||!S.symbol)return;
+    clearTimeout(S.reconnectTimer);S.retry++;S.connecting=false;S.connected=false;
+    const delay=Math.min(15000,1500+S.retry*1000);status(`BiQuote live stream unavailable — retrying in ${Math.ceil(delay/1000)}s…`);
+    S.reconnectTimer=setTimeout(()=>{if(generation===S.generation)connect();},delay);
   }
   function canvas(){
     const chart=document.getElementById('live-market-chart'),wrap=chart?.querySelector('.chart-canvas-wrap');if(!wrap)return null;
