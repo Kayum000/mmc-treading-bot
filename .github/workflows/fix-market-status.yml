@@ -1,0 +1,33 @@
+name: Remove duplicate Market Status news box
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '* * * * *'
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove duplicate box
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('web/templates/index.html')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('    <div class="status-recommendation" id="status-recommendation">মার্কেট নির্বাচন করলে স্ট্যাটাস দেখা যাবে।</div>\n', '')
+          s = s.replace(";document.getElementById('status-recommendation').textContent=d.recommendation_bn", '')
+          s = s.replace(";document.getElementById('status-recommendation').textContent='স্ট্যাটাস এখন পাওয়া যাচ্ছে না。'", '')
+          s = s.replace(";document.getElementById('status-recommendation').textContent='স্ট্যাটাস এখন পাওয়া যাচ্ছে না।'", '')
+          s = s.replace(";document.getElementById('status-recommendation').textContent='মার্কেট নির্বাচন করলে স্ট্যাটাস দেখা যাবে।'", '')
+          p.write_text(s, encoding='utf-8')
+      - name: Commit and remove one-time workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add web/templates/index.html
+          git rm .github/workflows/fix-market-status.yml
+          git commit -m 'Remove duplicate Market Status news box'
+          git push
