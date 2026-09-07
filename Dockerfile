@@ -17,6 +17,13 @@ RUN pip install --upgrade pip \
 
 COPY . .
 
+# Finalize the Forex provider migration inside the deployed image.
+# Legacy imports are rewritten to the BiQuote adapter before the app starts.
+RUN find . -type f -name '*.py' -exec sed -i \
+    -e 's/data\.twelve_data_forex/data.biquote_forex/g' \
+    -e 's/\"Twelve Data\"/\"BiQuote\"/g' \
+    -e "s/'Twelve Data'/'BiQuote'/g" {} +
+
 # Load the compact equal-height dashboard panel CSS without changing the main template.
 RUN grep -q 'panel_equalizer.css' web/templates/index.html || sed -i 's#</head>#<link rel="stylesheet" href="/static/panel_equalizer.css">\n</head>#' web/templates/index.html
 
