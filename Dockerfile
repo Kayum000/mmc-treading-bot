@@ -30,4 +30,7 @@ RUN grep -q 'panel_equalizer.css' web/templates/index.html || sed -i 's#</head>#
 # Load broker-style chart tools without altering the existing dashboard template.
 RUN grep -q 'chart_tools.js' web/templates/index.html || sed -i 's#</body>#<script src="/static/chart_tools.js" defer></script>\n</body>#' web/templates/index.html
 
+# Load the true tick-stream chart after the broker tools.
+RUN grep -q 'live_stream_chart.js' web/templates/index.html || sed -i 's#</body>#<script src="/static/live_stream_chart.js" defer></script>\n</body>#' web/templates/index.html
+
 CMD ["python", "main.py"]
