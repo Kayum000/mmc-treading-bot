@@ -115,37 +115,6 @@
     return eventTime(source) === String(lastDirectionData.event.event_time_utc || '') ? lastDirectionData : null;
   }
 
-  function ensureStatusBox() {
-    const panel = document.getElementById('market-status-panel');
-    if (!panel) return null;
-    let box = document.getElementById('important-news-status');
-    if (!box) {
-      box = document.createElement('div');
-      box.id = 'important-news-status';
-      const note = panel.querySelector('.status-note');
-      if (note) panel.insertBefore(box, note); else panel.appendChild(box);
-    }
-    return box;
-  }
-
-  function updateStatusImportant(source, directionData) {
-    const panel = document.getElementById('market-status-panel');
-    if (!panel) return;
-    let box = document.getElementById('important-news-status');
-    if (!source) { if (box) box.remove(); return; }
-    box = ensureStatusBox();
-    const t = eventTime(source);
-    const direction = String(directionData?.event?.direction || 'WAIT').toUpperCase();
-    const dirText = direction === 'UP' ? '⬆ UP — উপরে' : direction === 'DOWN' ? '⬇ DOWN — নিচে' : '⏸ WAIT — দিক এখনো নিশ্চিত নয়';
-    const sentiment = directionData?.event?.news_sentiment || {};
-    const meta = directionData?.event
-      ? `Sentiment: ${escapeText(sentiment.label_bn || 'তথ্য নেই')} | Score: ${escapeText(sentiment.score ?? '—')} | Articles: ${escapeText(sentiment.articles ?? 0)}<br>${escapeText(directionData.event.direction_basis_bn || 'Alpha Vantage sentiment ভিত্তিক সম্ভাব্য bias।')}<br><strong>এটি নিশ্চিত BUY/SELL prediction নয়।</strong>`
-      : 'High-impact নিউজ ৫ মিনিটের মধ্যে এলে Alpha Vantage sentiment দিয়ে Direction বিশ্লেষণ হবে।';
-    const key = `${titleOf(source)}|${t}|${direction}|${source.querySelector('.news-count')?.textContent || ''}`;
-    if (box.dataset.renderKey === key) return;
-    box.innerHTML = `<div class="ins-heading">🚨 পরবর্তী গুরুত্বপূর্ণ নিউজ</div><div class="ins-title">${escapeText(titleOf(source))}</div><div class="ins-time">🕒 REAL MARKET TIME (UTC): ${escapeText(t)}</div><div class="ins-time">🇧🇩 বাংলাদেশ সময়: ${escapeText(formatBd(t))}</div><div class="ins-count">⏱ ${escapeText(countdownText(Date.parse(t)))}</div><div class="ins-direction ${direction.toLowerCase()}">${dirText}</div><div class="ins-meta">${meta}</div>`;
-    box.dataset.renderKey = key;
-  }
 
   function ensureHero() {
     let hero = document.getElementById('important-news-hero');
@@ -180,7 +149,6 @@
       if (hero) hero.remove();
       lastHeroEventKey = '';
       lastHeroQueueKey = '';
-      updateStatusImportant(null, null);
       return;
     }
 
@@ -193,7 +161,6 @@
 
     const important = importantSources(content);
     const directionSource = important[0]?.node || null;
-    updateStatusImportant(directionSource, directionForSource(directionSource));
 
     if (eventKey !== lastHeroEventKey) {
       lastHeroEventKey = eventKey;
