@@ -1,0 +1,52 @@
+name: Fix static dashboard language
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Normalize index.html to English
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('web/templates/index.html')
+          s = p.read_text(encoding='utf-8')
+          replacements = {
+              'lang="bn"': 'lang="en"',
+              'মার্কেট নির্বাচন করুন। GET SIGNAL চাপলেই শুধু নির্বাচিত মার্কেটের live data নিয়ে signal তৈরি হবে।': 'Select a market. Press GET SIGNAL to generate a signal using live data for the selected market.',
+              'AUTO SIGNAL বন্ধ': 'AUTO SIGNAL OFF',
+              'মার্কেট নির্বাচন করুন': 'Select a market',
+              'বর্তমান সেশন': 'Current Session',
+              'মার্কেট অ্যাক্টিভিটি': 'Market Activity',
+              'সেরা ট্রেডিং উইন্ডো': 'Best Trading Window',
+              'নিউজ রিস্ক': 'News Risk',
+              'পরবর্তী নিউজ': 'Next News',
+              'এটি session + scheduled-news risk ভিত্তিক নির্দেশনা। এটি BUY/SELL-এর গ্যারান্টি নয়।': 'This is guidance based on session and scheduled-news risk. It is not a BUY/SELL guarantee.',
+              'কারণ ও বিস্তারিত যাচাই:': 'Reason & Details:',
+              'একটি মার্কেট নির্বাচন করে GET SIGNAL চাপুন।': 'Select a market and press GET SIGNAL.',
+              'রিফ্রেশ': 'REFRESH',
+              'মার্কেট নির্বাচন করলে সংশ্লিষ্ট নিউজ দেখা যাবে।': 'Select a market to view relevant news.',
+              'এখনও কোনো মার্কেট নির্বাচন করা হয়নি।': 'No market selected yet.',
+          }
+          for old, new in replacements.items():
+              s = s.replace(old, new)
+          p.write_text(s, encoding='utf-8')
+      - name: Commit changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "No static language changes needed."
+            exit 0
+          fi
+          git add web/templates/index.html
+          git commit -m "Make dashboard static text English"
+          git push
