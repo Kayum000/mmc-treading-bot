@@ -225,4 +225,13 @@
     });
     observer.observe(content, {childList:true, subtree:true});
   }
+
+  // Load the English-only UI normalizer after the dashboard DOM is ready.
+  if (!document.getElementById('english-ui-script')) {
+    const script = document.createElement('script');
+    script.id = 'english-ui-script';
+    script.src = '/static/english_ui.js';
+    script.defer = true;
+    document.head.appendChild(script);
+  }
 })();
