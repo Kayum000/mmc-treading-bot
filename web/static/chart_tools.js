@@ -1,116 +1,19 @@
 (() => {
   'use strict';
-
-  const state = { tool: 'crosshair', drawing: false, start: null, drawings: [], overlay: null };
-
-  const css = `
-    #live-market-chart .broker-tools{position:relative;display:inline-block;margin-left:auto}
-    #live-market-chart .broker-tools-btn{padding:6px 10px;border-radius:7px;background:#475569;color:#fff;border:1px solid #64748b;font-weight:900;cursor:pointer}
-    #live-market-chart .broker-tools-menu{display:none;position:absolute;right:0;top:38px;z-index:30;width:230px;max-height:330px;overflow:auto;padding:8px;border:1px solid #475569;border-radius:10px;background:#0b1220;box-shadow:0 10px 30px rgba(0,0,0,.35)}
-    #live-market-chart .broker-tools-menu.open{display:block}
-    #live-market-chart .broker-tools-menu button{display:block;width:100%;text-align:left;margin:3px 0;padding:7px 9px;border-radius:7px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;font-size:12px;cursor:pointer}
-    #live-market-chart .broker-tools-menu button.active{background:#2563eb;border-color:#2563eb;color:#fff}
-    #live-market-chart .broker-tools-menu .tool-group{padding:5px 6px 3px;color:#94a3b8;font-size:10px;font-weight:900;text-transform:uppercase}
-    #chart-drawing-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:4}
-    #live-market-chart .chart-canvas-wrap.tool-draw{cursor:crosshair}
-    #live-market-chart:fullscreen,#live-market-chart:-webkit-full-screen{width:100vw;height:100vh;max-width:none;max-height:none;margin:0;padding:0;border:0;border-radius:0;background:#0f172a;display:flex;flex-direction:column;overflow:hidden;position:fixed;inset:0;z-index:2147483647}
-    #live-market-chart:fullscreen .chart-canvas-wrap,#live-market-chart:-webkit-full-screen .chart-canvas-wrap{height:auto;flex:1 1 auto;min-height:0;width:100%;position:relative}
-    #live-market-chart:fullscreen .chart-controls,#live-market-chart:-webkit-full-screen .chart-controls{flex:none}
-    #live-market-chart:fullscreen .live-stream-badge,#live-market-chart:-webkit-full-screen .live-stream-badge{display:inline-flex}
-  `;
-
-  function inject(){
-    if(!document.getElementById('broker-chart-tools-style')){const s=document.createElement('style');s.id='broker-chart-tools-style';s.textContent=css;document.head.appendChild(s);}
-  }
-
-  function getWrap(){return document.querySelector('#live-market-chart .chart-canvas-wrap');}
-
-  function moveChartOutsideResult(){
-    const chart=document.getElementById('live-market-chart');
-    const result=document.getElementById('result-container');
-    if(!chart||!result||chart.parentElement!==result)return;
-    const parent=result.parentElement;
-    if(parent)parent.insertBefore(chart,result.nextSibling);
-  }
-
-  function ensureOverlay(){
-    const wrap=getWrap(); if(!wrap) return null;
-    let c=document.getElementById('chart-drawing-overlay');
-    if(!c){c=document.createElement('canvas');c.id='chart-drawing-overlay';c.setAttribute('aria-label','Chart drawing layer');c.style.pointerEvents='none';wrap.appendChild(c);}
-    const r=wrap.getBoundingClientRect(),ratio=Math.max(1,window.devicePixelRatio||1);c.width=Math.max(1,Math.floor(r.width*ratio));c.height=Math.max(1,Math.floor(r.height*ratio));c.style.width=r.width+'px';c.style.height=r.height+'px';state.overlay=c;return c;
-  }
-
-  function point(e){const wrap=getWrap(),r=wrap.getBoundingClientRect(),ratio=Math.max(1,window.devicePixelRatio||1);return{x:(e.clientX-r.left)*ratio,y:(e.clientY-r.top)*ratio};}
-
-  function redraw(){
-    const c=ensureOverlay(); if(!c)return;const ctx=c.getContext('2d'),ratio=Math.max(1,window.devicePixelRatio||1);ctx.clearRect(0,0,c.width,c.height);ctx.lineWidth=1.5*ratio;ctx.setLineDash([]);
-    state.drawings.forEach(d=>{ctx.strokeStyle=d.color||'#38bdf8';ctx.fillStyle='rgba(56,189,248,.10)';ctx.beginPath();if(d.type==='h'){ctx.moveTo(0,d.y);ctx.lineTo(c.width,d.y);ctx.stroke();}else if(d.type==='trend'||d.type==='arrow'){ctx.moveTo(d.a.x,d.a.y);ctx.lineTo(d.b.x,d.b.y);ctx.stroke();if(d.type==='arrow'){const ang=Math.atan2(d.b.y-d.a.y,d.b.x-d.a.x),len=10*ratio;ctx.beginPath();ctx.moveTo(d.b.x,d.b.y);ctx.lineTo(d.b.x-len*Math.cos(ang-.5),d.b.y-len*Math.sin(ang-.5));ctx.lineTo(d.b.x-len*Math.cos(ang+.5),d.b.y-len*Math.sin(ang+.5));ctx.closePath();ctx.fillStyle=d.color||'#38bdf8';ctx.fill();}}else if(d.type==='rect'){ctx.rect(d.a.x,d.a.y,d.b.x-d.a.x,d.b.y-d.a.y);ctx.stroke();ctx.fill();}});
-  }
-
-  function setTool(tool){state.tool=tool;const menu=document.querySelector('.broker-tools-menu');if(menu)menu.querySelectorAll('[data-btool]').forEach(b=>b.classList.toggle('active',b.dataset.btool===tool));const wrap=getWrap();if(wrap)wrap.classList.toggle('tool-draw',tool!=='none');if(tool==='clear'){state.drawings=[];state.tool='crosshair';redraw();if(menu)menu.querySelectorAll('[data-btool]').forEach(b=>b.classList.toggle('active',b.dataset.btool==='crosshair'));}}
-
-  async function enterFullscreen(chart){
-    try{
-      if(document.fullscreenElement || document.webkitFullscreenElement){
-        if(document.exitFullscreen) await document.exitFullscreen();
-        else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
-        return;
-      }
-      if(chart.requestFullscreen) await chart.requestFullscreen({navigationUI:'hide'});
-      else if(chart.webkitRequestFullscreen) chart.webkitRequestFullscreen();
-      else if(chart.webkitEnterFullscreen) chart.webkitEnterFullscreen();
-      else throw new Error('Fullscreen API unavailable');
-      setTimeout(()=>{ensureOverlay();redraw();window.dispatchEvent(new Event('resize'));},150);
-    }catch(e){
-      chart.classList.toggle('chart-fullscreen-fallback',true);
-      chart.style.cssText += ';position:fixed;inset:0;width:100vw;height:100vh;z-index:2147483647;margin:0;border-radius:0;display:flex;flex-direction:column;background:#0f172a;overflow:hidden;';
-      const wrap=getWrap();if(wrap)wrap.style.cssText += ';flex:1 1 auto;min-height:0;height:auto;';
-      setTimeout(()=>{ensureOverlay();redraw();window.dispatchEvent(new Event('resize'));},80);
-    }
-  }
-
-  function exitFallbackFullscreen(){
-    const chart=document.getElementById('live-market-chart');
-    if(!chart||!chart.classList.contains('chart-fullscreen-fallback'))return;
-    chart.classList.remove('chart-fullscreen-fallback');
-    chart.style.cssText=chart.style.cssText.replace(/position:fixed;inset:0;width:100vw;height:100vh;z-index:2147483647;margin:0;border-radius:0;display:flex;flex-direction:column;background:#0f172a;overflow:hidden;/,'');
-    const wrap=getWrap();if(wrap)wrap.style.cssText=wrap.style.cssText.replace(/flex:1 1 auto;min-height:0;height:auto;/,'');
-    ensureOverlay();redraw();
-  }
-
-  function addMenu(){
-    const chart=document.getElementById('live-market-chart');if(!chart||chart.querySelector('.broker-tools'))return false;inject();
-    moveChartOutsideResult();
-    const controls=chart.querySelector('.chart-controls');if(!controls)return false;
-    const holder=document.createElement('div');holder.className='broker-tools';holder.innerHTML=`<button type="button" class="broker-tools-btn" aria-expanded="false">🛠 TOOLS</button><div class="broker-tools-menu" role="menu"><div class="tool-group">Drawing</div><button type="button" data-btool="crosshair" class="active">✚ Crosshair</button><button type="button" data-btool="h">━ Horizontal Line</button><button type="button" data-btool="trend">╱ Trend Line</button><button type="button" data-btool="rect">▣ Rectangle / Zone</button><button type="button" data-btool="arrow">➜ Arrow / Marker</button><div class="tool-group">Chart</div><button type="button" data-btool="zoom-in">＋ Zoom In</button><button type="button" data-btool="zoom-out">－ Zoom Out</button><button type="button" data-btool="reset">↺ Reset View</button><button type="button" data-btool="fullscreen">⛶ Full Screen</button><div class="tool-group">Analysis</div><button type="button" data-btool="analysis">📊 SMA / EMA Analysis</button><div class="tool-group">Drawings</div><button type="button" data-btool="clear">🧹 Clear Drawings</button></div>`;
-    controls.appendChild(holder);
-    const btn=holder.querySelector('.broker-tools-btn'),menu=holder.querySelector('.broker-tools-menu');
-    btn.addEventListener('click',e=>{e.stopPropagation();const open=menu.classList.toggle('open');btn.setAttribute('aria-expanded',String(open));});
-    document.addEventListener('click',e=>{if(!holder.contains(e.target)){menu.classList.remove('open');btn.setAttribute('aria-expanded','false');}});
-    holder.querySelectorAll('[data-btool]').forEach(b=>b.addEventListener('click',async()=>{
-      const t=b.dataset.btool;
-      if(t==='zoom-in'||t==='zoom-out'||t==='reset'||t==='analysis'){
-        const target=chart.querySelector(`[data-chart-tool="${t}"]`);if(target)target.click();return;
-      }
-      if(t==='fullscreen'){menu.classList.remove('open');btn.setAttribute('aria-expanded','false');await enterFullscreen(chart);return;}
-      setTool(t);menu.classList.remove('open');btn.setAttribute('aria-expanded','false');
-    }));
-    const wrap=getWrap();if(!wrap)return true;ensureOverlay();
-    wrap.addEventListener('pointerdown',e=>{const t=state.tool;if(!['h','trend','rect','arrow'].includes(t))return;state.drawing=true;state.start=point(e);});
-    wrap.addEventListener('pointerup',e=>{if(!state.drawing)return;const end=point(e),a=state.start,t=state.tool;state.drawing=false;state.start=null;if(t==='h')state.drawings.push({type:'h',y:end.y});else state.drawings.push({type:t,a,b:end});redraw();});
-    wrap.addEventListener('pointermove',e=>{if(state.tool!=='crosshair'&&state.tool!=='h')return;const c=ensureOverlay();if(!c)return;const p=point(e),ctx=c.getContext('2d'),ratio=Math.max(1,window.devicePixelRatio||1);redraw();ctx.strokeStyle='rgba(148,163,184,.75)';ctx.lineWidth=ratio;ctx.setLineDash([5*ratio,4*ratio]);ctx.beginPath();ctx.moveTo(p.x,0);ctx.lineTo(p.x,c.height);ctx.stroke();if(state.tool==='h'){ctx.beginPath();ctx.moveTo(0,p.y);ctx.lineTo(c.width,p.y);ctx.stroke();}ctx.setLineDash([]);});
-    window.addEventListener('resize',()=>{ensureOverlay();redraw();},{passive:true});
-    document.addEventListener('fullscreenchange',()=>setTimeout(()=>{ensureOverlay();redraw();},80));
-    document.addEventListener('webkitfullscreenchange',()=>setTimeout(()=>{ensureOverlay();redraw();},80));
-    document.addEventListener('keydown',e=>{if(e.key==='Escape')exitFallbackFullscreen();});
-    redraw();return true;
-  }
-
-  function watch(){
-    if(addMenu())return;
-    const root=document.getElementById('result-container');if(!root)return;
-    const observer=new MutationObserver(()=>{if(addMenu())observer.disconnect();});observer.observe(root,{childList:true,subtree:true});
-  }
-
+  const state={tool:'crosshair',drawing:false,start:null,drawings:[],overlay:null,panStart:null,panOffset:0};
+  const css=`#live-market-chart .broker-tools{position:relative;display:inline-block;margin-left:auto}#live-market-chart .broker-tools-btn{padding:6px 10px;border-radius:7px;background:#475569;color:#fff;border:1px solid #64748b;font-weight:900;cursor:pointer}#live-market-chart .broker-tools-menu{display:none;position:absolute;right:0;top:38px;z-index:30;width:230px;max-height:330px;overflow:auto;padding:8px;border:1px solid #475569;border-radius:10px;background:#0b1220;box-shadow:0 10px 30px rgba(0,0,0,.35)}#live-market-chart .broker-tools-menu.open{display:block}#live-market-chart .broker-tools-menu button{display:block;width:100%;text-align:left;margin:3px 0;padding:7px 9px;border-radius:7px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;font-size:12px;cursor:pointer}#live-market-chart .broker-tools-menu button.active{background:#2563eb;border-color:#2563eb;color:#fff}#live-market-chart .broker-tools-menu .tool-group{padding:5px 6px 3px;color:#94a3b8;font-size:10px;font-weight:900;text-transform:uppercase}#chart-drawing-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:4}#live-market-chart .chart-canvas-wrap.tool-draw{cursor:crosshair}#live-market-chart .chart-canvas-wrap.tool-pan{cursor:grab;touch-action:none}#live-market-chart .chart-canvas-wrap.tool-pan.panning{cursor:grabbing}#live-market-chart:fullscreen,#live-market-chart:-webkit-full-screen{width:100vw;height:100vh;max-width:none;max-height:none;margin:0;padding:0;border:0;border-radius:0;background:#0f172a;display:flex;flex-direction:column;overflow:hidden;position:fixed;inset:0;z-index:2147483647}#live-market-chart:fullscreen .chart-canvas-wrap,#live-market-chart:-webkit-full-screen .chart-canvas-wrap{height:auto;flex:1 1 auto;min-height:0;width:100%;position:relative}`;
+  function inject(){if(!document.getElementById('broker-chart-tools-style')){const s=document.createElement('style');s.id='broker-chart-tools-style';s.textContent=css;document.head.appendChild(s);}}
+  const wrap=()=>document.querySelector('#live-market-chart .chart-canvas-wrap');
+  function move(){const c=document.getElementById('live-market-chart'),r=document.getElementById('result-container');if(c&&r&&c.parentElement===r&&r.parentElement)r.parentElement.insertBefore(c,r.nextSibling);}
+  function overlay(){const w=wrap();if(!w)return null;let c=document.getElementById('chart-drawing-overlay');if(!c){c=document.createElement('canvas');c.id='chart-drawing-overlay';w.appendChild(c);}const r=w.getBoundingClientRect(),d=Math.max(1,devicePixelRatio||1);c.width=Math.max(1,Math.floor(r.width*d));c.height=Math.max(1,Math.floor(r.height*d));c.style.width=r.width+'px';c.style.height=r.height+'px';state.overlay=c;return c;}
+  function pt(e){const w=wrap(),r=w.getBoundingClientRect(),d=Math.max(1,devicePixelRatio||1);return{x:(e.clientX-r.left)*d,y:(e.clientY-r.top)*d};}
+  function redraw(){const c=overlay();if(!c)return;const x=c.getContext('2d'),d=Math.max(1,devicePixelRatio||1);x.clearRect(0,0,c.width,c.height);x.lineWidth=1.5*d;state.drawings.forEach(q=>{x.strokeStyle=q.color||'#38bdf8';x.fillStyle='rgba(56,189,248,.10)';x.beginPath();if(q.type==='h'){x.moveTo(0,q.y);x.lineTo(c.width,q.y);x.stroke();}else{x.moveTo(q.a.x,q.a.y);x.lineTo(q.b.x,q.b.y);x.stroke();if(q.type==='arrow'){const a=Math.atan2(q.b.y-q.a.y,q.b.x-q.a.x),l=10*d;x.beginPath();x.moveTo(q.b.x,q.b.y);x.lineTo(q.b.x-l*Math.cos(a-.5),q.b.y-l*Math.sin(a-.5));x.lineTo(q.b.x-l*Math.cos(a+.5),q.b.y-l*Math.sin(a+.5));x.closePath();x.fill();}if(q.type==='rect'){x.rect(q.a.x,q.a.y,q.b.x-q.a.x,q.b.y-q.a.y);x.stroke();x.fill();}}});}
+  function refresh(){window.__liveChartRedraw?.();redraw();}
+  function setTool(t){state.tool=t;const w=wrap();if(w){w.classList.toggle('tool-draw',['h','trend','rect','arrow'].includes(t));w.classList.toggle('tool-pan',t==='pan');}document.querySelectorAll('.broker-tools-menu [data-btool]').forEach(b=>b.classList.toggle('active',b.dataset.btool===t));if(t==='clear'){state.drawings=[];state.tool='crosshair';refresh();}}
+  async function fullscreen(c){if(document.fullscreenElement||document.webkitFullscreenElement){if(document.exitFullscreen)await document.exitFullscreen();else document.webkitExitFullscreen?.();return;}try{if(c.requestFullscreen)await c.requestFullscreen({navigationUI:'hide'});else if(c.webkitRequestFullscreen)c.webkitRequestFullscreen();else throw Error('unsupported');}catch(e){c.classList.add('chart-fullscreen-fallback');c.dataset.prevStyle=c.getAttribute('style')||'';c.style.cssText+=';position:fixed;inset:0;width:100vw;height:100vh;z-index:2147483647;margin:0;border-radius:0;display:flex;flex-direction:column;background:#0f172a;overflow:hidden';}setTimeout(()=>{overlay();refresh();window.dispatchEvent(new Event('resize'));},120);}
+  function exitFallback(){const c=document.getElementById('live-market-chart');if(!c?.classList.contains('chart-fullscreen-fallback'))return;c.setAttribute('style',c.dataset.prevStyle||'');delete c.dataset.prevStyle;c.classList.remove('chart-fullscreen-fallback');refresh();}
+  function menu(){const c=document.getElementById('live-market-chart');if(!c||c.querySelector('.broker-tools'))return false;inject();move();const controls=c.querySelector('.chart-controls');if(!controls)return false;const h=document.createElement('div');h.className='broker-tools';h.innerHTML='<button type="button" class="broker-tools-btn" aria-expanded="false">🛠 TOOLS</button><div class="broker-tools-menu" role="menu"><div class="tool-group">Drawing</div><button data-btool="crosshair">✚ Crosshair</button><button data-btool="h">━ Horizontal Line</button><button data-btool="trend">╱ Trend Line</button><button data-btool="rect">▣ Rectangle / Zone</button><button data-btool="arrow">➜ Arrow / Marker</button><div class="tool-group">Navigation</div><button data-btool="pan">✋ Pan / Move Chart</button><button data-btool="zoom-in">＋ Zoom In</button><button data-btool="zoom-out">－ Zoom Out</button><button data-btool="reset">↺ Reset View</button><button data-btool="fullscreen">⛶ Full Screen</button><div class="tool-group">Analysis</div><button data-btool="analysis">📊 SMA / EMA Analysis</button><div class="tool-group">Drawings</div><button data-btool="clear">🧹 Clear Drawings</button></div>';controls.appendChild(h);const b=h.querySelector('.broker-tools-btn'),m=h.querySelector('.broker-tools-menu');b.addEventListener('click',e=>{e.stopPropagation();const o=m.classList.toggle('open');b.setAttribute('aria-expanded',o);});document.addEventListener('click',e=>{if(!h.contains(e.target)){m.classList.remove('open');b.setAttribute('aria-expanded','false');}});h.querySelectorAll('[data-btool]').forEach(q=>q.addEventListener('click',async()=>{const t=q.dataset.btool;if(t==='zoom-in'){window.__chartZoom=Math.min(4,(window.__chartZoom||1)*1.35);refresh();}else if(t==='zoom-out'){window.__chartZoom=Math.max(.5,(window.__chartZoom||1)/1.35);refresh();}else if(t==='reset'){window.__chartZoom=1;window.__chartOffset=0;refresh();}else if(t==='fullscreen'){m.classList.remove('open');await fullscreen(c);return;}else if(t==='analysis'){const x=c.querySelector('[data-chart-tool="analysis"]');x?.click();}else setTool(t);m.classList.remove('open');b.setAttribute('aria-expanded','false');}));
+    const w=wrap();if(!w)return true;overlay();w.addEventListener('pointerdown',e=>{if(state.tool==='pan'){state.panStart={x:e.clientX,offset:Number(window.__chartOffset||0)};w.classList.add('panning');w.setPointerCapture?.(e.pointerId);return;}if(!['h','trend','rect','arrow'].includes(state.tool))return;state.drawing=true;state.start=pt(e);});w.addEventListener('pointermove',e=>{if(state.tool==='pan'&&state.panStart){const dx=e.clientX-state.panStart.x,per=Math.max(3,w.clientWidth/90);const max=Math.max(0,(window.__chartBarsLength||240)-15);window.__chartOffset=Math.max(0,Math.min(max,Math.round(state.panStart.offset-dx/per)));refresh();return;}if(!state.drawing)return;const c=overlay(),p=pt(e),x=c.getContext('2d'),d=Math.max(1,devicePixelRatio||1);redraw();x.strokeStyle='rgba(148,163,184,.8)';x.setLineDash([5*d,4*d]);x.beginPath();if(state.tool==='h'){x.moveTo(0,p.y);x.lineTo(c.width,p.y);}else{x.moveTo(state.start.x,state.start.y);x.lineTo(p.x,p.y);}x.stroke();x.setLineDash([]);});w.addEventListener('pointerup',e=>{if(state.tool==='pan'){state.panStart=null;w.classList.remove('panning');return;}if(!state.drawing)return;const p=pt(e),a=state.start,t=state.tool;state.drawing=false;state.start=null;if(t==='h')state.drawings.push({type:'h',y:p.y});else state.drawings.push({type:t,a,b:p});redraw();});w.addEventListener('wheel',e=>{if(state.tool==='pan'||e.ctrlKey){e.preventDefault();window.__chartZoom=Math.max(.5,Math.min(4,(window.__chartZoom||1)*(e.deltaY<0?1.12:.89)));refresh();}},{passive:false});window.addEventListener('resize',()=>{overlay();refresh();},{passive:true});document.addEventListener('fullscreenchange',()=>setTimeout(()=>{overlay();refresh();},80));document.addEventListener('webkitfullscreenchange',()=>setTimeout(()=>{overlay();refresh();},80));document.addEventListener('keydown',e=>{if(e.key==='Escape')exitFallback();});setTool('crosshair');return true;}
+  function watch(){if(menu())return;const r=document.getElementById('result-container');if(!r)return;const o=new MutationObserver(()=>{if(menu())o.disconnect();});o.observe(r,{childList:true,subtree:true});}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',watch,{once:true});else watch();
 })();
