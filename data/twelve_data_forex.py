@@ -1,55 +1,47 @@
-"""Twelve Data real-time Forex 1-minute candle adapter.
+"""BiQuote real-time Forex 1-minute candle adapter.
 
-API keys are read from TWELVE_DATA_API_KEY and never stored in source control.
-This adapter only reads market data; it does not place trades.
+BiQuote is used as the live Forex market-data source. No API key is required
+for the public read endpoints. This adapter only reads market data; it does
+not place trades.
 """
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 from urllib.error import HTTPError
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 import pandas as pd
 
 INTERVAL = "1min"
 _INTERVAL_SECONDS = 60
-
-_LAST_CREDIT_USAGE = {"used": None, "left": None, "limit": None}
-
-
-def _record_credit_headers(headers) -> None:
-    used = headers.get("api-credits-used")
-    left = headers.get("api-credits-left")
-    if used is not None or left is not None:
-        try:
-            used_i = int(used) if used is not None else None
-            left_i = int(left) if left is not None else None
-            limit_i = (used_i + left_i) if used_i is not None and left_i is not None else None
-            _LAST_CREDIT_USAGE.update({"used": used_i, "left": left_i, "limit": limit_i})
-        except ValueError:
-            pass
+_BASE_URL = "https://biquote.io"
 
 
 def get_credit_usage() -> dict:
-    return dict(_LAST_CREDIT_USAGE)
+    """Return provider status in the shape expected by the existing dashboard."""
+    return {
+        "used": None,
+        "left": None,
+        "limit": None,
+        "provider": "BiQuote",
+        "free": True,
+    }
 
 
 def fetch_api_usage() -> dict:
-    """Fetch real account usage; this endpoint costs 1 API credit."""
-    api_key = os.getenv("TWELVE_DATA_API_KEY")
-    if not api_key:
-        raise RuntimeError("Set TWELVE_DATA_API_KEY in the environment; never commit it to GitHub.")
-    params = urlencode({"apikey": api_key})
+    """Return a lightweight provider-health result without spending API credits."""
     req = Request(
-        f"https://api.twelvedata.com/api_usage?{params}",
+        f"{_BASE_URL}/health",
         headers={"User-Agent": "mmc-signal-bot/1.0"},
     )
-    with urlopen(req, timeout=10) as response:
-        _record_credit_headers(response.headers)
-        return json.load(response)
+    try:
+        with urlopen(req, timeout=8) as response:
+            payload = json.load(response)
+        return {"provider": "BiQuote", "free": True, "healthy": True, "details": payload}
+    except Exception as exc:
+        return {"provider": "BiQuote", "free": True, "healthy": False, "error": str(exc)}
 
 
 def _closed_candles(df: pd.DataFrame) -> pd.DataFrame:
@@ -57,51 +49,54 @@ def _closed_candles(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     now_utc = pd.Timestamp(datetime.now(timezone.utc))
-    current_boundary = pd.Timestamp((int(now_utc.timestamp()) // _INTERVAL_SECONDS) * _INTERVAL_SECONDS, unit="s", tz="UTC")
+    current_boundary = pd.Timestamp(
+        (int(now_utc.timestamp()) // _INTERVAL_SECONDS) * _INTERVAL_SECONDS,
+        unit="s",
+        tz="UTC",
+    )
     timestamps = pd.to_datetime(df["timestamp"], utc=True)
     return df.loc[timestamps < current_boundary].copy()
 
 
 def fetch_forex_candles(symbol: str, interval: str = INTERVAL, outputsize: int = 200) -> pd.DataFrame:
-    api_key = os.getenv("TWELVE_DATA_API_KEY")
-    if not api_key:
-        raise RuntimeError("Set TWELVE_DATA_API_KEY in the environment; never commit it to GitHub.")
+    """Fetch closed 1-minute Forex OHLC candles from BiQuote."""
     if interval != INTERVAL:
         raise ValueError("Only the 1min interval is supported by the clean MMC strategy")
+    if outputsize < 1:
+        raise ValueError("outputsize must be at least 1")
 
-    params = urlencode({
-        "symbol": symbol,
-        "interval": INTERVAL,
-        "outputsize": outputsize,
-        "timezone": "UTC",
-        "apikey": api_key,
-    })
+    safe_symbol = quote(str(symbol).upper().strip(), safe="")
+    params = urlencode({"interval": "1m", "limit": min(int(outputsize), 1000)})
     req = Request(
-        f"https://api.twelvedata.com/time_series?{params}",
-        headers={"User-Agent": "mmc-signal-bot/1.0"},
+        f"{_BASE_URL}/api/{safe_symbol}/ohlc?{params}",
+        headers={"User-Agent": "mmc-signal-bot/1.0", "Accept": "application/json"},
     )
     try:
         with urlopen(req, timeout=10) as response:
-            _record_credit_headers(response.headers)
             payload = json.load(response)
     except HTTPError as exc:
-        if exc.code == 429:
-            raise RuntimeError(
-                "Twelve Data rate limit reached (HTTP 429). Wait for the next API-credit minute and try again."
-            ) from exc
-        raise
+        raise RuntimeError(f"BiQuote HTTP {exc.code} while fetching {symbol}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"BiQuote connection error for {symbol}: {exc}") from exc
 
-    if payload.get("status") == "error":
-        raise RuntimeError(payload.get("message", "Twelve Data API error"))
-    values = payload.get("values", [])
+    if isinstance(payload, dict) and payload.get("error"):
+        raise RuntimeError(str(payload.get("error")))
+
+    values = payload.get("bars", []) if isinstance(payload, dict) else []
+    if not isinstance(values, list) or not values:
+        raise RuntimeError(f"BiQuote returned no candle data for {symbol}")
+
     df = pd.DataFrame(values)
-    if df.empty:
-        raise RuntimeError("Twelve Data returned no candle data")
-    df["timestamp"] = pd.to_datetime(df["datetime"], utc=True)
+    required = {"openTime", "open", "high", "low", "close"}
+    missing = required - set(df.columns)
+    if missing:
+        raise RuntimeError(f"BiQuote candle response missing fields: {', '.join(sorted(missing))}")
+
+    df["timestamp"] = pd.to_datetime(df["openTime"], unit="ms", utc=True, errors="coerce")
     for col in ("open", "high", "low", "close"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df[["timestamp", "open", "high", "low", "close"]].dropna().sort_values("timestamp")
     df = _closed_candles(df)
     if df.empty:
-        raise RuntimeError("Twelve Data returned no closed 1m candles")
-    return df.reset_index(drop=True)
+        raise RuntimeError(f"BiQuote returned no closed 1m candles for {symbol}")
+    return df.tail(int(outputsize)).reset_index(drop=True)
