@@ -17,4 +17,7 @@ RUN pip install --upgrade pip \
 
 COPY . .
 
+# Load the compact equal-height dashboard panel CSS without changing the main template.
+RUN grep -q 'panel_equalizer.css' web/templates/index.html || sed -i 's#</head>#<link rel="stylesheet" href="/static/panel_equalizer.css">\n</head>#' web/templates/index.html
+
 CMD ["python", "main.py"]
