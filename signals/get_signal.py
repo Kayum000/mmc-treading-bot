@@ -8,7 +8,7 @@ import pandas as pd
 
 from data.biquote_forex import fetch_forex_candles
 from data.binance_crypto import fetch_crypto_candles
-from strategy.mmc import Signal, generate_signal, level_for_side
+from strategy.mmc_advanced import Signal, generate_signal, level_for_side
 from strategy.reentry_guard import check_reentry_guard
 from performance import settle_pending, loss_lock_reason, pending_trade_reason
 
@@ -60,81 +60,13 @@ def _bengali_reason(reason: str) -> str:
     """Translate every visible strategy/protection reason into Bengali."""
     text = str(reason or "").strip()
     replacements = (
-        ("Valid Supply/Demand origin → dynamic impulse measure → 50% equilibrium → AB=CD mirror → structure confluence → rejection → confirmation একসঙ্গে তৈরি হয়নি; তাই signal নেই।",
-         "বৈধ Supply/Demand Origin → বাজারের প্রকৃত Impulse Distance → ৫০% Equilibrium → AB=CD Mirror → Structure Confluence → Rejection → Confirmation—সবগুলো শর্ত একসঙ্গে পূরণ হয়নি; তাই কোনো সংকেত নেই।"),
-        ("Support rejection হয়েছে, কিন্তু valid Supply/Demand origin, dynamic impulse distance, AB=CD mirror এবং সম্পূর্ণ bullish confirmation একসঙ্গে হয়নি; BUY বন্ধ।",
-         "Support Rejection হয়েছে, কিন্তু বৈধ Supply/Demand Origin, বাজারের প্রকৃত Impulse Distance, AB=CD Mirror এবং সম্পূর্ণ Bullish Confirmation—সবগুলো একসঙ্গে পূরণ হয়নি; তাই ক্রয় সংকেত বন্ধ।"),
-        ("Resistance rejection হয়েছে, কিন্তু valid Supply/Demand origin, dynamic impulse distance, AB=CD mirror এবং সম্পূর্ণ bearish confirmation একসঙ্গে হয়নি; SELL বন্ধ।",
-         "Resistance Rejection হয়েছে, কিন্তু বৈধ Supply/Demand Origin, বাজারের প্রকৃত Impulse Distance, AB=CD Mirror এবং সম্পূর্ণ Bearish Confirmation—সবগুলো একসঙ্গে পূরণ হয়নি; তাই বিক্রয় সংকেত বন্ধ।"),
-        ("একই candle-এ দুই দিকের Mirror MMC confirmation এসেছে; তাই entry নেই।",
-         "একই Candle-এ ক্রয় ও বিক্রয়—দুই দিকের Mirror MMC Confirmation এসেছে; তাই কোনো প্রবেশ নেই।"),
-        ("পরিষ্কার MMC যাচাইয়ের জন্য পর্যাপ্ত বন্ধ ১ মিনিটের ক্যান্ডেল নেই।",
-         "পরিষ্কার MMC যাচাইয়ের জন্য পর্যাপ্ত বন্ধ ১-মিনিটের Candle নেই।"),
+        ("Valid Supply/Demand origin → dynamic impulse measure → 50% equilibrium → AB=CD mirror → structure confluence → rejection → confirmation একসঙ্গে তৈরি হয়নি; তাই signal নেই।", "বৈধ Supply/Demand Origin → বাজারের প্রকৃত Impulse Distance → ৫০% Equilibrium → AB=CD Mirror → Structure Confluence → Rejection → Confirmation—সবগুলো শর্ত একসঙ্গে পূরণ হয়নি; তাই কোনো সংকেত নেই।"),
+        ("Support rejection হয়েছে, কিন্তু valid Supply/Demand origin, dynamic impulse distance, AB=CD mirror এবং সম্পূর্ণ bullish confirmation একসঙ্গে হয়নি; BUY বন্ধ।", "Support Rejection হয়েছে, কিন্তু বৈধ Supply/Demand Origin, বাজারের প্রকৃত Impulse Distance, AB=CD Mirror এবং সম্পূর্ণ Bullish Confirmation—সবগুলো একসঙ্গে পূরণ হয়নি; তাই ক্রয় সংকেত বন্ধ।"),
+        ("Resistance rejection হয়েছে, কিন্তু valid Supply/Demand origin, dynamic impulse distance, AB=CD mirror এবং সম্পূর্ণ bearish confirmation একসঙ্গে হয়নি; SELL বন্ধ।", "Resistance Rejection হয়েছে, কিন্তু বৈধ Supply/Demand Origin, বাজারের প্রকৃত Impulse Distance, AB=CD Mirror এবং সম্পূর্ণ Bearish Confirmation—সবগুলো একসঙ্গে পূরণ হয়নি; তাই বিক্রয় সংকেত বন্ধ।"),
+        ("একই candle-এ দুই দিকের Mirror MMC confirmation এসেছে; তাই entry নেই।", "একই Candle-এ ক্রয় ও বিক্রয়—দুই দিকের Mirror MMC Confirmation এসেছে; তাই কোনো প্রবেশ নেই।"),
+        ("পরিষ্কার MMC যাচাইয়ের জন্য পর্যাপ্ত বন্ধ ১ মিনিটের ক্যান্ডেল নেই।", "পরিষ্কার MMC যাচাইয়ের জন্য পর্যাপ্ত বন্ধ ১-মিনিটের Candle নেই।"),
         ("পরবর্তী 1m candle-এ entry।", "পরবর্তী ১-মিনিটের Candle-এ প্রবেশ।"),
-        ("supply-origin", "Supply-Origin"),
-        ("demand-origin", "Demand-Origin"),
-        ("dynamic mirror distance", "বাজারের প্রকৃত Mirror Distance"),
-        ("50% equilibrium", "৫০% Equilibrium"),
-        ("AB=CD projected mirror target", "AB=CD অনুযায়ী Mirror Target"),
-        ("structure confluence", "Structure Confluence"),
-        ("rejection", "Rejection"),
-        ("bullish confirmation", "Bullish Confirmation"),
-        ("bearish confirmation", "Bearish Confirmation"),
-        ("Supporting votes", "সহায়ক ভোট"),
-        ("supporting votes", "সহায়ক ভোট"),
-        ("BUY", "ক্রয়"),
-        ("SELL", "বিক্রয়"),
-        ("NO_TRADE", "কোনো ট্রেড নয়"),
-        ("Mirror MMC", "মিরর MMC"),
-        ("main Mirror MMC", "মূল মিরর MMC"),
-        ("final direction", "চূড়ান্ত দিক"),
-        ("final directional gate", "চূড়ান্ত দিক নির্ধারণের শর্ত"),
-        ("vote", "ভোট"),
-        ("votes", "ভোট"),
-        ("accumulation", "সঞ্চয়"),
-        ("liquidity generation", "লিকুইডিটি তৈরি"),
-        ("premium & discount", "প্রিমিয়াম ও ডিসকাউন্ট"),
-        ("premium_discount", "প্রিমিয়াম ও ডিসকাউন্ট"),
-        ("inducement", "ইনডিউসমেন্ট"),
-        ("engineering liquidity", "লিকুইডিটি ইঞ্জিনিয়ারিং"),
-        ("judas stop hunt", "জুডাস স্টপ-হান্ট"),
-        ("liquidity sweep", "লিকুইডিটি সুইপ"),
-        ("order block activation", "অর্ডার ব্লক সক্রিয়করণ"),
-        ("IFC", "প্রাতিষ্ঠানিক ফান্ডিং ক্যান্ডেল"),
-        ("displacement", "দ্রুত মূল্য-বিস্তার"),
-        ("MSS/CHoCH", "মার্কেট স্ট্রাকচার পরিবর্তন"),
-        ("MSS", "মার্কেট স্ট্রাকচার পরিবর্তন"),
-        ("CHoCH", "চরিত্র পরিবর্তন"),
-        ("BOS", "স্ট্রাকচার ব্রেক"),
-        ("FVG", "ফেয়ার ভ্যালু গ্যাপ"),
-        ("IFVG", "ইনভার্স ফেয়ার ভ্যালু গ্যাপ"),
-        ("liquidity void", "লিকুইডিটি ভয়েড"),
-        ("mitigation", "মিটিগেশন"),
-        ("breaker block", "ব্রেকার ব্লক"),
-        ("rejection block", "রিজেকশন ব্লক"),
-        ("propulsion block", "প্রপালশন ব্লক"),
-        ("OTE", "অপ্টিমাল ট্রেড এন্ট্রি"),
-        ("kill zone", "কিল জোন"),
-        ("distribution", "বণ্টন"),
-        ("completion", "সম্পূর্ণতা"),
-        ("candle", "Candle"),
-        ("signal", "সংকেত"),
-        ("entry", "প্রবেশ"),
-        ("reason", "কারণ"),
-        ("valid", "বৈধ"),
-        ("confirmation", "নিশ্চিতকরণ"),
-        ("bullish", "ঊর্ধ্বমুখী"),
-        ("bearish", "নিম্নমুখী"),
-        ("dynamic", "বাজার-নির্ধারিত"),
-        ("impulse", "ইমপালস"),
-        ("distance", "দূরত্ব"),
-        ("target", "লক্ষ্য"),
-        ("structure", "স্ট্রাকচার"),
-        ("confluence", "সমন্বয়"),
-        ("support", "সাপোর্ট"),
-        ("resistance", "রেজিস্ট্যান্স"),
-        ("Supply", "সাপ্লাই"),
-        ("Demand", "ডিমান্ড"),
+        ("supply-origin", "Supply-Origin"), ("demand-origin", "Demand-Origin"), ("dynamic mirror distance", "বাজারের প্রকৃত Mirror Distance"), ("50% equilibrium", "৫০% Equilibrium"), ("AB=CD projected mirror target", "AB=CD অনুযায়ী Mirror Target"), ("structure confluence", "Structure Confluence"), ("rejection", "Rejection"), ("bullish confirmation", "Bullish Confirmation"), ("bearish confirmation", "Bearish Confirmation"), ("Supporting votes", "সহায়ক ভোট"), ("supporting votes", "সহায়ক ভোট"), ("BUY", "ক্রয়"), ("SELL", "বিক্রয়"), ("NO_TRADE", "কোনো ট্রেড নয়"), ("Mirror MMC", "মিরর MMC"), ("main Mirror MMC", "মূল মিরর MMC"), ("final direction", "চূড়ান্ত দিক"), ("final directional gate", "চূড়ান্ত দিক নির্ধারণের শর্ত"), ("vote", "ভোট"), ("votes", "ভোট"), ("accumulation", "সঞ্চয়"), ("liquidity generation", "লিকুইডিটি তৈরি"), ("premium & discount", "প্রিমিয়াম ও ডিসকাউন্ট"), ("premium_discount", "প্রিমিয়াম ও ডিসকাউন্ট"), ("inducement", "ইনডিউসমেন্ট"), ("engineering liquidity", "লিকুইডিটি ইঞ্জিনিয়ারিং"), ("judas stop hunt", "জুডাস স্টপ-হান্ট"), ("liquidity sweep", "লিকুইডিটি সুইপ"), ("order block activation", "অর্ডার ব্লক সক্রিয়করণ"), ("IFC", "প্রাতিষ্ঠানিক ফান্ডিং ক্যান্ডেল"), ("displacement", "দ্রুত মূল্য-বিস্তার"), ("MSS/CHoCH", "মার্কেট স্ট্রাকচার পরিবর্তন"), ("MSS", "মার্কেট স্ট্রাকচার পরিবর্তন"), ("CHoCH", "চরিত্র পরিবর্তন"), ("BOS", "স্ট্রাকচার ব্রেক"), ("FVG", "ফেয়ার ভ্যালু গ্যাপ"), ("IFVG", "ইনভার্স ফেয়ার ভ্যালু গ্যাপ"), ("liquidity void", "লিকুইডিটি ভয়েড"), ("mitigation", "মিটিগেশন"), ("breaker block", "ব্রেকার ব্লক"), ("rejection block", "রিজেকশন ব্লক"), ("propulsion block", "প্রপালশন ব্লক"), ("OTE", "অপ্টিমাল ট্রেড এন্ট্রি"), ("kill zone", "কিল জোন"), ("distribution", "বণ্টন"), ("completion", "সম্পূর্ণতা"), ("candle", "Candle"), ("signal", "সংকেত"), ("entry", "প্রবেশ"), ("reason", "কারণ"), ("valid", "বৈধ"), ("confirmation", "নিশ্চিতকরণ"), ("bullish", "ঊর্ধ্বমুখী"), ("bearish", "নিম্নমুখী"), ("dynamic", "বাজার-নির্ধারিত"), ("impulse", "ইমপালস"), ("distance", "দূরত্ব"), ("target", "লক্ষ্য"), ("structure", "স্ট্রাকচার"), ("confluence", "সমন্বয়"), ("support", "সাপোর্ট"), ("resistance", "রেজিস্ট্যান্স"), ("Supply", "সাপ্লাই"), ("Demand", "ডিমান্ড"),
     )
     for source, translated in replacements:
         text = text.replace(source, translated)
@@ -142,11 +74,7 @@ def _bengali_reason(reason: str) -> str:
 
 
 def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) -> dict:
-    """Generate one clean-MMC next-1m-candle entry for the selected market.
-
-    Only completed 1m candles are analyzed. Level touch alone never produces a
-    signal. Entry is always the next 1m candle, not the currently running one.
-    """
+    """Generate one advanced clean-MMC next-1m-candle entry for the selected market."""
     pair = pair.strip().upper()
     market_mode = market_mode.strip().lower()
     if market_mode not in {"real", "crypto"}:
@@ -156,7 +84,6 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
 
     signal_at_utc = datetime.now(timezone.utc)
     next_candle_utc = _next_candle_boundary_utc(signal_at_utc)
-
     entry_frame = _load_frame(pair, market_mode, signal_at_utc, automatic)
     try:
         settle_pending({(market_mode, pair): entry_frame})
@@ -168,27 +95,14 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
         entry_bd = next_candle_utc.astimezone(timezone(timedelta(hours=6)))
         entry_time_text = entry_bd.strftime("%d %b %Y, %H:%M:%S")
-        return {
-            "pair": pair, "requested_pair": pair, "market_mode": market_mode,
-            "source": "Binance" if market_mode == "crypto" else "BiQuote", "signal": "NO_TRADE",
-            "buy_score": 0, "sell_score": 0,
-            "reason": f"{_bengali_reason(pending_reason)} প্রবেশ হবে {entry_time_text} বাংলাদেশ সময় ({next_candle_utc.strftime('%H:%M:%S')} UTC)।",
-            "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
-            "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": None,
-            "analysis_candle_time_utc": None, "entry_price": None, "entry_price_type": "pending_trade_block",
-            "entry_time_utc": next_candle_utc.isoformat(timespec="seconds"), "entry_time_bd": entry_time_text,
-            "entry_delay_seconds": max(0, int((next_candle_utc - signal_at_utc).total_seconds())),
-            "timeframe": "Clean MMC / 1m", "entry_timeframe": "1m", "automatic": automatic,
-        }
+        return {"pair": pair, "requested_pair": pair, "market_mode": market_mode, "source": "Binance" if market_mode == "crypto" else "BiQuote", "signal": "NO_TRADE", "buy_score": 0, "sell_score": 0, "reason": f"{_bengali_reason(pending_reason)} প্রবেশ হবে {entry_time_text} বাংলাদেশ সময় ({next_candle_utc.strftime('%H:%M:%S')} UTC)।", "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": None, "analysis_candle_time_utc": None, "entry_price": None, "entry_price_type": "pending_trade_block", "entry_time_utc": next_candle_utc.isoformat(timespec="seconds"), "entry_time_bd": entry_time_text, "entry_delay_seconds": max(0, int((next_candle_utc - signal_at_utc).total_seconds())), "timeframe": "Advanced Clean MMC / 1m", "entry_timeframe": "1m", "automatic": automatic}
 
     result = generate_signal(entry_frame)
-
     level_info = level_for_side(entry_frame, result.action) if result.action in {"BUY", "SELL"} else None
     loss_reason = loss_lock_reason(market_mode, pair, result.action, entry_frame, level_info)
     if loss_reason and result.action in {"BUY", "SELL"}:
         result = Signal("NO_TRADE", result.buy_score, result.sell_score, loss_reason)
         level_info = None
-
     if result.action in {"BUY", "SELL"}:
         block_reason = check_reentry_guard(entry_frame, market_mode, pair, result.action)
         if block_reason:
@@ -206,26 +120,8 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
     entry_bd = next_candle_utc.astimezone(timezone(timedelta(hours=6)))
     entry_time_text = entry_bd.strftime("%d %b %Y, %H:%M:%S")
-    reason_text = (
-        f"{_bengali_reason(result.reason)} "
-        f"প্রবেশ হবে পরবর্তী ১-মিনিটের Candle-এ, সময় {entry_time_text} বাংলাদেশ সময় "
-        f"({next_candle_utc.strftime('%H:%M:%S')} UTC)। এটি চলমান Candle-এর জন্য নয়।"
-    )
-
-    return {
-        "pair": pair, "requested_pair": pair, "market_mode": market_mode,
-        "source": "Binance" if market_mode == "crypto" else "BiQuote", "signal": result.action,
-        "buy_score": result.buy_score, "sell_score": result.sell_score, "reason": reason_text,
-        "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
-        "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": candle_time,
-        "analysis_candle_time_utc": candle_time, "entry_price": entry_price,
-        "entry_price_type": "last_closed_1m_close_reference", "entry_time_utc": next_candle_utc.isoformat(),
-        "entry_time_bd": entry_time_text,
-        "entry_delay_seconds": max(0, int((next_candle_utc - signal_at_utc).total_seconds())),
-        "timeframe": "Clean MMC / 1m", "entry_timeframe": "1m", "automatic": automatic,
-        "mmc_level_type": level_info[0] if level_info else None,
-        "mmc_level_price": level_info[1] if level_info else None,
-    }
+    reason_text = f"{_bengali_reason(result.reason)} প্রবেশ হবে পরবর্তী ১-মিনিটের Candle-এ, সময় {entry_time_text} বাংলাদেশ সময় ({next_candle_utc.strftime('%H:%M:%S')} UTC)। এটি চলমান Candle-এর জন্য নয়।"
+    return {"pair": pair, "requested_pair": pair, "market_mode": market_mode, "source": "Binance" if market_mode == "crypto" else "BiQuote", "signal": result.action, "buy_score": result.buy_score, "sell_score": result.sell_score, "reason": reason_text, "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": candle_time, "analysis_candle_time_utc": candle_time, "entry_price": entry_price, "entry_price_type": "last_closed_1m_close_reference", "entry_time_utc": next_candle_utc.isoformat(), "entry_time_bd": entry_time_text, "entry_delay_seconds": max(0, int((next_candle_utc - signal_at_utc).total_seconds())), "timeframe": "Advanced Clean MMC / 1m", "entry_timeframe": "1m", "automatic": automatic, "mmc_level_type": level_info[0] if level_info else None, "mmc_level_price": level_info[1] if level_info else None}
 
 
 def pd_timestamp_to_utc(value) -> datetime:
