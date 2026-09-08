@@ -1,8 +1,8 @@
-"""Pure multi-timeframe price-structure strategy using only 5m, 15m and 30m.
+"""Pure MTF direction + 1m price-action entry strategy.
 
-No MMC, EMA, RSI, MACD, or other indicator is used for the directional signal.
-The 30m and 15m frames establish directional structure; the 5m frame provides
-an aligned break-of-structure entry trigger.
+5m/15m/30m only establish direction. When all three agree, the 1m chart
+must provide a fresh liquidity sweep, displacement and structure break before
+an entry is returned. No MMC, EMA, RSI or MACD is used.
 """
 from __future__ import annotations
 
@@ -31,13 +31,8 @@ def _resample_ohlc(df, minutes):
     x = x.dropna()
     if x.empty:
         return None
-    return x.resample(
-        f'{int(minutes)}min', label='right', closed='right'
-    ).agg({
-        'open': 'first',
-        'high': 'max',
-        'low': 'min',
-        'close': 'last',
+    return x.resample(f'{int(minutes)}min', label='right', closed='right').agg({
+        'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last'
     }).dropna()
 
 
@@ -54,12 +49,10 @@ def _structure(df, lookback=3):
 
 
 def _trend_bias(df, lookback=3):
-    """Use the most recent confirmed structure break in the HTF window."""
     if not _valid(df, lookback + 3):
         return 'neutral'
     for i in range(len(df) - 1, max(lookback + 1, len(df) - 8), -1):
-        sub = df.iloc[:i + 1]
-        s = _structure(sub, lookback)
+        s = _structure(df.iloc[:i + 1], lookback)
         if s != 'neutral':
             return s
     return 'neutral'
@@ -67,25 +60,59 @@ def _trend_bias(df, lookback=3):
 
 def mtf_states(df):
     frames = {m: _resample_ohlc(df, m) for m in (5, 15, 30)}
-    return frames, {m: _trend_bias(frames[m]) if frames[m] is not None else 'neutral'
-                    for m in (5, 15, 30)}
+    states = {m: _trend_bias(frames[m]) if frames[m] is not None else 'neutral'
+              for m in (5, 15, 30)}
+    return frames, states
 
 
 def market_bias(df):
-    """Visible bias: 30m first, then 15m; neutral if they conflict."""
+    """Only expose a directional bias when 30m, 15m and 5m agree."""
     _, states = mtf_states(df)
-    if states[30] in {'bullish', 'bearish'} and states[15] == states[30]:
-        return 'BUY' if states[30] == 'bullish' else 'SELL'
-    if states[30] in {'bullish', 'bearish'}:
-        return 'BUY' if states[30] == 'bullish' else 'SELL'
-    if states[15] in {'bullish', 'bearish'}:
-        return 'BUY' if states[15] == 'bullish' else 'SELL'
+    if states[30] == states[15] == states[5] == 'bullish':
+        return 'BUY'
+    if states[30] == states[15] == states[5] == 'bearish':
+        return 'SELL'
     return 'NEUTRAL'
 
 
-def _aligned_entry(states, side):
-    want = 'bullish' if side == 'BUY' else 'bearish'
-    return states[30] == want and states[15] == want and states[5] == want
+def _one_minute_entry(df, side, lookback=5):
+    """Fresh 1m sweep + displacement + MSS confirmation."""
+    if not _valid(df, 8):
+        return False
+    x = df[['open', 'high', 'low', 'close']].tail(max(lookback + 4, 9)).copy()
+    for c in x.columns:
+        x[c] = pd.to_numeric(x[c], errors='coerce')
+    x = x.dropna()
+    if len(x) < 8:
+        return False
+
+    last = x.iloc[-1]
+    prev = x.iloc[-2]
+    prior = x.iloc[:-2].tail(lookback)
+    if prior.empty:
+        return False
+
+    prior_high = float(prior['high'].max())
+    prior_low = float(prior['low'].min())
+    rng = float(last['high'] - last['low'])
+    body = abs(float(last['close'] - last['open']))
+    if rng <= 0 or body / rng < 0.55:
+        return False
+
+    if side == 'BUY':
+        # Previous candle sweeps sell-side liquidity, then latest candle
+        # displaces up and closes above the recent 1m structure.
+        sweep = float(prev['low']) < prior_low and float(prev['close']) > prior_low
+        displacement = float(last['close']) > float(last['open'])
+        mss = float(last['close']) > prior_high or float(last['close']) > float(prev['high'])
+        return sweep and displacement and mss
+
+    # SELL: previous candle sweeps buy-side liquidity, then latest candle
+    # displaces down and closes below the recent 1m structure.
+    sweep = float(prev['high']) > prior_high and float(prev['close']) < prior_high
+    displacement = float(last['close']) < float(last['open'])
+    mss = float(last['close']) < prior_low or float(last['close']) < float(prev['low'])
+    return sweep and displacement and mss
 
 
 def generate_signal(df):
@@ -93,28 +120,31 @@ def generate_signal(df):
     if any(frames[m] is None or len(frames[m]) < 6 for m in (5, 15, 30)):
         return Signal('NO_TRADE', 0, 0, 'MTF 5m/15m/30m বিশ্লেষণের জন্য পর্যাপ্ত বন্ধ ক্যান্ডেল নেই।')
 
-    buy_ok = _aligned_entry(states, 'BUY')
-    sell_ok = _aligned_entry(states, 'SELL')
     buy_score = sum(states[m] == 'bullish' for m in (5, 15, 30))
     sell_score = sum(states[m] == 'bearish' for m in (5, 15, 30))
 
-    if buy_ok and not sell_ok:
-        return Signal('BUY', buy_score, sell_score,
-                      'Pure MTF BUY: 30m + 15m trend aligned, 5m structure aligned for entry.')
-    if sell_ok and not buy_ok:
-        return Signal('SELL', buy_score, sell_score,
-                      'Pure MTF SELL: 30m + 15m trend aligned, 5m structure aligned for entry.')
-    if buy_ok and sell_ok:
+    # HTF alignment is mandatory before any 1m analysis can trigger.
+    if states[30] == states[15] == states[5] == 'bullish':
+        if _one_minute_entry(df, 'BUY'):
+            return Signal('BUY', buy_score, sell_score,
+                          'MTF aligned BUY: 30m+15m+5m bullish; 1m sweep + displacement + MSS confirmed.')
         return Signal('NO_TRADE', buy_score, sell_score,
-                      'MTF BUY এবং SELL একই সঙ্গে valid নয়; ambiguous structure এ entry বন্ধ।')
+                      '30m+15m+5m bullish, কিন্তু 1m BUY confirmation এখনো হয়নি।')
+
+    if states[30] == states[15] == states[5] == 'bearish':
+        if _one_minute_entry(df, 'SELL'):
+            return Signal('SELL', buy_score, sell_score,
+                          'MTF aligned SELL: 30m+15m+5m bearish; 1m sweep + displacement + MSS confirmed.')
+        return Signal('NO_TRADE', buy_score, sell_score,
+                      '30m+15m+5m bearish, কিন্তু 1m SELL confirmation এখনো হয়নি।')
 
     return Signal('NO_TRADE', buy_score, sell_score,
-                  f"MTF alignment incomplete: 30m={states[30]}, 15m={states[15]}, 5m={states[5]}.")
+                  f"MTF alignment incomplete: 30m={states[30]}, 15m={states[15]}, 5m={states[5]}; 1m analysis skipped.")
 
 
 def level_for_side(df, side, lookback=20):
     """Compatibility helper: returns the latest 5m structural level."""
-    frames, states = mtf_states(df)
+    frames, _ = mtf_states(df)
     f = frames.get(5)
     if f is None or f.empty:
         return None
