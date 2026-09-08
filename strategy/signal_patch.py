@@ -1,16 +1,44 @@
 """Conservative signal-density layer for the live MMC engine.
 
-The canonical Mirror MMC remains first priority. This module only supplies a
-secondary entry when the main gate finds NO_TRADE and the 22 supporting votes
-show a clear directional imbalance plus independent price-action confirmation.
-It never fabricates a signal and does not bypass the re-entry/loss protection
-which is applied later by signals.get_signal.
+The canonical Mirror MMC remains first priority. Valid canonical setups are
+classified as A+ or A without changing the underlying entry decision. The
+secondary fallback remains explicitly lower-tier and is never counted as A/A+.
 """
 from __future__ import annotations
 
 from strategy import mmc as _mmc
 
 _ORIGINAL_GENERATE_SIGNAL = _mmc.generate_signal
+
+
+def _grade_canonical(signal, df):
+    """Attach an empirical setup grade to an already-valid canonical signal.
+
+    A+ requires both a meaningful score margin and a strong confirmation body.
+    A is a valid MMC confirmation with a smaller margin. No threshold here
+    creates a signal; it only classifies a signal that the canonical gate has
+    already accepted.
+    """
+    if signal.action not in {"BUY", "SELL"}:
+        return signal
+
+    margin = abs(int(signal.buy_score) - int(signal.sell_score))
+    try:
+        ratio = float(_mmc._ratio(df.iloc[-1]))
+    except Exception:
+        return signal
+
+    if margin >= 4 and ratio >= 0.60:
+        grade = "A+"
+    elif margin >= 2 and ratio >= 0.45:
+        grade = "A"
+    else:
+        # Canonical gate passed, but the classification is intentionally not
+        # promoted to A/A+ until the stronger margin/body conditions are met.
+        grade = "VALID"
+
+    reason = f"{signal.reason} Setup grade: {grade} (score margin {margin}, confirmation body ratio {ratio:.2f})."
+    return _mmc.Signal(signal.action, signal.buy_score, signal.sell_score, reason)
 
 
 def _quality_fallback(df):
@@ -57,14 +85,14 @@ def _quality_fallback(df):
         side,
         buy_score,
         sell_score,
-        f"Quality MMC fallback: {side} selected with supporting votes {buy_score}/22 vs {sell_score}/22, directional candle and independent price-action confirmation. Canonical Mirror gate did not complete, so this is a lower-tier setup; protection rules still apply."
+        f"Quality MMC fallback: {side} selected with supporting votes {buy_score}/22 vs {sell_score}/22, directional candle and independent price-action confirmation. Canonical Mirror gate did not complete, so this is a lower-tier setup (not A/A+); protection rules still apply."
     )
 
 
 def generate_signal(df):
-    """Use canonical Mirror MMC first, then a conservative quality fallback."""
+    """Use canonical Mirror MMC first, classify it, then use a lower-tier fallback."""
     primary = _ORIGINAL_GENERATE_SIGNAL(df)
     if primary.action in {"BUY", "SELL"}:
-        return primary
+        return _grade_canonical(primary, df)
     fallback = _quality_fallback(df)
     return fallback if fallback is not None else primary
