@@ -72,7 +72,7 @@ def fetch_latest_tick(symbol: str) -> dict:
 
 
 def fetch_tick_history(symbol: str, count: int = 1000) -> pd.DataFrame:
-    """Return newest BiQuote ticks in the schema expected by the tick strategy."""
+    """Return newest BiQuote ticks, preserving volume fields when present."""
     clean_symbol = symbol.replace("/", "").upper()
     limit = max(1, min(int(count), 1000))
     payload = _request_json(f"{BASE_URL}/api/{quote(clean_symbol)}/history?count={limit}")
@@ -84,14 +84,19 @@ def fetch_tick_history(symbol: str, count: int = 1000) -> pd.DataFrame:
         if not isinstance(tick, dict):
             continue
         try:
-            out.append({
+            row = {
                 "timestamp": pd.to_datetime(tick.get("timestamp"), utc=True),
                 "askPrice": float(tick["ask"]),
                 "bidPrice": float(tick["bid"]),
-            })
+            }
+            if tick.get("askVolume") is not None and tick.get("bidVolume") is not None:
+                row["askVolume"] = float(tick["askVolume"])
+                row["bidVolume"] = float(tick["bidVolume"])
+            out.append(row)
         except (KeyError, TypeError, ValueError):
             continue
-    df = pd.DataFrame(out).dropna().sort_values("timestamp").drop_duplicates("timestamp")
+    df = pd.DataFrame(out).dropna(subset=["timestamp", "askPrice", "bidPrice"])
+    df = df.sort_values("timestamp").drop_duplicates("timestamp")
     if df.empty:
         raise RuntimeError(f"BiQuote returned invalid tick history for {clean_symbol}")
     return df.reset_index(drop=True)
