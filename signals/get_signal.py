@@ -1,4 +1,4 @@
-"""Live single-timeframe MM-free signal generation for the selected market."""
+"""Live pure multi-timeframe signal generation for the selected market."""
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
@@ -8,9 +8,8 @@ import pandas as pd
 
 from data.biquote_forex import fetch_forex_candles
 from data.binance_crypto import fetch_crypto_candles
-from strategy.mmc_advanced import Signal, generate_signal, market_bias, level_for_side
-from strategy.reentry_guard import check_reentry_guard
-from performance import settle_pending, loss_lock_reason, pending_trade_reason
+from strategy.mtf import Signal, generate_signal, market_bias, level_for_side
+from performance import settle_pending, pending_trade_reason
 
 _CACHE = {}
 _CACHE_LOCK = threading.Lock()
@@ -36,7 +35,12 @@ def _closed_1m_frame(frame, now_utc: datetime):
         return frame
     current_start = pd.Timestamp.fromtimestamp(_period_start(now_utc), tz="UTC")
     timestamps = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
-    return frame.loc[timestamps < current_start].copy()
+    out = frame.loc[timestamps < current_start].copy()
+    out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True, errors="coerce")
+    out = out.dropna(subset=["timestamp"])
+    out = out.sort_values("timestamp")
+    out.index = out["timestamp"]
+    return out
 
 
 def _load_frame(pair: str, market_mode: str, now_utc: datetime, automatic: bool):
@@ -57,12 +61,10 @@ def _bengali_reason(reason: str) -> str:
     text = str(reason or "").strip()
     replacements = (
         ("BUY", "ক্রয়"), ("SELL", "বিক্রয়"), ("NO_TRADE", "কোনো ট্রেড নয়"),
-        ("bias", "বাজারের দিক"), ("edge", "দিকের শক্তি"), ("weak entry edge", "এন্ট্রির শক্তি কম"),
-        ("MM-free PA entry", "MMC-বিহীন Price Action Entry"),
-        ("MM-free PA", "MMC-বিহীন Price Action"),
-        ("insufficient history", "পর্যাপ্ত ইতিহাস নেই"),
-        ("pending", "অপেক্ষমাণ"), ("entry", "এন্ট্রি"), ("Candle", "ক্যান্ডেল"),
-        ("level", "লেভেল"), ("loss lock", "লস-লক"), ("re-entry", "পুনঃএন্ট্রি"),
+        ("MTF BUY", "MTF ক্রয়"), ("MTF SELL", "MTF বিক্রয়"),
+        ("alignment incomplete", "MTF alignment সম্পূর্ণ হয়নি"),
+        ("ambiguous structure", "দিক অস্পষ্ট"), ("entry", "এন্ট্রি"),
+        ("level", "লেভেল"), ("pending", "অপেক্ষমাণ"), ("Candle", "ক্যান্ডেল"),
     )
     for source, translated in replacements:
         text = text.replace(source, translated)
@@ -80,12 +82,12 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     signal_at_utc = datetime.now(timezone.utc)
     next_candle_utc = _next_candle_boundary_utc(signal_at_utc)
     entry_frame = _load_frame(pair, market_mode, signal_at_utc, automatic)
+
     try:
         settle_pending({(market_mode, pair): entry_frame})
     except Exception:
         pass
 
-    # Dashboard direction is NEVER blank: it is the current market bias.
     bias = market_bias(entry_frame)
 
     pending_reason = pending_trade_reason(market_mode, pair)
@@ -106,21 +108,12 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
             "entry_time_utc": next_candle_utc.isoformat(timespec="seconds"),
             "entry_time_bd": entry_time_text,
             "entry_delay_seconds": max(0, int((next_candle_utc - signal_at_utc).total_seconds())),
-            "timeframe": "MM-free Price Action / 1m", "entry_timeframe": "1m",
+            "timeframe": "MTF Price Structure / 5m + 15m + 30m", "entry_timeframe": "1m",
             "automatic": automatic, "mmc_level_type": None, "mmc_level_price": None,
         }
 
     result = generate_signal(entry_frame)
     level_info = level_for_side(entry_frame, result.action) if result.action in {"BUY", "SELL"} else None
-    loss_reason = loss_lock_reason(market_mode, pair, result.action, entry_frame, level_info)
-    if loss_reason and result.action in {"BUY", "SELL"}:
-        result = Signal("NO_TRADE", result.buy_score, result.sell_score, loss_reason)
-        level_info = None
-    if result.action in {"BUY", "SELL"}:
-        block_reason = check_reentry_guard(entry_frame, market_mode, pair, result.action)
-        if block_reason:
-            result = Signal("NO_TRADE", result.buy_score, result.sell_score, block_reason)
-            level_info = None
 
     entry_price = None
     candle_time = None
@@ -137,7 +130,6 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     return {
         "pair": pair, "requested_pair": pair, "market_mode": market_mode,
         "source": "Binance" if market_mode == "crypto" else "BiQuote",
-        # Keep `signal` as BUY/SELL for the visible panel; execution logic must use entry_signal.
         "signal": bias, "market_bias": bias, "entry_signal": result.action,
         "buy_score": result.buy_score, "sell_score": result.sell_score,
         "reason": reason_text,
@@ -147,7 +139,7 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         "entry_price": entry_price, "entry_price_type": "last_closed_1m_close_reference",
         "entry_time_utc": next_candle_utc.isoformat(), "entry_time_bd": entry_time_text,
         "entry_delay_seconds": max(0, int((next_candle_utc - signal_at_utc).total_seconds())),
-        "timeframe": "MM-free Price Action / 1m", "entry_timeframe": "1m", "automatic": automatic,
+        "timeframe": "MTF Price Structure / 5m + 15m + 30m", "entry_timeframe": "1m", "automatic": automatic,
         "mmc_level_type": level_info[0] if level_info else None,
         "mmc_level_price": level_info[1] if level_info else None,
     }
