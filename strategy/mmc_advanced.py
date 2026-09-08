@@ -1,16 +1,17 @@
-"""Advanced MMC quality gate.
+"""Balanced Advanced MMC quality gate.
 
-Keeps the canonical Mirror MMC directional decision intact and adds a strict
-confirmation-quality filter. No EMA/RSI/MACD/MTF is introduced.
+Keeps the canonical Mirror MMC directional decision intact while filtering
+weak/choppy confirmation candles. No EMA/RSI/MACD/MTF is introduced.
 """
 from __future__ import annotations
 
 from strategy.mmc import Signal, generate_signal as _base_generate_signal, level_for_side
 
 
-ADVANCED_BODY_RATIO = 0.60
+ADVANCED_BODY_RATIO = 0.55
 ADVANCED_RANGE_LOOKBACK = 20
-ADVANCED_RANGE_MULTIPLIER = 1.00
+ADVANCED_RANGE_MULTIPLIER = 0.90
+ADVANCED_CLOSE_LOCATION = 0.25
 
 
 def _advanced_confirmation_quality(df, side: str) -> tuple[bool, str]:
@@ -27,27 +28,47 @@ def _advanced_confirmation_quality(df, side: str) -> tuple[bool, str]:
 
     ranges = (df["high"].astype(float) - df["low"].astype(float)).tail(ADVANCED_RANGE_LOOKBACK)
     median_range = max(float(ranges.median()), 1e-12)
+    range_ratio = candle_range / median_range
 
     if body_ratio < ADVANCED_BODY_RATIO:
         return False, (
-            f"Advanced MMC filter: confirmation candle body/range {body_ratio:.2f} < "
+            f"Advanced MMC filter: body/range {body_ratio:.2f} < "
             f"{ADVANCED_BODY_RATIO:.2f}; weak confirmation।"
         )
 
-    if candle_range < median_range * ADVANCED_RANGE_MULTIPLIER:
+    if range_ratio < ADVANCED_RANGE_MULTIPLIER:
         return False, (
-            f"Advanced MMC filter: confirmation range {candle_range:.8f} < "
-            f"20-candle median {median_range:.8f}; insufficient displacement।"
+            f"Advanced MMC filter: range/20-candle-median {range_ratio:.2f} < "
+            f"{ADVANCED_RANGE_MULTIPLIER:.2f}; weak displacement।"
         )
 
+    # Direction-aware close location: BUY should finish near the high,
+    # SELL near the low. This removes many indecisive rejection candles
+    # without requiring an external indicator.
+    if side == "BUY":
+        close_from_high = (high - close) / candle_range
+        if close_from_high > ADVANCED_CLOSE_LOCATION:
+            return False, (
+                f"Advanced MMC filter: BUY close is too far from high "
+                f"({close_from_high:.2f} > {ADVANCED_CLOSE_LOCATION:.2f})।"
+            )
+    elif side == "SELL":
+        close_from_low = (close - low) / candle_range
+        if close_from_low > ADVANCED_CLOSE_LOCATION:
+            return False, (
+                f"Advanced MMC filter: SELL close is too far from low "
+                f"({close_from_low:.2f} > {ADVANCED_CLOSE_LOCATION:.2f})।"
+            )
+
     return True, (
-        f"Advanced MMC quality passed: body/range={body_ratio:.2f}, "
-        f"range/20-candle-median={candle_range / median_range:.2f}।"
+        f"Advanced quality passed: body/range={body_ratio:.2f}, "
+        f"range/median={range_ratio:.2f}, side={side}, "
+        f"close-location<= {ADVANCED_CLOSE_LOCATION:.2f}।"
     )
 
 
 def generate_signal(df):
-    """Generate canonical MMC signal, then require advanced confirmation quality."""
+    """Generate canonical MMC signal, then require balanced advanced quality."""
     base = _base_generate_signal(df)
     if base.action not in {"BUY", "SELL"}:
         return base
@@ -60,7 +81,7 @@ def generate_signal(df):
         base.action,
         base.buy_score,
         base.sell_score,
-        f"{base.reason} Advanced quality gate passed: {quality_reason}",
+        f"{base.reason} Advanced balanced gate passed: {quality_reason}",
     )
 
 
