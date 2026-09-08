@@ -1,17 +1,16 @@
 """Tick-Run Pressure Continuation strategy.
 
-A new tick-level strategy derived from the uploaded EURUSD tick sample.
-It does NOT use MMC, sweep, MSS, MTF, S/R, ORB, candle patterns, EMA/RSI/MACD,
-or the previous TickFlow minute-imbalance logic.
+The only live entry logic for the bot. Previous MMC / MTF / candle strategies
+are intentionally not used here.
 
-Idea:
-1. A persistent run of quote-mid moves indicates short-term directional pressure.
-2. Require strong same-side bid/ask volume imbalance to confirm that the run is
-   supported by liquidity pressure rather than a weak price drift.
-3. Predict the direction of the next quote-mid tick.
+Primary research mode (Dukascopy-style tick files):
+- 8 consecutive same-direction mid-price ticks
+- strong bid/ask volume imbalance confirmation
 
-This is intentionally tick-level; it should not be wired into the M1 live path
-until a real tick feed is available and multi-day walk-forward validation passes.
+Live broker mode:
+- the public BiQuote FX feed exposes bid/ask/mid but not bid/ask traded volume
+- therefore live mode uses the same 8-tick run plus a spread-quality filter;
+  it never invents volume data.
 """
 from __future__ import annotations
 
@@ -28,50 +27,81 @@ class TickRunSignal:
 
 
 def _prepare(ticks: pd.DataFrame) -> pd.DataFrame:
-    required = {"timestamp", "askPrice", "bidPrice", "askVolume", "bidVolume"}
+    required = {"timestamp", "askPrice", "bidPrice"}
     missing = required - set(ticks.columns)
     if missing:
         raise ValueError(f"missing tick columns: {sorted(missing)}")
     x = ticks.copy()
-    for c in ["askPrice", "bidPrice", "askVolume", "bidVolume"]:
+    for c in ["askPrice", "bidPrice"]:
         x[c] = pd.to_numeric(x[c], errors="coerce")
     x = x.dropna(subset=list(required)).sort_values("timestamp").drop_duplicates("timestamp")
     x["mid"] = (x["askPrice"] + x["bidPrice"]) / 2.0
-    total = x["bidVolume"] + x["askVolume"]
-    x["imbalance"] = (x["bidVolume"] - x["askVolume"]) / total.replace(0, np.nan)
+    x["spread"] = x["askPrice"] - x["bidPrice"]
     x["direction"] = np.sign(x["mid"].diff()).fillna(0)
-    return x.dropna(subset=["imbalance"])
+    if {"askVolume", "bidVolume"}.issubset(x.columns):
+        x["askVolume"] = pd.to_numeric(x["askVolume"], errors="coerce")
+        x["bidVolume"] = pd.to_numeric(x["bidVolume"], errors="coerce")
+        total = x["bidVolume"] + x["askVolume"]
+        x["imbalance"] = (x["bidVolume"] - x["askVolume"]) / total.replace(0, np.nan)
+    else:
+        x["imbalance"] = np.nan
+    return x.dropna(subset=["mid", "direction"])
 
 
-def generate_signal(ticks: pd.DataFrame, run_length: int = 8, imbalance_threshold: float = 0.60) -> TickRunSignal:
+def generate_signal(
+    ticks: pd.DataFrame,
+    run_length: int = 8,
+    imbalance_threshold: float = 0.60,
+    max_spread_pips: float = 1.5,
+) -> TickRunSignal:
     x = _prepare(ticks)
     if len(x) < run_length + 2:
         return TickRunSignal("HOLD", 0.0, "insufficient tick history")
 
     d = x["direction"].to_numpy()
-    imb = x["imbalance"].to_numpy()
     last = len(x) - 1
     run = d[last - run_length + 1:last + 1]
-    if np.all(run > 0) and imb[last] >= imbalance_threshold:
-        conf = min(0.99, 0.70 + 0.20 * (imb[last] - imbalance_threshold) / (1.0 - imbalance_threshold))
-        return TickRunSignal("BUY", conf, f"{run_length}-tick upward run + strong bid-volume pressure")
-    if np.all(run < 0) and imb[last] <= -imbalance_threshold:
-        conf = min(0.99, 0.70 + 0.20 * ((-imb[last]) - imbalance_threshold) / (1.0 - imbalance_threshold))
-        return TickRunSignal("SELL", conf, f"{run_length}-tick downward run + strong ask-volume pressure")
-    return TickRunSignal("HOLD", 0.0, "run/pressure confirmation absent")
+    spread_pips = float(x.iloc[last]["spread"] * 100000.0)
+    if spread_pips > max_spread_pips:
+        return TickRunSignal("HOLD", 0.0, "spread too wide")
+
+    has_volume = not pd.isna(x.iloc[last]["imbalance"])
+    if has_volume:
+        imb = float(x.iloc[last]["imbalance"])
+        if np.all(run > 0) and imb >= imbalance_threshold:
+            conf = min(0.99, 0.70 + 0.20 * (imb - imbalance_threshold) / (1.0 - imbalance_threshold))
+            return TickRunSignal("BUY", conf, f"{run_length}-tick upward run + strong bid-volume pressure")
+        if np.all(run < 0) and imb <= -imbalance_threshold:
+            conf = min(0.99, 0.70 + 0.20 * ((-imb) - imbalance_threshold) / (1.0 - imbalance_threshold))
+            return TickRunSignal("SELL", conf, f"{run_length}-tick downward run + strong ask-volume pressure")
+    else:
+        # Live BiQuote FX quotes have no consolidated bid/ask volume. Use only
+        # observable quote information rather than fabricating an order-flow field.
+        if np.all(run > 0):
+            return TickRunSignal("BUY", 0.70, f"{run_length}-tick upward run; live quote-volume unavailable")
+        if np.all(run < 0):
+            return TickRunSignal("SELL", 0.70, f"{run_length}-tick downward run; live quote-volume unavailable")
+
+    return TickRunSignal("HOLD", 0.0, "run confirmation absent")
 
 
 def backtest_labels(ticks: pd.DataFrame, run_length: int = 8, imbalance_threshold: float = 0.60) -> pd.DataFrame:
     x = _prepare(ticks)
     x["signal"] = "HOLD"
     d = x["direction"].to_numpy()
-    imb = x["imbalance"].to_numpy()
+    has_volume = not x["imbalance"].isna().all()
     for i in range(run_length, len(x) - 1):
         run = d[i-run_length+1:i+1]
-        if np.all(run > 0) and imb[i] >= imbalance_threshold:
-            x.iat[i, x.columns.get_loc("signal")] = "BUY"
-        elif np.all(run < 0) and imb[i] <= -imbalance_threshold:
-            x.iat[i, x.columns.get_loc("signal")] = "SELL"
+        if not np.all(run > 0) and not np.all(run < 0):
+            continue
+        if has_volume:
+            imb = x.iloc[i]["imbalance"]
+            if np.all(run > 0) and imb >= imbalance_threshold:
+                x.iat[i, x.columns.get_loc("signal")] = "BUY"
+            elif np.all(run < 0) and imb <= -imbalance_threshold:
+                x.iat[i, x.columns.get_loc("signal")] = "SELL"
+        else:
+            x.iat[i, x.columns.get_loc("signal")] = "BUY" if np.all(run > 0) else "SELL"
     x["future_direction"] = np.sign(x["mid"].shift(-1) - x["mid"])
     x["correct"] = ((x.signal == "BUY") & (x.future_direction > 0)) | ((x.signal == "SELL") & (x.future_direction < 0))
     return x
