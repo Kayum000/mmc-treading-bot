@@ -1,13 +1,11 @@
-"""MTF market direction + 1m price-action entry strategy.
+"""MTF context + market-momentum 1m entry strategy.
 
-5m/15m/30m candles determine the market direction.
-There is NO fallback to 1m or to a single timeframe when the three MTF
-states disagree. A BUY/SELL side is retained from the last valid full MTF
-agreement so the signal never exposes NEUTRAL.
+5m/15m/30m MTF candles are CONTEXT ONLY. They never block an entry.
+The actual BUY/SELL side follows current market momentum/price structure on
+1m, so the bot can react when the market starts moving before all MTF candles
+agree.
 
-The 1m entry engine follows that market side and uses the existing sweep +
-displacement + structure-break setup for timing.
-
+MTF scores remain available for the UI, but MTF agreement is not an entry gate.
 No MMC, EMA, RSI or MACD is used.
 """
 from __future__ import annotations
@@ -72,30 +70,41 @@ def mtf_states(df):
 
 
 def market_bias(df):
-    """Return the last valid full 5m/15m/30m agreement; never use fallback."""
-    _, states = mtf_states(df)
-
-    # A direction is valid only when all three MTF candle structures agree.
-    if states[30] == states[15] == states[5] == 'bullish':
+    """Return current 1m market momentum direction; MTF never blocks it."""
+    if not _valid(df, 8):
         return 'BUY'
-    if states[30] == states[15] == states[5] == 'bearish':
+
+    x = df[['open', 'high', 'low', 'close']].copy()
+    for c in x.columns:
+        x[c] = pd.to_numeric(x[c], errors='coerce')
+    x = x.dropna()
+    if len(x) < 8:
+        return 'BUY'
+
+    recent = x.tail(8)
+    mid = recent.iloc[:4]
+    last = recent.iloc[4:]
+
+    net_move = float(last['close'].iloc[-1] - mid['close'].iloc[0])
+    up_bars = int((last['close'] > last['open']).sum())
+    down_bars = int((last['close'] < last['open']).sum())
+    recent_high = float(recent['high'].max())
+    recent_low = float(recent['low'].min())
+    last_close = float(recent['close'].iloc[-1])
+    span = recent_high - recent_low
+
+    if span > 0:
+        position = (last_close - recent_low) / span
+    else:
+        position = 0.5
+
+    if (net_move > 0 and up_bars >= down_bars) or position >= 0.68:
+        return 'BUY'
+    if (net_move < 0 and down_bars >= up_bars) or position <= 0.32:
         return 'SELL'
 
-    # No current agreement: retain the most recent valid MTF direction.
-    # This is state persistence, not a lower-timeframe or single-TF fallback.
-    return getattr(market_bias, '_last_valid_bias', 'BUY')
-
-
-def _update_mtf_bias(df):
-    _, states = mtf_states(df)
-    if states[30] == states[15] == states[5] == 'bullish':
-        market_bias._last_valid_bias = 'BUY'
-    elif states[30] == states[15] == states[5] == 'bearish':
-        market_bias._last_valid_bias = 'SELL'
-    return market_bias._last_valid_bias
-
-
-market_bias._last_valid_bias = 'BUY'
+    # When momentum is temporarily balanced, use the latest completed candle.
+    return 'BUY' if float(x.iloc[-1]['close']) >= float(x.iloc[-1]['open']) else 'SELL'
 
 
 def _one_minute_setup(x, side, sweep_lookback=5):
@@ -128,7 +137,7 @@ def _one_minute_setup(x, side, sweep_lookback=5):
 
 
 def _one_minute_entry(df, side, freshness=2, lookback=5):
-    """Allow a confirmed setup to remain valid for up to `freshness` 1m bars."""
+    """Allow a confirmed 1m setup to remain valid for up to `freshness` bars."""
     if not _valid(df, lookback + 5):
         return False
     x = df[['open', 'high', 'low', 'close']].copy()
@@ -149,18 +158,18 @@ def _one_minute_entry(df, side, freshness=2, lookback=5):
 
 
 def generate_signal(df):
-    """Generate 1m entry using only the persisted full MTF direction."""
-    frames, states = mtf_states(df)
+    """Generate BUY/SELL from market momentum; MTF is informational only."""
+    _, states = mtf_states(df)
     buy_score = sum(states[m] == 'bullish' for m in (5, 15, 30))
     sell_score = sum(states[m] == 'bearish' for m in (5, 15, 30))
-    bias = _update_mtf_bias(df)
+    bias = market_bias(df)
 
     if _one_minute_entry(df, bias):
         return Signal(bias, buy_score, sell_score,
-                      f'1m {bias}: full 5m + 15m + 30m MTF direction followed; sweep + displacement + MSS confirmed.')
+                      f'1m {bias}: market momentum followed; sweep + displacement + MSS confirmed. MTF is context only.')
 
     return Signal(bias, buy_score, sell_score,
-                  f'MTF direction={bias}. 5m + 15m + 30m agreement required; 1m {bias} entry setup এখনো confirmed হয়নি।')
+                  f'Market momentum={bias}. MTF 5m/15m/30m does not block entry; waiting for 1m {bias} confirmation.')
 
 
 def level_for_side(df, side, lookback=20):
