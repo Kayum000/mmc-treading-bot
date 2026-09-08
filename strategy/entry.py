@@ -7,7 +7,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from strategy.mmc import Signal
+
+@dataclass(frozen=True)
+class Signal:
+    action: str
+    buy_score: int
+    sell_score: int
+    reason: str
 
 MIN_HISTORY = 45
 STRUCTURE_LOOKBACK = 12
