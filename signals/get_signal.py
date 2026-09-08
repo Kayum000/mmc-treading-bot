@@ -108,7 +108,7 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
             "entry_time_utc": next_candle_utc.isoformat(timespec="seconds"),
             "entry_time_bd": entry_time_text,
             "entry_delay_seconds": max(0, int((next_candle_utc - signal_at_utc).total_seconds())),
-            "timeframe": "MTF Price Structure / 5m + 15m + 30m", "entry_timeframe": "1m",
+            "timeframe": f"MTF: {bias}", "entry_timeframe": "1m",
             "automatic": automatic, "mmc_level_type": None, "mmc_level_price": None,
         }
 
@@ -139,7 +139,7 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         "entry_price": entry_price, "entry_price_type": "last_closed_1m_close_reference",
         "entry_time_utc": next_candle_utc.isoformat(), "entry_time_bd": entry_time_text,
         "entry_delay_seconds": max(0, int((next_candle_utc - signal_at_utc).total_seconds())),
-        "timeframe": "MTF Price Structure / 5m + 15m + 30m", "entry_timeframe": "1m", "automatic": automatic,
+        "timeframe": f"MTF: {bias}", "entry_timeframe": "1m", "automatic": automatic,
         "mmc_level_type": level_info[0] if level_info else None,
         "mmc_level_price": level_info[1] if level_info else None,
     }
