@@ -76,7 +76,6 @@ def _mirror(df,side,lookback=20):
                 if not any(_near(o,c['price'],t) for c in sc):continue
                 d=z-o; f=p.iloc[i+1:]
                 if d<=t*2 or f.empty:continue
-                # A real impulse must leave the origin and reach the supply zone.
                 if not ((f['close'].astype(float)>f['open'].astype(float)) & (f.apply(_ratio,axis=1)>=.50)).any():continue
                 if float(f['high'].max())<z-t:continue
                 cs.append({'side':'SELL','origin':o,'zone':z,'distance':d,'equilibrium':o+d*.5,'mirror_target':z-d,'tolerance':t,'zone_touches':zc['touches'],'structure_confluence':False,'origin_index':i})
@@ -206,8 +205,22 @@ def _confirmation_candle(df, side):
     want = 'bullish' if side == 'BUY' else 'bearish'
     if _dir(r) != want:
         return False
-    pmid = (float(p['open']) + float(p['close'])) * 0.5
-    return float(r['close']) > pmid if side == 'BUY' else float(r['close']) < pmid
+    r_open=float(r['open']); r_close=float(r['close']); r_high=float(r['high']); r_low=float(r['low'])
+    p_open=float(p['open']); p_close=float(p['close']); p_high=float(p['high']); p_low=float(p['low'])
+    if side == 'BUY':
+        # Confirmation must break the previous candle body, not merely its midpoint.
+        if r_close <= max(p_open, p_close):
+            return False
+        if r_close < r_low + _rng(r)*.65:
+            return False
+        return r_close >= p_high - _rng(r)*.15
+    # SELL: require a genuine bearish break so a weak rejection cannot trigger
+    # a SELL immediately before a bullish next candle.
+    if r_close >= min(p_open, p_close):
+        return False
+    if r_close > r_low + _rng(r)*.35:
+        return False
+    return r_close <= p_low + _rng(r)*.15
 
 def _zone_touch(df, mirror):
     if not mirror or df is None or df.empty:
@@ -220,8 +233,6 @@ def _structure_confluence(df, side, mirror):
         return False
     side = str(side).upper()
     want = 'bullish_bos' if side == 'BUY' else 'bearish_bos'
-    # Accept a recent BOS/MSS in the setup direction, not necessarily on the
-    # confirmation candle. This keeps valid 1m setups from disappearing.
     for n in range(1, min(5, len(df) - CONFIG.swing_lookback)):
         sub = df.iloc[:-n]
         if market_structure(sub, CONFIG.swing_lookback) == want:
@@ -248,37 +259,47 @@ def _rejection_near_zone(df, side, mirror, lookback=4):
     return None
 
 def _setup_quality(df, side, mirror):
-    """Balanced MMC gate: geometry + structure + rejection + next-candle confirmation."""
+    """Balanced MMC gate: geometry + structure + rejection + strong confirmation + equilibrium."""
     if not mirror or df is None or len(df) < 8:
         return False
     side = str(side).upper()
     distance = float(mirror.get('distance', 0))
     tolerance = float(mirror.get('tolerance', 0))
+    equilibrium = float(mirror.get('equilibrium', 0))
     if distance <= tolerance * 2:
         return False
 
-    # The calculated mirror zone must actually be traded/rejected.
     rej_i = _rejection_near_zone(df, side, mirror, 4)
-    if rej_i is None:
+    if rej_i is None or rej_i >= len(df) - 1:
         return False
 
-    # Real structure confluence is mandatory, but can occur shortly before the
-    # rejection/confirmation sequence.
     structure_df = df.iloc[:rej_i + 1]
     if not _structure_confluence(structure_df, side, mirror):
         return False
 
-    # Confirmation must be the first closed candle after rejection.
-    if rej_i >= len(df) - 1:
-        return False
     confirm_df = df.iloc[:rej_i + 2]
     if not _confirmation_candle(confirm_df, side):
         return False
 
-    # Require directional follow-through on the confirmation candle. A tiny
-    # doji-like close through the midpoint should not trigger an entry.
     r = confirm_df.iloc[-1]
-    return _ratio(r) >= .35
+    if _ratio(r) < .45:
+        return False
+
+    # The 50% equilibrium is now a real gate, not just a calculated field.
+    # Confirmation must have crossed it in the intended direction.
+    if side == 'SELL' and float(r['close']) >= equilibrium:
+        return False
+    if side == 'BUY' and float(r['close']) <= equilibrium:
+        return False
+
+    # Do not accept a confirmation that closes back through the zone against
+    # the intended reversal.
+    z=float(mirror['zone']); t=float(mirror['tolerance'])
+    if side == 'SELL' and float(r['close']) >= z + t:
+        return False
+    if side == 'BUY' and float(r['close']) <= z - t:
+        return False
+    return True
 
 def final_confirmation(df, side, lookback=20):
     side = str(side).lower(); side_u = side.upper()
@@ -299,11 +320,11 @@ def generate_signal(df):
     sell_ok = final_confirmation(df, 'sell', CONFIG.level_lookback)
 
     if buy_ok and not sell_ok:
-        return Signal('BUY', bv, sv, f'MMC BUY: valid origin → real impulse → 50% equilibrium → AB=CD mirror → structure → rejection → confirmation. Supporting votes {bv}/22 vs {sv}/22.')
+        return Signal('BUY', bv, sv, f'MMC BUY: valid origin → real impulse → 50% equilibrium → AB=CD mirror → structure → rejection → strong confirmation. Supporting votes {bv}/22 vs {sv}/22.')
     if sell_ok and not buy_ok:
-        return Signal('SELL', bv, sv, f'MMC SELL: valid origin → real impulse → 50% equilibrium → AB=CD mirror → structure → rejection → confirmation. Supporting votes {bv}/22 vs {sv}/22.')
+        return Signal('SELL', bv, sv, f'MMC SELL: valid origin → real impulse → 50% equilibrium → AB=CD mirror → structure → rejection → strong confirmation. Supporting votes {bv}/22 vs {sv}/22.')
     if buy_ok and sell_ok:
         return Signal('NO_TRADE', bv, sv, 'BUY এবং SELL দুদিকেই একই সময়ে valid confirmation পাওয়া গেছে; ambiguous setup এ Entry নেওয়া হয়নি।')
     if buy_m or sell_m:
-        return Signal('NO_TRADE', bv, sv, 'Mirror setup তৈরি হয়েছে, কিন্তু structure/rejection/confirmation chain সম্পূর্ণ হয়নি; পরের valid setup-এর জন্য অপেক্ষা করা হচ্ছে।')
-    return Signal('NO_TRADE', bv, sv, f'Valid Supply/Demand origin → dynamic impulse → 50% equilibrium → AB=CD mirror → structure → rejection → confirmation একসঙ্গে তৈরি হয়নি। Supporting votes: BUY {bv}/22, SELL {sv}/22.')
+        return Signal('NO_TRADE', bv, sv, 'Mirror setup তৈরি হয়েছে, কিন্তু structure/rejection/strong confirmation/equilibrium chain সম্পূর্ণ হয়নি; পরের valid setup-এর জন্য অপেক্ষা করা হচ্ছে।')
+    return Signal('NO_TRADE', bv, sv, f'Valid Supply/Demand origin → dynamic impulse → 50% equilibrium → AB=CD mirror → structure → rejection → strong confirmation একসঙ্গে তৈরি হয়নি। Supporting votes: BUY {bv}/22, SELL {sv}/22.')
