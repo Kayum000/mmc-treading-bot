@@ -1,19 +1,18 @@
-"""MM-free always-direction EURUSD M1 strategy.
+"""MM-free EURUSD M1 price-action engine.
 
-Every valid M1 candle receives a directional decision: BUY or SELL.
-The engine uses raw OHLC price action only; no MMC, Mirror Zone, EMA, RSI,
-MACD, or MTF confirmation is required.
-
-The score is used to choose the stronger direction, not to produce NO_TRADE.
+The dashboard can always show a BUY/SELL market bias, while the actual
+trade signal is allowed to be NO_TRADE when the entry setup is weak.
+No MMC, Mirror MMC, EMA, RSI, MACD, or MTF confirmation is used here.
 """
 from __future__ import annotations
 
-from strategy.mmc import Signal
+from strategy.mmc import Signal, level_for_side
 
-LOOKBACK = 20
-SHORT_LOOKBACK = 5
-BREAKOUT_LOOKBACK = 12
-VOL_LOOKBACK = 20
+MIN_HISTORY = 25
+FAST = 8
+SLOW = 21
+MOMENTUM = 5
+RANGE_LOOKBACK = 20
 
 
 def _valid(df, n=2):
@@ -24,89 +23,111 @@ def _rng(r):
     return max(float(r["high"]) - float(r["low"]), 1e-12)
 
 
-def _body(r):
+def _body_ratio(r):
     return abs(float(r["close"]) - float(r["open"])) / _rng(r)
 
 
-def _direction_scores(df):
-    buy = 0.0
-    sell = 0.0
-    x = df.tail(max(LOOKBACK, SHORT_LOOKBACK + 2)).reset_index(drop=True)
+def _ema(values, span):
+    return values.astype(float).ewm(span=span, adjust=False).mean()
+
+
+def _scores(df):
+    x = df.tail(max(MIN_HISTORY, SLOW + 3)).copy().reset_index(drop=True)
+    close = x["close"].astype(float)
+    fast = _ema(close, FAST)
+    slow = _ema(close, SLOW)
     last = x.iloc[-1]
     prev = x.iloc[-2]
+    buy = 0.0
+    sell = 0.0
 
-    o = float(last["open"])
-    h = float(last["high"])
-    l = float(last["low"])
-    c = float(last["close"])
-    r = _rng(last)
-
-    body = _body(last)
-    if c > o:
-        buy += 2.0 + body
-    elif c < o:
-        sell += 2.0 + body
-
-    n = min(SHORT_LOOKBACK, len(x) - 1)
-    anchor = float(x.iloc[-1 - n]["close"])
-    if c > anchor:
+    # Trend direction.
+    if fast.iloc[-1] > slow.iloc[-1]:
         buy += 2.0
-    elif c < anchor:
+    elif fast.iloc[-1] < slow.iloc[-1]:
         sell += 2.0
 
-    prior = x.iloc[:-1].tail(BREAKOUT_LOOKBACK)
-    if not prior.empty:
-        hi = float(prior["high"].max())
-        lo = float(prior["low"].min())
-        if c > hi:
-            buy += 3.0
-        if c < lo:
-            sell += 3.0
-        span = max(hi - lo, 1e-12)
-        pos = (c - lo) / span
-        if pos >= 0.65:
-            buy += 1.0
-        elif pos <= 0.35:
-            sell += 1.0
+    # EMA slope is deliberately small so it cannot dominate price action.
+    if fast.iloc[-1] > fast.iloc[-4]:
+        buy += 1.0
+    elif fast.iloc[-1] < fast.iloc[-4]:
+        sell += 1.0
 
-    ranges = (x["high"].astype(float) - x["low"].astype(float)).iloc[:-1].tail(VOL_LOOKBACK)
-    if len(ranges) >= 5:
-        median = max(float(ranges.median()), 1e-12)
-        if r >= median * 1.20:
-            if c > o:
-                buy += 2.0
-            elif c < o:
-                sell += 2.0
-
-    upper = h - max(o, c)
-    lower = min(o, c) - l
-    if lower > upper * 1.35 and lower > r * 0.25:
+    # Short momentum.
+    anchor = close.iloc[-1 - min(MOMENTUM, len(x) - 2)]
+    if close.iloc[-1] > anchor:
         buy += 1.5
-    if upper > lower * 1.35 and upper > r * 0.25:
+    elif close.iloc[-1] < anchor:
         sell += 1.5
 
-    pc = float(prev["close"])
-    if c > pc:
+    # Current candle quality.
+    o, c = float(last["open"]), float(last["close"])
+    br = _body_ratio(last)
+    if c > o and br >= 0.45:
+        buy += 1.5
+    elif c < o and br >= 0.45:
+        sell += 1.5
+
+    # Previous-candle continuation.
+    po, pc = float(prev["open"]), float(prev["close"])
+    if c > o and pc > po:
         buy += 0.75
-    elif c < pc:
+    elif c < o and pc < po:
         sell += 0.75
+
+    # Breakout pressure against the recent completed range.
+    prior = x.iloc[:-1].tail(12)
+    hi = float(prior["high"].max())
+    lo = float(prior["low"].min())
+    if c > hi:
+        buy += 2.0
+    elif c < lo:
+        sell += 2.0
+
+    # Rejection pressure.
+    h, l = float(last["high"]), float(last["low"])
+    upper = h - max(o, c)
+    lower = min(o, c) - l
+    if lower >= max(upper * 1.4, _rng(last) * 0.25):
+        buy += 1.0
+    elif upper >= max(lower * 1.4, _rng(last) * 0.25):
+        sell += 1.0
 
     return buy, sell
 
 
-def generate_signal(df):
-    """Always return BUY or SELL once two M1 candles are available."""
+def market_bias(df):
+    """Always return the current directional bias once history exists."""
     if not _valid(df, 2):
-        return Signal("BUY", 0, 0, "MM-free directional fallback: insufficient history.")
+        return "BUY"
+    buy, sell = _scores(df)
+    return "BUY" if buy >= sell else "SELL"
 
-    buy, sell = _direction_scores(df)
-    action = "BUY" if buy >= sell else "SELL"
-    margin = abs(buy - sell)
-    reason = (
-        f"MM-free Always-Direction PA | BUY={buy:.2f} SELL={sell:.2f} "
-        f"| selected={action} | edge={margin:.2f}"
+
+def generate_signal(df):
+    """Return a real entry only when directional edge is sufficiently clear."""
+    if not _valid(df, MIN_HISTORY):
+        return Signal("NO_TRADE", 0, 0, "MM-free PA: insufficient history; market bias is still available.")
+
+    buy, sell = _scores(df)
+    bias = "BUY" if buy >= sell else "SELL"
+    edge = abs(buy - sell)
+
+    # Avoid turning every M1 fluctuation into a trade.
+    if edge < 2.0:
+        return Signal(
+            "NO_TRADE",
+            int(round(buy)),
+            int(round(sell)),
+            f"MM-free PA | bias={bias} | BUY={buy:.2f} SELL={sell:.2f} | edge={edge:.2f} | weak entry edge.",
+        )
+
+    return Signal(
+        bias,
+        int(round(buy)),
+        int(round(sell)),
+        f"MM-free PA entry | bias={bias} | BUY={buy:.2f} SELL={sell:.2f} | edge={edge:.2f}.",
     )
-    return Signal(action, int(round(buy)), int(round(sell)), reason)
 
 
-__all__ = ["Signal", "generate_signal"]
+__all__ = ["Signal", "generate_signal", "market_bias", "level_for_side"]
