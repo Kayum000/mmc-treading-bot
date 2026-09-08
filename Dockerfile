@@ -26,7 +26,6 @@ RUN find . -type f -name '*.py' -exec sed -i \
 # Load dashboard CSS and live chart assets.
 RUN grep -q 'panel_equalizer.css' web/templates/index.html || sed -i 's#</head>#<link rel="stylesheet" href="/static/panel_equalizer.css">\n</head>#' web/templates/index.html
 RUN grep -q 'chart_mount.js' web/templates/index.html || sed -i 's#</body>#<script src="/static/chart_mount.js" defer></script>\n</body>#' web/templates/index.html
-RUN grep -q 'chart_tools.js' web/templates/index.html || sed -i 's#</body>#<script src="/static/chart_tools.js" defer></script>\n</body>#' web/templates/index.html
 RUN grep -q 'live_stream_chart.js' web/templates/index.html || sed -i 's#</body>#<script src="/static/live_stream_chart.js" defer></script>\n</body>#' web/templates/index.html
 
 CMD ["python", "main.py"]
