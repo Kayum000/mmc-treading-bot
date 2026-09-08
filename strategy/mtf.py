@@ -1,8 +1,11 @@
 """Pure MTF direction + 1m price-action entry strategy.
 
-5m/15m/30m only establish direction. When all three agree, the 1m chart
-must provide a fresh liquidity sweep, displacement and structure break before
-an entry is returned. No MMC, EMA, RSI or MACD is used.
+5m/15m/30m establish direction. Only when all three agree, 1m searches for
+a fresh sweep + displacement + structure break. A confirmed 1m setup remains
+valid for a short freshness window so the live signal does not disappear on
+the next tick, while a new opposite setup invalidates it.
+
+No MMC, EMA, RSI or MACD is used.
 """
 from __future__ import annotations
 
@@ -66,7 +69,7 @@ def mtf_states(df):
 
 
 def market_bias(df):
-    """Only expose a directional bias when 30m, 15m and 5m agree."""
+    """Directional bias exists only when 30m, 15m and 5m agree."""
     _, states = mtf_states(df)
     if states[30] == states[15] == states[5] == 'bullish':
         return 'BUY'
@@ -75,44 +78,56 @@ def market_bias(df):
     return 'NEUTRAL'
 
 
-def _one_minute_entry(df, side, lookback=5):
-    """Fresh 1m sweep + displacement + MSS confirmation."""
-    if not _valid(df, 8):
+def _one_minute_setup(x, side, sweep_lookback=5):
+    """Check a completed 1m sweep/displacement/MSS sequence ending at x."""
+    if len(x) < sweep_lookback + 3:
         return False
-    x = df[['open', 'high', 'low', 'close']].tail(max(lookback + 4, 9)).copy()
-    for c in x.columns:
-        x[c] = pd.to_numeric(x[c], errors='coerce')
-    x = x.dropna()
-    if len(x) < 8:
-        return False
-
-    last = x.iloc[-1]
-    prev = x.iloc[-2]
-    prior = x.iloc[:-2].tail(lookback)
+    candidate = x.iloc[-1]
+    sweep_candle = x.iloc[-2]
+    prior = x.iloc[:-2].tail(sweep_lookback)
     if prior.empty:
         return False
 
     prior_high = float(prior['high'].max())
     prior_low = float(prior['low'].min())
-    rng = float(last['high'] - last['low'])
-    body = abs(float(last['close'] - last['open']))
+    rng = float(candidate['high'] - candidate['low'])
+    body = abs(float(candidate['close'] - candidate['open']))
     if rng <= 0 or body / rng < 0.55:
         return False
 
     if side == 'BUY':
-        # Previous candle sweeps sell-side liquidity, then latest candle
-        # displaces up and closes above the recent 1m structure.
-        sweep = float(prev['low']) < prior_low and float(prev['close']) > prior_low
-        displacement = float(last['close']) > float(last['open'])
-        mss = float(last['close']) > prior_high or float(last['close']) > float(prev['high'])
+        sweep = float(sweep_candle['low']) < prior_low and float(sweep_candle['close']) > prior_low
+        displacement = float(candidate['close']) > float(candidate['open'])
+        mss = float(candidate['close']) > prior_high or float(candidate['close']) > float(sweep_candle['high'])
         return sweep and displacement and mss
 
-    # SELL: previous candle sweeps buy-side liquidity, then latest candle
-    # displaces down and closes below the recent 1m structure.
-    sweep = float(prev['high']) > prior_high and float(prev['close']) < prior_high
-    displacement = float(last['close']) < float(last['open'])
-    mss = float(last['close']) < prior_low or float(last['close']) < float(prev['low'])
+    sweep = float(sweep_candle['high']) > prior_high and float(sweep_candle['close']) < prior_high
+    displacement = float(candidate['close']) < float(candidate['open'])
+    mss = float(candidate['close']) < prior_low or float(candidate['close']) < float(sweep_candle['low'])
     return sweep and displacement and mss
+
+
+def _one_minute_entry(df, side, freshness=2, lookback=5):
+    """Allow a confirmed setup to remain valid for up to `freshness` 1m bars."""
+    if not _valid(df, lookback + 5):
+        return False
+    x = df[['open', 'high', 'low', 'close']].copy()
+    for c in x.columns:
+        x[c] = pd.to_numeric(x[c], errors='coerce')
+    x = x.dropna()
+    if len(x) < lookback + 5:
+        return False
+
+    # Most recent completed 1m bar gets priority. If its setup was just
+    # confirmed, keep the signal alive for the next `freshness` bars.
+    for age in range(freshness + 1):
+        end = len(x) - age
+        if end < lookback + 3:
+            continue
+        window = x.iloc[:end]
+        if _one_minute_setup(window, side, lookback):
+            return True
+    return False
 
 
 def generate_signal(df):
@@ -123,20 +138,20 @@ def generate_signal(df):
     buy_score = sum(states[m] == 'bullish' for m in (5, 15, 30))
     sell_score = sum(states[m] == 'bearish' for m in (5, 15, 30))
 
-    # HTF alignment is mandatory before any 1m analysis can trigger.
+    # 1m analysis is NEVER allowed before full 30m+15m+5m alignment.
     if states[30] == states[15] == states[5] == 'bullish':
         if _one_minute_entry(df, 'BUY'):
             return Signal('BUY', buy_score, sell_score,
-                          'MTF aligned BUY: 30m+15m+5m bullish; 1m sweep + displacement + MSS confirmed.')
+                          'MTF BUY: 30m+15m+5m aligned; fresh 1m sweep + displacement + MSS confirmed/persistent.')
         return Signal('NO_TRADE', buy_score, sell_score,
-                      '30m+15m+5m bullish, কিন্তু 1m BUY confirmation এখনো হয়নি।')
+                      '30m+15m+5m bullish, কিন্তু valid 1m BUY confirmation নেই।')
 
     if states[30] == states[15] == states[5] == 'bearish':
         if _one_minute_entry(df, 'SELL'):
             return Signal('SELL', buy_score, sell_score,
-                          'MTF aligned SELL: 30m+15m+5m bearish; 1m sweep + displacement + MSS confirmed.')
+                          'MTF SELL: 30m+15m+5m aligned; fresh 1m sweep + displacement + MSS confirmed/persistent.')
         return Signal('NO_TRADE', buy_score, sell_score,
-                      '30m+15m+5m bearish, কিন্তু 1m SELL confirmation এখনো হয়নি।')
+                      '30m+15m+5m bearish, কিন্তু valid 1m SELL confirmation নেই।')
 
     return Signal('NO_TRADE', buy_score, sell_score,
                   f"MTF alignment incomplete: 30m={states[30]}, 15m={states[15]}, 5m={states[5]}; 1m analysis skipped.")
