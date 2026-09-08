@@ -1,8 +1,12 @@
 """MTF display bias + independent 1m price-action entry strategy.
 
-5m/15m/30m are used to calculate a directional MTF bias for display only.
+5m/15m/30m calculate a directional MTF bias for display only.
 They do NOT block the 1m entry engine. Entry continues from the confirmed
 1m sweep + displacement + structure-break logic with a short freshness window.
+
+The displayed MTF bias is always BUY or SELL: confirmed higher-timeframe
+structure has priority (30m > 15m > 5m), with the latest 1m candle direction
+as the final fallback. NEUTRAL is never exposed as the strategy bias.
 
 No MMC, EMA, RSI or MACD is used.
 """
@@ -68,13 +72,34 @@ def mtf_states(df):
 
 
 def market_bias(df):
-    """Return BUY/SELL only when 30m, 15m and 5m agree; otherwise NEUTRAL."""
-    _, states = mtf_states(df)
+    """Return BUY or SELL for display; never expose NEUTRAL."""
+    frames, states = mtf_states(df)
+
+    # Full alignment has the strongest meaning.
     if states[30] == states[15] == states[5] == 'bullish':
         return 'BUY'
     if states[30] == states[15] == states[5] == 'bearish':
         return 'SELL'
-    return 'NEUTRAL'
+
+    # When timeframes disagree, the higher timeframe wins for display.
+    # This is informational only and does not gate the 1m entry engine.
+    for minutes in (30, 15, 5):
+        if states[minutes] == 'bullish':
+            return 'BUY'
+        if states[minutes] == 'bearish':
+            return 'SELL'
+
+    # Final fallback: latest completed 1m candle direction.
+    if _valid(df):
+        last = df.iloc[-1]
+        try:
+            return 'BUY' if float(last['close']) >= float(last['open']) else 'SELL'
+        except (TypeError, ValueError, KeyError):
+            pass
+
+    # Data should normally never reach this branch; keep the public contract
+    # strictly BUY/SELL rather than exposing NEUTRAL.
+    return 'BUY'
 
 
 def _one_minute_setup(x, side, sweep_lookback=5):
