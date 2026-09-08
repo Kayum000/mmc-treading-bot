@@ -1,4 +1,4 @@
-"""Historical backtest for the canonical single-timeframe clean MMC strategy.
+"""Historical backtest for the Advanced single-timeframe MMC strategy.
 
 Input is a 1-minute OHLCV CSV. No higher-timeframe resampling or MTF
 confirmation is used, so the backtest follows the same strategy path as live
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from strategy.mmc import generate_signal, level_for_side
+from strategy.mmc_advanced import generate_signal, level_for_side
 
 
 BUCKETS = ((5, 6, "5-6"), (7, 8, "7-8"), (9, 10, "9-10"), (11, 99, "11+"))
@@ -117,7 +117,7 @@ def build_report(trades: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Backtest clean MMC on historical 1m OHLC data")
+    parser = argparse.ArgumentParser(description="Backtest Advanced MMC on historical 1m OHLC data")
     parser.add_argument("csv", help="1-minute OHLC CSV path")
     parser.add_argument("--out", default="backtest_results", help="Output directory")
     args = parser.parse_args()
@@ -129,7 +129,7 @@ def main() -> None:
     trades.to_csv(out / "signals.csv", index=False)
     by_score.to_csv(out / "score_report.csv", index=False)
     by_direction.to_csv(out / "direction_report.csv", index=False)
-    print("MMC BACKTEST")
+    print("ADVANCED MMC BACKTEST")
     print(f"Signals: {summary['signals']}")
     print(f"Wins: {summary['wins']} | Losses: {summary['losses']} | Draws: {summary['draws']}")
     print(f"Accuracy (wins / wins+losses): {summary['accuracy_pct']}%")
