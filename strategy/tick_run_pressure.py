@@ -9,8 +9,8 @@ Primary research mode (Dukascopy-style tick files):
 
 Live broker mode:
 - the public BiQuote FX feed exposes bid/ask/mid but not bid/ask traded volume
-- therefore live mode uses the same 8-tick run plus a spread-quality filter;
-  it never invents volume data.
+- therefore live mode uses the same 8-tick run plus an instrument-aware
+  spread-quality filter; it never invents volume data.
 """
 from __future__ import annotations
 
@@ -48,11 +48,19 @@ def _prepare(ticks: pd.DataFrame) -> pd.DataFrame:
     return x.dropna(subset=["mid", "direction"])
 
 
+def _pip_multiplier(mid_price: float) -> float:
+    """Convert quote-price distance to standard FX pips.
+
+    JPY crosses use 0.01 per pip; most other FX pairs use 0.0001.
+    """
+    return 100.0 if abs(float(mid_price)) >= 20.0 else 10000.0
+
+
 def generate_signal(
     ticks: pd.DataFrame,
     run_length: int = 8,
     imbalance_threshold: float = 0.60,
-    max_spread_pips: float = 1.5,
+    max_spread_pips: float | None = None,
 ) -> TickRunSignal:
     x = _prepare(ticks)
     if len(x) < run_length + 2:
@@ -61,9 +69,17 @@ def generate_signal(
     d = x["direction"].to_numpy()
     last = len(x) - 1
     run = d[last - run_length + 1:last + 1]
-    spread_pips = float(x.iloc[last]["spread"] * 100000.0)
+    mid = float(x.iloc[last]["mid"])
+    pip_multiplier = _pip_multiplier(mid)
+    spread_pips = float(x.iloc[last]["spread"] * pip_multiplier)
+
+    # Default limits are deliberately instrument-aware. The old fixed
+    # 1.5-pip rule was too strict for JPY crosses such as GBPJPY.
+    if max_spread_pips is None:
+        max_spread_pips = 2.5 if pip_multiplier == 100.0 else 1.5
+
     if spread_pips > max_spread_pips:
-        return TickRunSignal("HOLD", 0.0, "spread too wide")
+        return TickRunSignal("HOLD", 0.0, f"spread too wide ({spread_pips:.1f} pips)")
 
     has_volume = not pd.isna(x.iloc[last]["imbalance"])
     if has_volume:
@@ -75,8 +91,6 @@ def generate_signal(
             conf = min(0.99, 0.70 + 0.20 * ((-imb) - imbalance_threshold) / (1.0 - imbalance_threshold))
             return TickRunSignal("SELL", conf, f"{run_length}-tick downward run + strong ask-volume pressure")
     else:
-        # Live BiQuote FX quotes have no consolidated bid/ask volume. Use only
-        # observable quote information rather than fabricating an order-flow field.
         if np.all(run > 0):
             return TickRunSignal("BUY", 0.70, f"{run_length}-tick upward run; live quote-volume unavailable")
         if np.all(run < 0):
