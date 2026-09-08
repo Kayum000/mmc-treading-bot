@@ -2,10 +2,10 @@
   'use strict';
 
   function mount() {
-    const findAuto = () => document.getElementById('auto-signal')?.closest('.auto-row');
     const findResult = () => document.getElementById('result-container');
-    let anchor = findAuto() || findResult();
-    if (!anchor || !anchor.parentElement) return;
+    const dashboard = document.querySelector('.dashboard');
+    const anchor = findResult();
+    if (!anchor || !dashboard) return;
 
     function resetLegacyChart(chart) {
       // Older candle_timer builds can create a second canvas/chart first.
@@ -21,13 +21,6 @@
     }
 
     document.querySelectorAll('#live-market-chart').forEach((node, i) => { if (i > 0) node.remove(); });
-    let row = document.getElementById('auto-chart-row');
-    if (!row) {
-      row = document.createElement('div');
-      row.id = 'auto-chart-row';
-      row.className = 'auto-chart-row';
-      anchor.parentElement.insertBefore(row, anchor);
-    }
 
     function normalizeChart(chart) {
       if (!chart) return;
@@ -78,9 +71,8 @@
     }
 
     function ensureLayout() {
-      const current = findAuto() || findResult();
-      if (!current || !current.parentElement) return;
-      if (current.parentElement !== row) row.appendChild(current);
+      const current = findResult();
+      if (!current || !dashboard) return;
 
       let chart = document.getElementById('live-market-chart');
       if (!chart) {
@@ -89,7 +81,12 @@
         chart.className = 'chart-clean';
         chart.innerHTML = '<div class="chart-bar"><span class="chart-title">LIVE CHART</span><span class="chart-price">—</span><button type="button" id="chart-full-view">FULL VIEW</button></div><div class="chart-canvas-wrap"></div>';
       }
-      if (chart.parentElement !== row) row.appendChild(chart);
+
+      // Put the live chart directly below the Signal Panel on desktop.
+      // On mobile it follows the Signal Panel and stays before News Events.
+      if (chart.parentElement !== dashboard || chart.previousElementSibling !== current) {
+        dashboard.insertBefore(chart, document.getElementById('news-panel'));
+      }
       normalizeChart(chart);
     }
 
@@ -100,9 +97,7 @@
       document.head.appendChild(style);
     }
     style.textContent = `
-      #auto-chart-row{display:flex;flex-direction:row;align-items:flex-start;gap:9px;width:100%;margin:0 0 10px 0;box-sizing:border-box;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;}
-      #auto-chart-row .auto-row{display:inline-flex;flex:0 0 auto;align-items:center;gap:9px;margin:0;white-space:nowrap;}
-      #live-market-chart{display:flex;flex:1 1 700px;flex-direction:column;margin:0;border:1px solid #334155;border-radius:10px;background:#0b1220;padding:0;overflow:hidden;width:100%;height:360px;min-width:280px;min-height:220px;max-width:100%;max-height:80vh;box-sizing:border-box;position:relative;}
+      #live-market-chart{grid-column:2;grid-row:auto;display:flex;flex-direction:column;margin:0;border:1px solid #334155;border-radius:10px;background:#0b1220;padding:0;overflow:hidden;width:100%;height:360px;min-width:0;min-height:220px;max-width:100%;max-height:80vh;box-sizing:border-box;position:relative;}
       #live-market-chart.chart-expanded{position:fixed;inset:10px;z-index:99999;width:auto!important;height:auto!important;max-width:none;max-height:none;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.45);}
       #live-market-chart .chart-bar{height:38px;min-height:38px;display:flex;align-items:center;justify-content:flex-start;gap:10px;padding:0 8px;background:#111827;color:#e5e7eb;font-size:12px;font-weight:900;letter-spacing:.25px;box-sizing:border-box;}
       #live-market-chart .chart-bar .chart-title{display:block;white-space:nowrap;margin:0;color:#f8fafc;font-size:13px;}
@@ -112,8 +107,8 @@
       #live-market-chart .chart-canvas-wrap:active{cursor:grabbing;}
       #live-market-chart canvas{display:block;width:100%;height:100%;}
       #live-market-chart .chart-status{padding:7px 10px;font-size:11px;color:#94a3b8;background:#111827;min-height:28px;box-sizing:border-box;}
-      @media(max-width:850px){#auto-chart-row{gap:7px;padding-bottom:2px;}#live-market-chart{flex-basis:100%;height:320px;}}
-      @media(max-width:600px){#auto-chart-row{gap:6px;}#live-market-chart{width:100%;height:300px;min-height:220px;}#live-market-chart.chart-expanded{inset:0;border-radius:0;}#live-market-chart .chart-bar{height:40px;min-height:40px;}#live-market-chart .chart-bar .chart-price{max-width:48%;font-size:10px;}#live-market-chart .chart-bar #chart-full-view{font-size:10px;padding:6px 8px;}}
+      @media(max-width:850px){#live-market-chart{grid-column:1;grid-row:auto;height:320px;order:3;}}
+      @media(max-width:600px){#live-market-chart{width:100%;height:300px;min-height:220px;order:3;}#live-market-chart.chart-expanded{inset:0;border-radius:0;}#live-market-chart .chart-bar{height:40px;min-height:40px;}#live-market-chart .chart-bar .chart-price{max-width:48%;font-size:10px;}#live-market-chart .chart-bar #chart-full-view{font-size:10px;padding:6px 8px;}#news-panel{order:4;}}
     `;
 
     ensureLayout();
