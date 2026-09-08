@@ -23,8 +23,9 @@ RUN find . -type f -name '*.py' -exec sed -i \
     -e 's/\"Twelve Data\"/\"BiQuote\"/g' \
     -e "s/'Twelve Data'/'BiQuote'/g" {} +
 
-# Load dashboard CSS and live chart assets.
+# Load dashboard CSS and the single clean live-chart mount/engine.
 RUN grep -q 'panel_equalizer.css' web/templates/index.html || sed -i 's#</head>#<link rel="stylesheet" href="/static/panel_equalizer.css">\n</head>#' web/templates/index.html
+RUN sed -i '/chart_tools\.js/d' web/templates/index.html
 RUN grep -q 'chart_mount.js' web/templates/index.html || sed -i 's#</body>#<script src="/static/chart_mount.js" defer></script>\n</body>#' web/templates/index.html
 RUN grep -q 'live_stream_chart.js' web/templates/index.html || sed -i 's#</body>#<script src="/static/live_stream_chart.js" defer></script>\n</body>#' web/templates/index.html
 
