@@ -1,68 +1,32 @@
-# MMC Clean 1-Minute Signal Bot
+# EURUSD Tick-Run Signal Bot
 
-A rule-based signal engine for BUY / SELL / NO_TRADE decisions using one canonical clean MMC strategy on **completed 1-minute candles only**.
+A rule-based BUY / SELL / NO_TRADE signal engine using the new **Tick-Run Pressure** strategy. The live signal path no longer uses the previous MMC, MTF, sweep, MSS, support/resistance, ORB, candle-pattern, EMA, RSI, MACD, TickFlow, or Liquidity-Response strategies.
 
-## Market modes
+## Live market data
 
-- **REAL_MARKET:** live Forex candles from the configured Twelve Data feed.
-- **CRYPTO:** public Binance 1-minute candle data.
+- **REAL_MARKET:** BiQuote historical tick endpoint for the selected Forex pair.
+- The strategy uses the most recent 1,000 quote ticks.
+- BiQuote's public FX tick feed exposes bid/ask/mid but does not expose consolidated bid/ask traded volume, so live mode does not fabricate volume data.
 
-These modes generate signals only. They do **not** submit orders.
+## New entry rule
 
-## Entry rule
+1. Build the latest midpoint from bid/ask quotes.
+2. Detect an **8-tick consecutive directional run**.
+3. Reject signals when the current spread is too wide.
+4. When bid/ask volume fields are available in research data, require strong same-side volume imbalance (0.60 threshold).
+5. With the live BiQuote FX feed, use only observable quote direction because consolidated quote volume is unavailable.
+6. Upward run → BUY; downward run → SELL; otherwise NO_TRADE.
 
-The strategy has one decision path:
+## Strategy boundary
 
-1. Build confirmed support/resistance from prior closed 1m price action.
-2. Require a **strong** level with repeated touches.
-3. Require rejection/reclaim at that level.
-4. Require same-direction MMC confirmation from liquidity sweep and/or displacement.
-5. **Strong support + bullish confirmation → BUY**.
-6. **Strong resistance + bearish confirmation → SELL**.
-7. A level touch by itself never creates a signal.
-8. The running candle is never used as the entry candle; a confirmed signal is always for the **next 1-minute candle**.
+`strategy/tick_run_pressure.py` is the only live entry strategy.
 
-There is **no multi-timeframe strategy** and no EMA/RSI/MACD decision layer.
+`signals/get_signal.py` no longer imports or calls the previous strategy engines.
 
-## Loss protection
+## Validation
 
-A confirmed BUY/SELL is stored in persistent PostgreSQL performance storage for 24 hours.
+The tick-run rule was discovered from the supplied tick dataset. A single-day result is not treated as proof of a robust 70% accuracy rate. Multi-day, unseen-data walk-forward validation is required before claiming 70%+ accuracy.
 
-After exactly **one LOSS**, that market/pair is locked and signals remain OFF. A NO_TRADE observation does **not** clear the lock. The lock is cleared only when a later check has both:
+## Important
 
-- a **new strong support/resistance level**, materially different from the losing setup's stored level; and
-- a **fresh same-direction MMC confirmation**.
-
-Only then can a new BUY/SELL signal be issued.
-
-## Web behavior
-
-- GET SIGNAL analyzes only the selected market.
-- AUTO SIGNAL remains available and also analyzes only the selected market.
-- No simultaneous 20-market strategy analysis is performed.
-- The UI keeps the next-candle entry time visible.
-- Performance shows confirmed BUY/SELL results for the last 24 hours; WAIT/NO_TRADE is not counted as a trade result.
-
-## Canonical strategy location
-
-All MMC decision logic lives in `strategy/mmc.py`.
-
-`strategy/reentry_guard.py` is only a persistent one-entry-per-level protection layer; it reuses the canonical MMC level calculation.
-
-## Historical backtest
-
-`backtest/mmc_backtest.py` uses the same canonical 1m MMC strategy on historical 1-minute OHLC data. It does not resample into higher timeframes and does not call the live API.
-
-Example:
-
-```bash
-python -m backtest.mmc_backtest data/1m.csv --out backtest_results
-```
-
-Accuracy is calculated from WIN/LOSS outcomes; DRAW is reported separately. Historical results are descriptive only and do not guarantee future profitability.
-
-## Data boundary
-
-The live network/data modules remain separate from the strategy engine. The strategy itself consumes only the selected market's completed 1m OHLC data.
-
-> Research/prototyping only. Trading and binary-options trading are high risk; signals are not guaranteed to be profitable.
+This repository generates signals only; it does not guarantee trading profitability and should not be treated as a validated live trading system until out-of-sample testing is completed.
