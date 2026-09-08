@@ -1,11 +1,12 @@
 """MTF market direction + 1m price-action entry strategy.
 
-5m/15m/30m determine the current market direction for display and trade side.
-The 1m entry engine follows that direction; MTF never produces NEUTRAL.
+5m/15m/30m candles determine the market direction.
+There is NO fallback to 1m or to a single timeframe when the three MTF
+states disagree. A BUY/SELL side is retained from the last valid full MTF
+agreement so the signal never exposes NEUTRAL.
 
-Entry requires the existing 1m sweep + displacement + structure-break setup
-and a short freshness window. MTF determines BUY versus SELL, while the 1m
-setup determines whether an entry is ready.
+The 1m entry engine follows that market side and uses the existing sweep +
+displacement + structure-break setup for timing.
 
 No MMC, EMA, RSI or MACD is used.
 """
@@ -71,31 +72,30 @@ def mtf_states(df):
 
 
 def market_bias(df):
-    """Return BUY or SELL only; NEUTRAL is never exposed."""
-    frames, states = mtf_states(df)
+    """Return the last valid full 5m/15m/30m agreement; never use fallback."""
+    _, states = mtf_states(df)
 
-    # Full 30m/15m/5m agreement has highest priority.
+    # A direction is valid only when all three MTF candle structures agree.
     if states[30] == states[15] == states[5] == 'bullish':
         return 'BUY'
     if states[30] == states[15] == states[5] == 'bearish':
         return 'SELL'
 
-    # If they disagree, follow the highest available timeframe.
-    for minutes in (30, 15, 5):
-        if states[minutes] == 'bullish':
-            return 'BUY'
-        if states[minutes] == 'bearish':
-            return 'SELL'
+    # No current agreement: retain the most recent valid MTF direction.
+    # This is state persistence, not a lower-timeframe or single-TF fallback.
+    return getattr(market_bias, '_last_valid_bias', 'BUY')
 
-    # Final fallback: latest completed 1m candle direction.
-    if _valid(df):
-        last = df.iloc[-1]
-        try:
-            return 'BUY' if float(last['close']) >= float(last['open']) else 'SELL'
-        except (TypeError, ValueError, KeyError):
-            pass
 
-    return 'BUY'
+def _update_mtf_bias(df):
+    _, states = mtf_states(df)
+    if states[30] == states[15] == states[5] == 'bullish':
+        market_bias._last_valid_bias = 'BUY'
+    elif states[30] == states[15] == states[5] == 'bearish':
+        market_bias._last_valid_bias = 'SELL'
+    return market_bias._last_valid_bias
+
+
+market_bias._last_valid_bias = 'BUY'
 
 
 def _one_minute_setup(x, side, sweep_lookback=5):
@@ -149,21 +149,18 @@ def _one_minute_entry(df, side, freshness=2, lookback=5):
 
 
 def generate_signal(df):
-    """Generate the 1m entry in the direction of the current market bias."""
+    """Generate 1m entry using only the persisted full MTF direction."""
     frames, states = mtf_states(df)
     buy_score = sum(states[m] == 'bullish' for m in (5, 15, 30))
     sell_score = sum(states[m] == 'bearish' for m in (5, 15, 30))
-    bias = market_bias(df)
+    bias = _update_mtf_bias(df)
 
-    # Market direction chooses the side. The 1m PA setup decides timing.
     if _one_minute_entry(df, bias):
         return Signal(bias, buy_score, sell_score,
-                      f'1m {bias}: market direction followed; sweep + displacement + MSS confirmed/persistent.')
+                      f'1m {bias}: full 5m + 15m + 30m MTF direction followed; sweep + displacement + MSS confirmed.')
 
-    # No neutral signal: expose the current market side while reporting that
-    # the 1m timing setup is not ready yet.
     return Signal(bias, buy_score, sell_score,
-                  f'Market direction={bias}. 1m {bias} entry setup এখনো confirmed হয়নি; নতুন 1m confirmation অপেক্ষা করছে।')
+                  f'MTF direction={bias}. 5m + 15m + 30m agreement required; 1m {bias} entry setup এখনো confirmed হয়নি।')
 
 
 def level_for_side(df, side, lookback=20):
