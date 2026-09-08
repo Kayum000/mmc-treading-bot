@@ -48,6 +48,7 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         tick_time = tick_time.to_pydatetime()
     tick_time = tick_time.astimezone(timezone.utc)
 
+    is_entry = result.action in {"BUY", "SELL"}
     return {
         "pair": pair,
         "requested_pair": pair,
@@ -65,11 +66,11 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         "analysis_candle_time_utc": tick_time.isoformat(timespec="milliseconds"),
         "entry_price": float(last["mid"] if "mid" in last else (last["askPrice"] + last["bidPrice"]) / 2),
         "entry_price_type": "latest_tick_mid",
-        "entry_time_utc": signal_at_utc.isoformat(timespec="seconds"),
-        "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
-        "entry_delay_seconds": 0,
+        "entry_time_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None,
+        "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
+        "entry_delay_seconds": 0 if is_entry else None,
         "timeframe": "tick-run",
-        "entry_timeframe": "next qualifying tick",
+        "entry_timeframe": "next qualifying tick" if is_entry else "wait for qualifying tick",
         "automatic": automatic,
         "confidence": result.confidence,
         "mmc_level_type": None,
