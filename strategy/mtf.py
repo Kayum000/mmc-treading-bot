@@ -1,8 +1,9 @@
-"""MTF context + market-momentum + dynamic S/R 1m entry strategy.
+"""MTF context + market-momentum + respected S/R 1m entry strategy.
 
 5m/15m/30m MTF candles are CONTEXT ONLY. They never block an entry.
 The actual BUY/SELL side follows current 1m market momentum/price structure.
-Dynamic 5m support/resistance is used as entry-quality context, not a hard gate.
+Respected 5m S/R zones are detected from confirmed swings, repeated reactions,
+and failed breaks. They are quality context, not a hard gate.
 No MMC, EMA, RSI or MACD is used.
 """
 from __future__ import annotations
@@ -94,29 +95,139 @@ def market_bias(df):
     return 'BUY' if float(x.iloc[-1]['close']) >= float(x.iloc[-1]['open']) else 'SELL'
 
 
-def _sr_context(df, side, lookback=20):
-    """Return dynamic 5m S/R context without making it a hard entry gate."""
+def _sr_tolerance(f):
+    ranges = (f['high'] - f['low']).tail(40)
+    median_range = float(ranges.median()) if not ranges.empty else 0.0
+    current = float(f['close'].iloc[-1])
+    return max(median_range * 0.30, abs(current) * 0.00006)
+
+
+def _confirmed_pivots(f, wing=2):
+    """Confirmed pivots only: last `wing` bars are excluded to avoid lookahead."""
+    if len(f) < wing * 2 + 5:
+        return [], []
+    x = f.iloc[:-wing]
+    lows, highs = [], []
+    for i in range(wing, len(x) - wing):
+        row = x.iloc[i]
+        lo = float(row['low'])
+        hi = float(row['high'])
+        left = x.iloc[i-wing:i]
+        right = x.iloc[i+1:i+1+wing]
+        if lo <= float(left['low'].min()) and lo <= float(right['low'].min()):
+            lows.append((x.index[i], lo))
+        if hi >= float(left['high'].max()) and hi >= float(right['high'].max()):
+            highs.append((x.index[i], hi))
+    return lows, highs
+
+
+def _cluster_levels(candidates, tolerance):
+    if not candidates:
+        return []
+    ordered = sorted(candidates, key=lambda z: z[1])
+    clusters = []
+    for ts, price in ordered:
+        if not clusters or abs(price - clusters[-1]['price']) > tolerance:
+            clusters.append({'price': price, 'times': [ts], 'prices': [price]})
+        else:
+            c = clusters[-1]
+            c['times'].append(ts)
+            c['prices'].append(price)
+            c['price'] = sum(c['prices']) / len(c['prices'])
+    return clusters
+
+
+def _zone_stats(f, level, side, tolerance):
+    """Score a zone using repeated touches, rejection, recency and break penalty."""
+    tol = tolerance
+    touch = 0
+    rejection = 0
+    clean_breaks = 0
+    retests = 0
+    for i in range(1, len(f) - 1):
+        r = f.iloc[i]
+        o, h, l, c = map(float, (r['open'], r['high'], r['low'], r['close']))
+        body = abs(c - o)
+        if side == 'support':
+            touched = l <= level + tol and h >= level - tol
+            rejected = touched and c > level + tol * 0.35 and (min(o, c) - l) >= max(body * 0.6, tol * 0.15)
+            broken = c < level - tol
+        else:
+            touched = l <= level + tol and h >= level - tol
+            rejected = touched and c < level - tol * 0.35 and (h - max(o, c)) >= max(body * 0.6, tol * 0.15)
+            broken = c > level + tol
+        if touched:
+            touch += 1
+        if rejected:
+            rejection += 1
+        if broken:
+            clean_breaks += 1
+            if i + 1 < len(f):
+                nxt = float(f.iloc[i+1]['close'])
+                if (side == 'support' and nxt > level) or (side == 'resistance' and nxt < level):
+                    retests += 1
+    age_bars = max(0, len(f) - 1)
+    last_touch_age = age_bars
+    for i in range(len(f) - 1, 0, -1):
+        r = f.iloc[i]
+        if float(r['low']) <= level + tol and float(r['high']) >= level - tol:
+            last_touch_age = len(f) - 1 - i
+            break
+    recency = max(0.0, 1.5 - last_touch_age / 20.0)
+    score = 1.5 * min(touch, 5) + 2.0 * min(rejection, 3) + 1.0 * min(retests, 2) + recency - 1.5 * min(clean_breaks, 3)
+    return {'touches': touch, 'rejections': rejection, 'breaks': clean_breaks,
+            'retests': retests, 'recency': recency, 'score': round(score, 2)}
+
+
+def respected_sr(df, side, lookback=60):
+    """Find the nearest *respected* 5m S/R zone for the requested side.
+
+    A zone earns strength from confirmed swing pivots, clustered repeated touches,
+    rejection candles, break/retest behavior and recency, while clean breaks reduce it.
+    The detector never blocks a signal.
+    """
     frames, _ = mtf_states(df)
     f = frames.get(5)
-    if f is None or len(f) < 6:
-        return {'type': 'none', 'price': None, 'near': False, 'distance': None}
-    recent = f.tail(lookback)
-    current = float(recent['close'].iloc[-1])
-    support = float(recent['low'].min())
-    resistance = float(recent['high'].max())
-    range_size = float(recent['high'].max() - recent['low'].min())
-    tolerance = max(range_size * 0.08, abs(current) * 0.00008)
-    if side == 'BUY':
-        distance = abs(current - support)
-        return {'type': 'support', 'price': support, 'near': distance <= tolerance, 'distance': distance}
-    if side == 'SELL':
-        distance = abs(current - resistance)
-        return {'type': 'resistance', 'price': resistance, 'near': distance <= tolerance, 'distance': distance}
-    return {'type': 'none', 'price': None, 'near': False, 'distance': None}
+    empty = {'type': 'none', 'price': None, 'near': False, 'distance': None,
+             'score': 0.0, 'touches': 0, 'rejections': 0, 'retests': 0}
+    if f is None or len(f) < 15:
+        return empty
+    f = f.tail(lookback)
+    tolerance = _sr_tolerance(f)
+    lows, highs = _confirmed_pivots(f, wing=2)
+    candidates = lows if side == 'BUY' else highs
+    clusters = _cluster_levels(candidates, tolerance)
+    current = float(f['close'].iloc[-1])
+    kind = 'support' if side == 'BUY' else 'resistance'
+    scored = []
+    for c in clusters:
+        level = float(c['price'])
+        if side == 'BUY' and level > current + tolerance:
+            continue
+        if side == 'SELL' and level < current - tolerance:
+            continue
+        stats = _zone_stats(f, level, kind, tolerance)
+        if stats['touches'] < 2 and stats['rejections'] < 1:
+            continue
+        distance = abs(current - level)
+        proximity_bonus = max(0.0, 2.0 - distance / max(tolerance, 1e-9))
+        score = stats['score'] + proximity_bonus
+        scored.append((score, distance, level, stats))
+    if not scored:
+        return empty
+    scored.sort(key=lambda z: (z[0], -z[1]), reverse=True)
+    score, distance, level, stats = scored[0]
+    near = distance <= tolerance * 1.5
+    return {'type': kind, 'price': level, 'near': near, 'distance': distance,
+            'score': round(score, 2), 'touches': stats['touches'],
+            'rejections': stats['rejections'], 'retests': stats['retests']}
+
+
+def _sr_context(df, side, lookback=60):
+    return respected_sr(df, side, lookback)
 
 
 def _one_minute_setup(x, side, sweep_lookback=5):
-    """Check a completed 1m sweep/displacement/MSS sequence ending at x."""
     if len(x) < sweep_lookback + 3:
         return False
     candidate = x.iloc[-1]
@@ -142,7 +253,6 @@ def _one_minute_setup(x, side, sweep_lookback=5):
 
 
 def _one_minute_entry(df, side, freshness=2, lookback=5):
-    """Allow a confirmed 1m setup to remain valid for up to `freshness` bars."""
     if not _valid(df, lookback + 5):
         return False
     x = df[['open', 'high', 'low', 'close']].copy()
@@ -161,28 +271,31 @@ def _one_minute_entry(df, side, freshness=2, lookback=5):
 
 
 def generate_signal(df):
-    """Generate BUY/SELL from market momentum; MTF remains informational only."""
     _, states = mtf_states(df)
     buy_score = sum(states[m] == 'bullish' for m in (5, 15, 30))
     sell_score = sum(states[m] == 'bearish' for m in (5, 15, 30))
     bias = market_bias(df)
     sr = _sr_context(df, bias)
     setup = _one_minute_entry(df, bias)
+    level_text = ''
+    if sr['price'] is not None:
+        level_text = (f' 5m respected {sr["type"]}={sr["price"]:.5f}, '
+                      f'score={sr["score"]:.1f}, touches={sr["touches"]}, '
+                      f'rejections={sr["rejections"]}')
     if setup and sr['near']:
         return Signal(bias, buy_score, sell_score,
-                      f'1m {bias}: market momentum + 5m {sr["type"]} + sweep/displacement/MSS confirmed. MTF is context only.')
+                      f'1m {bias}: market momentum + respected 5m {sr["type"]} + sweep/displacement/MSS confirmed.{level_text} MTF is context only.')
     if setup:
         return Signal(bias, buy_score, sell_score,
-                      f'1m {bias}: market momentum + sweep/displacement/MSS confirmed; 5m {sr["type"]} level is not nearby, so S/R is context only. MTF does not block entry.')
+                      f'1m {bias}: market momentum + sweep/displacement/MSS confirmed; respected S/R is context only.{level_text} MTF does not block entry.')
     if sr['near']:
         return Signal(bias, buy_score, sell_score,
-                      f'Market momentum={bias}; price is near 5m {sr["type"]} at {sr["price"]:.5f}. Waiting for 1m {bias} confirmation; MTF does not block entry.')
+                      f'Market momentum={bias}; price is near respected 5m {sr["type"]}.{level_text} Waiting for 1m {bias} confirmation; MTF does not block entry.')
     return Signal(bias, buy_score, sell_score,
-                  f'Market momentum={bias}; 5m {sr["type"]} context active. MTF does not block entry; waiting for 1m {bias} confirmation.')
+                  f'Market momentum={bias}; respected 5m S/R context active.{level_text} MTF does not block entry; waiting for 1m {bias} confirmation.')
 
 
-def level_for_side(df, side, lookback=20):
-    """Compatibility helper: returns the latest dynamic 5m S/R level."""
+def level_for_side(df, side, lookback=60):
     sr = _sr_context(df, side, lookback)
     if sr['price'] is None:
         return None
