@@ -1,9 +1,8 @@
-"""Pure MTF direction + 1m price-action entry strategy.
+"""MTF display bias + independent 1m price-action entry strategy.
 
-5m/15m/30m establish direction. Only when all three agree, 1m searches for
-a fresh sweep + displacement + structure break. A confirmed 1m setup remains
-valid for a short freshness window so the live signal does not disappear on
-the next tick, while a new opposite setup invalidates it.
+5m/15m/30m are used to calculate a directional MTF bias for display only.
+They do NOT block the 1m entry engine. Entry continues from the confirmed
+1m sweep + displacement + structure-break logic with a short freshness window.
 
 No MMC, EMA, RSI or MACD is used.
 """
@@ -69,7 +68,7 @@ def mtf_states(df):
 
 
 def market_bias(df):
-    """Directional bias exists only when 30m, 15m and 5m agree."""
+    """Return BUY/SELL only when 30m, 15m and 5m agree; otherwise NEUTRAL."""
     _, states = mtf_states(df)
     if states[30] == states[15] == states[5] == 'bullish':
         return 'BUY'
@@ -118,8 +117,6 @@ def _one_minute_entry(df, side, freshness=2, lookback=5):
     if len(x) < lookback + 5:
         return False
 
-    # Most recent completed 1m bar gets priority. If its setup was just
-    # confirmed, keep the signal alive for the next `freshness` bars.
     for age in range(freshness + 1):
         end = len(x) - age
         if end < lookback + 3:
@@ -131,30 +128,26 @@ def _one_minute_entry(df, side, freshness=2, lookback=5):
 
 
 def generate_signal(df):
+    """Generate the entry from 1m PA; MTF is informational and never a gate."""
     frames, states = mtf_states(df)
     if any(frames[m] is None or len(frames[m]) < 6 for m in (5, 15, 30)):
-        return Signal('NO_TRADE', 0, 0, 'MTF 5m/15m/30m বিশ্লেষণের জন্য পর্যাপ্ত বন্ধ ক্যান্ডেল নেই।')
+        return Signal('NO_TRADE', 0, 0, 'MTF 5m/15m/30m তথ্যের জন্য পর্যাপ্ত বন্ধ ক্যান্ডেল নেই; 1m entry analysis চালানো সম্ভব নয়।')
 
     buy_score = sum(states[m] == 'bullish' for m in (5, 15, 30))
     sell_score = sum(states[m] == 'bearish' for m in (5, 15, 30))
+    bias = market_bias(df)
 
-    # 1m analysis is NEVER allowed before full 30m+15m+5m alignment.
-    if states[30] == states[15] == states[5] == 'bullish':
-        if _one_minute_entry(df, 'BUY'):
-            return Signal('BUY', buy_score, sell_score,
-                          'MTF BUY: 30m+15m+5m aligned; fresh 1m sweep + displacement + MSS confirmed/persistent.')
-        return Signal('NO_TRADE', buy_score, sell_score,
-                      '30m+15m+5m bullish, কিন্তু valid 1m BUY confirmation নেই।')
+    # MTF only reports direction. It must never suppress the 1m entry engine.
+    if _one_minute_entry(df, 'BUY'):
+        return Signal('BUY', buy_score, sell_score,
+                      f'1m BUY: sweep + displacement + MSS confirmed/persistent. MTF bias={bias}.')
 
-    if states[30] == states[15] == states[5] == 'bearish':
-        if _one_minute_entry(df, 'SELL'):
-            return Signal('SELL', buy_score, sell_score,
-                          'MTF SELL: 30m+15m+5m aligned; fresh 1m sweep + displacement + MSS confirmed/persistent.')
-        return Signal('NO_TRADE', buy_score, sell_score,
-                      '30m+15m+5m bearish, কিন্তু valid 1m SELL confirmation নেই।')
+    if _one_minute_entry(df, 'SELL'):
+        return Signal('SELL', buy_score, sell_score,
+                      f'1m SELL: sweep + displacement + MSS confirmed/persistent. MTF bias={bias}.')
 
     return Signal('NO_TRADE', buy_score, sell_score,
-                  f"MTF alignment incomplete: 30m={states[30]}, 15m={states[15]}, 5m={states[5]}; 1m analysis skipped.")
+                  f'1m entry setup নেই। MTF bias={bias}; MTF entry gate হিসেবে ব্যবহৃত হয়নি।')
 
 
 def level_for_side(df, side, lookback=20):
