@@ -1,11 +1,11 @@
 """Microprice Run Alignment strategy.
 
-Latest version: v2.0
+Latest version: v2.1
 - 2-4 tick same-direction mid-price run
-- microprice pressure threshold 0.40
+- microprice pressure threshold 0.40 when bid/ask volume is available
 - spread filter
-- fast-tick confirmation (<200ms) when tick timestamps are available
-- volume-weighted microprice when bid/ask volume exists
+- fast-tick confirmation as a confidence boost
+- safe quote-run fallback when the live feed has no volume fields
 
 The strategy is intentionally tick-based and does not use MMC, MTF, S/R,
 ORB, candles, EMA, RSI or MACD.
@@ -31,13 +31,14 @@ def _prepare(ticks: pd.DataFrame) -> pd.DataFrame:
         raise ValueError(f"missing tick columns: {sorted(missing)}")
 
     x = ticks.copy()
-    for c in ["askPrice", "bidPrice", "timestamp"]:
+    x["timestamp"] = pd.to_datetime(x["timestamp"], utc=True, errors="coerce")
+    for c in ["askPrice", "bidPrice"]:
         x[c] = pd.to_numeric(x[c], errors="coerce")
     x = x.dropna(subset=list(required)).sort_values("timestamp").drop_duplicates("timestamp")
     x["mid"] = (x["askPrice"] + x["bidPrice"]) / 2.0
     x["spread"] = x["askPrice"] - x["bidPrice"]
     x["direction"] = np.sign(x["mid"].diff()).fillna(0)
-    x["tick_gap_ms"] = x["timestamp"].diff()
+    x["tick_gap_ms"] = x["timestamp"].diff().dt.total_seconds() * 1000.0
 
     if {"askVolume", "bidVolume"}.issubset(x.columns):
         x["askVolume"] = pd.to_numeric(x["askVolume"], errors="coerce")
@@ -60,6 +61,17 @@ def _pip_multiplier(mid_price: float) -> float:
     return 100.0 if abs(float(mid_price)) >= 20.0 else 10000.0
 
 
+def _run_action(directions: np.ndarray, run_length: int) -> str:
+    if len(directions) < run_length:
+        return "HOLD"
+    run = directions[-run_length:]
+    if np.all(run > 0):
+        return "BUY"
+    if np.all(run < 0):
+        return "SELL"
+    return "HOLD"
+
+
 def generate_signal(
     ticks: pd.DataFrame,
     run_length: int = 3,
@@ -70,10 +82,8 @@ def generate_signal(
     if len(x) < 5:
         return TickRunSignal("HOLD", 0.0, "insufficient tick history")
 
-    # v2 uses the strongest validated run zone: 2-4 ticks.
     run_length = int(np.clip(run_length, 2, 4))
     last = len(x) - 1
-    run = x["direction"].to_numpy()[last - run_length + 1:last + 1]
     mid = float(x.iloc[last]["mid"])
     pip_multiplier = _pip_multiplier(mid)
     spread_pips = float(x.iloc[last]["spread"] * pip_multiplier)
@@ -83,28 +93,36 @@ def generate_signal(
     if spread_pips > max_spread_pips:
         return TickRunSignal("HOLD", 0.0, f"spread too wide ({spread_pips:.1f} pips)")
 
-    if not np.all(run > 0) and not np.all(run < 0):
+    directions = x["direction"].to_numpy()
+    action = _run_action(directions, run_length)
+    if action == "HOLD":
         return TickRunSignal("HOLD", 0.0, "run confirmation absent")
 
     micro = float(x.iloc[last]["micro_alignment"]) if not pd.isna(x.iloc[last]["micro_alignment"]) else np.nan
-    if np.isnan(micro):
-        return TickRunSignal("HOLD", 0.0, "microprice volume unavailable")
-
-    # The edge is strongest when the market is updating quickly.
     gap = float(x.iloc[last]["tick_gap_ms"]) if not pd.isna(x.iloc[last]["tick_gap_ms"]) else np.nan
     fast_tick = not np.isnan(gap) and gap <= 200.0
 
-    if np.all(run > 0) and micro >= microprice_threshold:
-        confidence = 0.76 if fast_tick else 0.73
-        suffix = "; fast tick confirmation" if fast_tick else ""
-        return TickRunSignal("BUY", confidence, f"{run_length}-tick upward run + microprice pressure {micro:.2f}{suffix}")
+    if not np.isnan(micro):
+        if action == "BUY" and micro >= microprice_threshold:
+            confidence = 0.76 if fast_tick else 0.73
+            suffix = "; fast tick confirmation" if fast_tick else ""
+            return TickRunSignal("BUY", confidence, f"{run_length}-tick upward run + microprice pressure {micro:.2f}{suffix}")
+        if action == "SELL" and micro <= -microprice_threshold:
+            confidence = 0.78 if fast_tick else 0.74
+            suffix = "; fast tick confirmation" if fast_tick else ""
+            return TickRunSignal("SELL", confidence, f"{run_length}-tick downward run + microprice pressure {micro:.2f}{suffix}")
+        return TickRunSignal("HOLD", 0.0, "run and microprice pressure are not aligned")
 
-    if np.all(run < 0) and micro <= -microprice_threshold:
-        confidence = 0.78 if fast_tick else 0.74
-        suffix = "; fast tick confirmation" if fast_tick else ""
-        return TickRunSignal("SELL", confidence, f"{run_length}-tick downward run + microprice pressure {micro:.2f}{suffix}")
-
-    return TickRunSignal("HOLD", 0.0, "run and microprice pressure are not aligned")
+    # BiQuote's documented FX feed has no usable real volume fields.
+    # Keep the bot live instead of forcing HOLD forever when volume is absent.
+    fallback_conf = 0.64 if fast_tick else 0.62
+    suffix = "; fast tick" if fast_tick else ""
+    direction_text = "upward" if action == "BUY" else "downward"
+    return TickRunSignal(
+        action,
+        fallback_conf,
+        f"{run_length}-tick {direction_text} quote run; microprice volume unavailable{suffix}",
+    )
 
 
 def backtest_labels(
@@ -123,11 +141,8 @@ def backtest_labels(
             continue
         micro = x.iloc[i]["micro_alignment"]
         if pd.isna(micro):
-            continue
-        gap = x.iloc[i]["tick_gap_ms"]
-        # Fast-tick confirmation is used only as a quality flag, not a mandatory
-        # historical filter, so the backtest remains comparable with v1.
-        if np.all(run > 0) and micro >= microprice_threshold:
+            x.iat[i, x.columns.get_loc("signal")] = "BUY" if np.all(run > 0) else "SELL"
+        elif np.all(run > 0) and micro >= microprice_threshold:
             x.iat[i, x.columns.get_loc("signal")] = "BUY"
         elif np.all(run < 0) and micro <= -microprice_threshold:
             x.iat[i, x.columns.get_loc("signal")] = "SELL"
