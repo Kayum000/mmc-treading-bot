@@ -1,8 +1,4 @@
-"""Live signal generation using only the new tick-run strategy.
-
-All previous MMC / MTF / candle-based signal engines are intentionally removed
-from the live path. The selected strategy consumes recent quote ticks directly.
-"""
+"""Live signal generation using the Microprice Run Alignment strategy."""
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
@@ -17,9 +13,9 @@ def _bengali_reason(reason: str) -> str:
         ("BUY", "ক্রয়"), ("SELL", "বিক্রয়"), ("HOLD", "ট্রেড নয়"),
         ("upward run", "উর্ধ্বমুখী tick run"),
         ("downward run", "নিম্নমুখী tick run"),
-        ("strong bid-volume pressure", "শক্তিশালী bid-volume pressure"),
-        ("strong ask-volume pressure", "শক্তিশালী ask-volume pressure"),
-        ("live quote-volume unavailable", "live quote-এ volume নেই"),
+        ("microprice pressure", "microprice চাপ"),
+        ("microprice volume unavailable", "microprice volume পাওয়া যায়নি"),
+        ("run and microprice pressure are not aligned", "tick run ও microprice চাপ একই দিকে নেই"),
         ("spread too wide", "spread বেশি"),
         ("insufficient tick history", "পর্যাপ্ত tick history নেই"),
         ("run confirmation absent", "tick-run confirmation পাওয়া যায়নি"),
@@ -35,11 +31,11 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     if not pair:
         raise ValueError("No market selected")
     if market_mode != "real":
-        raise ValueError("The new Tick-Run strategy is currently enabled for real Forex only")
+        raise ValueError("The Microprice Run strategy is enabled for real Forex only")
 
     signal_at_utc = datetime.now(timezone.utc)
     ticks = fetch_tick_history(pair, count=1000)
-    result = generate_signal(ticks, run_length=8, imbalance_threshold=0.60)
+    result = generate_signal(ticks, run_length=3, microprice_threshold=0.40)
 
     last = ticks.iloc[-1]
     signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
@@ -64,7 +60,7 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
         "candle_time": None,
         "analysis_candle_time_utc": tick_time.isoformat(timespec="milliseconds"),
-        "entry_price": float(last["mid"] if "mid" in last else (last["askPrice"] + last["bidPrice"]) / 2),
+        "entry_price": float((last["askPrice"] + last["bidPrice"]) / 2),
         "entry_price_type": "latest_tick_mid",
         "entry_time_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None,
         "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
