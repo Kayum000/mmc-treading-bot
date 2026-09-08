@@ -1,21 +1,22 @@
 """MM-free EURUSD M1 microstructure engine.
 
-Market bias is always BUY/SELL. A real entry is produced only when a local
-liquidity sweep is rejected with a strong displacement candle during the
-most liquid 08:00-17:00 UTC window. No MMC, Mirror MMC, RSI, MACD, or MTF
-confirmation is used.
+Bias is always BUY/SELL. A real entry requires a prior-candle liquidity
+sweep/rejection followed by a confirmed displacement candle in the same
+direction during 08:00-17:00 UTC. No MMC, RSI, MACD, or MTF confirmation.
 """
 from __future__ import annotations
 
 from strategy.mmc import Signal, level_for_side
 
-MIN_HISTORY = 40
+MIN_HISTORY = 45
 STRUCTURE_LOOKBACK = 12
 VOL_LOOKBACK = 20
 SWEEP_BUFFER_ATR = 0.08
 MIN_REJECTION_WICK = 0.35
-MIN_BODY_RATIO = 0.45
-MIN_RANGE_RATIO = 1.30
+MIN_CONFIRM_BODY = 0.45
+MIN_EXPANSION = 1.30
+MIN_RR = 1.20
+COOLDOWN_BARS = 3
 SESSION_START_UTC = 8
 SESSION_END_UTC = 17
 
@@ -36,8 +37,6 @@ def _atr_like(x, n=VOL_LOOKBACK):
 def _hour_utc(value):
     try:
         ts = value.to_pydatetime() if hasattr(value, "to_pydatetime") else value
-        if getattr(ts, "tzinfo", None) is not None:
-            return ts.hour
         return ts.hour
     except Exception:
         return None
@@ -58,49 +57,6 @@ def _structure_bias(x):
     return "BUY" if c >= (rh + rl) / 2.0 else "SELL"
 
 
-def _scores(df):
-    x = df.tail(max(MIN_HISTORY, 40)).copy().reset_index(drop=True)
-    last = x.iloc[-1]
-    prior = x.iloc[:-1].tail(STRUCTURE_LOOKBACK)
-    atr = _atr_like(x.iloc[:-1])
-    hi = float(prior["high"].max())
-    lo = float(prior["low"].min())
-    o, c, h, l = map(float, (last["open"], last["close"], last["high"], last["low"]))
-    rng = _range(last)
-    body = abs(c - o)
-    upper = h - max(o, c)
-    lower = min(o, c) - l
-    bias = _structure_bias(x.iloc[:-1])
-    buy = 3.0 if bias == "BUY" else 0.0
-    sell = 3.0 if bias == "SELL" else 0.0
-
-    swept_low = l < lo - atr * SWEEP_BUFFER_ATR and c > lo
-    swept_high = h > hi + atr * SWEEP_BUFFER_ATR and c < hi
-    if swept_low:
-        buy += 4.0
-        if lower / rng >= MIN_REJECTION_WICK:
-            buy += 1.5
-    if swept_high:
-        sell += 4.0
-        if upper / rng >= MIN_REJECTION_WICK:
-            sell += 1.5
-
-    expansion = rng / atr
-    if expansion >= MIN_RANGE_RATIO and body / rng >= MIN_BODY_RATIO:
-        if c > o:
-            buy += 2.0
-        elif c < o:
-            sell += 2.0
-
-    close_pos = (c - l) / rng
-    if close_pos >= 0.72:
-        buy += 1.0
-    elif close_pos <= 0.28:
-        sell += 1.0
-
-    return buy, sell, swept_low, swept_high, expansion, bias
-
-
 def market_bias(df):
     """Always return BUY or SELL once at least two candles exist."""
     if not _valid(df, 2):
@@ -108,26 +64,92 @@ def market_bias(df):
     return _structure_bias(df.tail(40).copy().reset_index(drop=True))
 
 
+def _confirmed_setup(x):
+    """Evaluate sweep on -2 and confirmation/displacement on -1."""
+    sweep = x.iloc[-2]
+    confirm = x.iloc[-1]
+    base = x.iloc[:-2].tail(STRUCTURE_LOOKBACK)
+    atr = _atr_like(x.iloc[:-2])
+    hi = float(base["high"].max())
+    lo = float(base["low"].min())
+
+    so, sc, sh, sl = map(float, (sweep["open"], sweep["close"], sweep["high"], sweep["low"]))
+    co, cc, ch, cl = map(float, (confirm["open"], confirm["close"], confirm["high"], confirm["low"]))
+    srng = _range(sweep)
+    crng = _range(confirm)
+    cbody = abs(cc - co)
+    lower = min(so, sc) - sl
+    upper = sh - max(so, sc)
+
+    bias = _structure_bias(x.iloc[:-2])
+    swept_low = sl < lo - atr * SWEEP_BUFFER_ATR and sc > lo
+    swept_high = sh > hi + atr * SWEEP_BUFFER_ATR and sc < hi
+    reject_low = lower / srng >= MIN_REJECTION_WICK
+    reject_high = upper / srng >= MIN_REJECTION_WICK
+    expansion = crng / atr
+    body_ratio = cbody / crng
+
+    buy_confirm = (
+        swept_low and reject_low and bias == "BUY"
+        and cc > co and cc > sc
+        and body_ratio >= MIN_CONFIRM_BODY
+        and expansion >= MIN_EXPANSION
+    )
+    sell_confirm = (
+        swept_high and reject_high and bias == "SELL"
+        and cc < co and cc < sc
+        and body_ratio >= MIN_CONFIRM_BODY
+        and expansion >= MIN_EXPANSION
+    )
+
+    buy_rr = sell_rr = 0.0
+    if buy_confirm:
+        risk = cc - sl
+        reward = hi - cc
+        buy_rr = reward / risk if risk > 0 else 0.0
+    if sell_confirm:
+        risk = sh - cc
+        reward = cc - lo
+        sell_rr = reward / risk if risk > 0 else 0.0
+
+    return buy_confirm and buy_rr >= MIN_RR, sell_confirm and sell_rr >= MIN_RR, expansion, bias, buy_rr, sell_rr
+
+
+def _recent_confirmation(x):
+    """Deterministic cooldown: avoid repeating a same-direction setup recently."""
+    if len(x) < MIN_HISTORY + COOLDOWN_BARS:
+        return False, False
+    buy_recent = sell_recent = False
+    start = max(45, len(x) - 1 - COOLDOWN_BARS)
+    for end in range(start, len(x) - 1):
+        sample = x.iloc[:end + 1]
+        b, s, *_ = _confirmed_setup(sample)
+        buy_recent |= b
+        sell_recent |= s
+    return buy_recent, sell_recent
+
+
 def generate_signal(df):
-    """Produce a trade only for a confirmed liquid-session sweep setup."""
+    """Produce an entry only after causal sweep + confirmation + RR filters."""
     if not _valid(df, MIN_HISTORY):
         return Signal("NO_TRADE", 0, 0, "MM-free microstructure: insufficient history; market bias is still available.")
 
-    buy, sell, swept_low, swept_high, expansion, bias = _scores(df)
-    last = df.iloc[-1]
-    hour = _hour_utc(last["timestamp"]) if "timestamp" in df.columns else None
+    x = df.tail(70).copy().reset_index(drop=True)
+    last = x.iloc[-1]
+    hour = _hour_utc(last["timestamp"]) if "timestamp" in x.columns else None
     in_session = hour is not None and SESSION_START_UTC <= hour < SESSION_END_UTC
 
-    if swept_low and bias == "BUY" and buy >= 7.0 and in_session and expansion >= MIN_RANGE_RATIO:
-        return Signal("BUY", int(round(buy)), int(round(sell)),
-                      f"MM-free microstructure BUY | liquidity sweep-low + rejection + displacement | {hour:02d}:xx UTC | expansion={expansion:.2f}x.")
-    if swept_high and bias == "SELL" and sell >= 7.0 and in_session and expansion >= MIN_RANGE_RATIO:
-        return Signal("SELL", int(round(buy)), int(round(sell)),
-                      f"MM-free microstructure SELL | liquidity sweep-high + rejection + displacement | {hour:02d}:xx UTC | expansion={expansion:.2f}x.")
+    buy_ok, sell_ok, expansion, bias, buy_rr, sell_rr = _confirmed_setup(x)
+    buy_recent, sell_recent = _recent_confirmation(x)
+
+    if buy_ok and in_session and not buy_recent:
+        return Signal("BUY", 8, 0, f"MM-free BUY | sweep-low + rejection + confirmation | RR={buy_rr:.2f} | {hour:02d}:xx UTC.")
+    if sell_ok and in_session and not sell_recent:
+        return Signal("SELL", 0, 8, f"MM-free SELL | sweep-high + rejection + confirmation | RR={sell_rr:.2f} | {hour:02d}:xx UTC.")
 
     session_text = f"{hour:02d}:xx UTC" if hour is not None else "outside session"
-    return Signal("NO_TRADE", int(round(buy)), int(round(sell)),
-                  f"MM-free microstructure | bias={bias} | waiting for sweep/rejection confirmation | {session_text} | expansion={expansion:.2f}x.")
+    return Signal("NO_TRADE", 5 if bias == "BUY" else 0, 5 if bias == "SELL" else 0,
+                  f"MM-free | bias={bias} | waiting for confirmed sweep/displacement | RR(B/S)={buy_rr:.2f}/{sell_rr:.2f} | {session_text} | expansion={expansion:.2f}x.")
 
 
 __all__ = ["Signal", "generate_signal", "market_bias", "level_for_side"]
