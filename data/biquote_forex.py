@@ -1,9 +1,4 @@
-"""Free real-time Forex adapter backed by BiQuote public market data.
-
-BiQuote exposes public REST endpoints without an API key. This module keeps
-market-data handling isolated so the existing MMC engine can use the feed
-without changing strategy logic.
-"""
+"""Free real-time Forex adapter backed by BiQuote public market data."""
 from __future__ import annotations
 
 import json
@@ -30,24 +25,17 @@ def _request_json(url: str) -> dict:
 
 
 def _closed_candles(df: pd.DataFrame) -> pd.DataFrame:
-    """Keep only fully closed 1-minute candles in UTC."""
     if df.empty:
         return df
     now_utc = pd.Timestamp(datetime.now(timezone.utc))
-    boundary = pd.Timestamp(
-        (int(now_utc.timestamp()) // 60) * 60,
-        unit="s",
-        tz="UTC",
-    )
+    boundary = pd.Timestamp((int(now_utc.timestamp()) // 60) * 60, unit="s", tz="UTC")
     timestamps = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
     return df.loc[timestamps < boundary].copy()
 
 
 def fetch_forex_candles(symbol: str, interval: str = INTERVAL, outputsize: int = 200) -> pd.DataFrame:
-    """Return closed 1-minute OHLC candles in the legacy engine format."""
     if interval != INTERVAL:
-        raise ValueError("Only the 1min interval is supported by the clean MMC strategy")
-
+        raise ValueError("Only the 1min interval is supported by the selected strategy")
     clean_symbol = symbol.replace("/", "").upper()
     limit = max(1, min(int(outputsize), 1000))
     url = f"{BASE_URL}/api/{quote(clean_symbol)}/ohlc?interval=1m&limit={limit}"
@@ -55,26 +43,20 @@ def fetch_forex_candles(symbol: str, interval: str = INTERVAL, outputsize: int =
     bars = payload.get("bars", []) if isinstance(payload, dict) else []
     if not bars:
         raise RuntimeError(f"BiQuote returned no candle data for {clean_symbol}")
-
     rows = []
     for bar in bars:
         try:
             rows.append({
                 "timestamp": pd.to_datetime(bar["openTime"], utc=True),
-                "open": float(bar["open"]),
-                "high": float(bar["high"]),
-                "low": float(bar["low"]),
-                "close": float(bar["close"]),
+                "open": float(bar["open"]), "high": float(bar["high"]),
+                "low": float(bar["low"]), "close": float(bar["close"]),
             })
         except (KeyError, TypeError, ValueError):
             continue
-
     df = pd.DataFrame(rows)
     if df.empty:
         raise RuntimeError(f"BiQuote returned invalid candle data for {clean_symbol}")
-
-    df = df[["timestamp", "open", "high", "low", "close"]].dropna()
-    df = df.sort_values("timestamp")
+    df = df[["timestamp", "open", "high", "low", "close"]].dropna().sort_values("timestamp")
     df = _closed_candles(df)
     if df.empty:
         raise RuntimeError(f"BiQuote returned no closed 1m candles for {clean_symbol}")
@@ -82,7 +64,6 @@ def fetch_forex_candles(symbol: str, interval: str = INTERVAL, outputsize: int =
 
 
 def fetch_latest_tick(symbol: str) -> dict:
-    """Return the latest public tick, including market freshness metadata."""
     clean_symbol = symbol.replace("/", "").upper()
     payload = _request_json(f"{BASE_URL}/api/{quote(clean_symbol)}")
     if not isinstance(payload, dict):
@@ -90,11 +71,35 @@ def fetch_latest_tick(symbol: str) -> dict:
     return payload
 
 
+def fetch_tick_history(symbol: str, count: int = 1000) -> pd.DataFrame:
+    """Return newest BiQuote ticks in the schema expected by the tick strategy."""
+    clean_symbol = symbol.replace("/", "").upper()
+    limit = max(1, min(int(count), 1000))
+    payload = _request_json(f"{BASE_URL}/api/{quote(clean_symbol)}/history?count={limit}")
+    rows = payload.get("ticks", payload) if isinstance(payload, dict) else payload
+    if not isinstance(rows, list) or not rows:
+        raise RuntimeError(f"BiQuote returned no tick history for {clean_symbol}")
+    out = []
+    for tick in rows:
+        if not isinstance(tick, dict):
+            continue
+        try:
+            out.append({
+                "timestamp": pd.to_datetime(tick.get("timestamp"), utc=True),
+                "askPrice": float(tick["ask"]),
+                "bidPrice": float(tick["bid"]),
+            })
+        except (KeyError, TypeError, ValueError):
+            continue
+    df = pd.DataFrame(out).dropna().sort_values("timestamp").drop_duplicates("timestamp")
+    if df.empty:
+        raise RuntimeError(f"BiQuote returned invalid tick history for {clean_symbol}")
+    return df.reset_index(drop=True)
+
+
 def get_credit_usage() -> dict:
-    """Compatibility response: this feed has no account credit meter."""
     return {"used": None, "left": None, "limit": None}
 
 
 def fetch_api_usage() -> dict:
-    """Compatibility response for the existing dashboard usage widget."""
     return {"provider": "BiQuote", "api_key_required": False, "credits": "unmetered_public_feed"}
