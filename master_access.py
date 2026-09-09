@@ -32,7 +32,7 @@ def _is_master() -> bool:
     return current in {state.get("master_device_hash"), state.get("master_device_hash_2")}
 
 
-def _claim_master(device_id: str, setup_key: str) -> tuple[bool, str]:
+def _claim_master(device_id: str, setup_key: str, recover_slot: int | None = None) -> tuple[bool, str]:
     configured_key = os.getenv("MASTER_SETUP_KEY", "").strip()
     if not configured_key:
         return False, "Master setup is not configured on the server."
@@ -40,6 +40,8 @@ def _claim_master(device_id: str, setup_key: str) -> tuple[bool, str]:
         return False, "Device ID is required."
     if not hmac.compare_digest(setup_key, configured_key):
         return False, "Invalid Master activation key."
+    if recover_slot in (1, 2) and store.enabled:
+        return store.recover_master(_device_hash(device_id), recover_slot)
     ok, message = store.claim_master(_device_hash(device_id)) if store.enabled else (True, "MASTER device authorized successfully.")
     if not ok:
         return False, message
@@ -70,15 +72,20 @@ def init_master_access(app) -> None:
     @app.route("/master/claim", methods=["POST"])
     def master_claim():
         data = request.get_json(silent=True) or request.form
+        recover_raw = str(data.get("recover_slot", "")).strip()
+        recover_slot = int(recover_raw) if recover_raw in {"1", "2"} else None
         ok, message = _claim_master(
             str(data.get("device_id", "")).strip(),
             str(data.get("setup_key", "")).strip(),
+            recover_slot,
         )
+        if ok:
+            session["master"] = True
+            session["master_device_id"] = str(data.get("device_id", "")).strip()
         return jsonify({"ok": ok, "message": message, "role": "MASTER" if ok else "VIEWER"}), (200 if ok else 403)
 
     @app.route("/master/sync-selection", methods=["POST"])
     def master_sync_selection():
-        """Update a Master browser session from the already-published shared selection."""
         if not _is_master():
             return jsonify({"ok": False, "error": "MASTER authorization required."}), 403
         data = request.get_json(silent=True) or request.form
@@ -96,7 +103,6 @@ def init_master_access(app) -> None:
         pair = session.get("selected_pair", "").strip().upper()
         if not mode or not pair:
             return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
-
         if not _is_master():
             state = _state()
             result = state.get("result")
@@ -107,7 +113,6 @@ def init_master_access(app) -> None:
             if state_mode != mode or state_pair != pair:
                 return jsonify({"ok": False, "error": "MASTER বর্তমানে অন্য pair নির্বাচন করেছে.", "master_pair": state_pair}), 409
             return jsonify({"ok": True, "result": result, "role": "VIEWER"})
-
         try:
             result = get_signal(pair, mode, automatic=True)
             record_signal(result)
@@ -145,10 +150,17 @@ def init_master_access(app) -> None:
 (()=>{
  const overlay=document.getElementById('master-control-overlay'),badge=document.getElementById('master-role-badge'),claim=document.getElementById('master-claim-btn');
  if(!overlay||!badge)return;
- const KEY='mmc_master_device_id'; let id=localStorage.getItem(KEY); if(!id){id=(crypto.randomUUID?crypto.randomUUID():(Date.now()+'-'+Math.random()));localStorage.setItem(KEY,id)}
+ const KEY='mmc_master_device_id';
+ let id='';
+ try{if(window.AndroidSignalAlert&&typeof window.AndroidSignalAlert.getDeviceId==='function')id=window.AndroidSignalAlert.getDeviceId()||'';}catch(_){ }
+ if(!id){id=localStorage.getItem(KEY)||'';if(!id){id=(crypto.randomUUID?crypto.randomUUID():(Date.now()+'-'+Math.random()));localStorage.setItem(KEY,id)}}
  let lastSharedSignalKey='';
  async function syncMasterSession(mode,pair){try{await fetch('/master/sync-selection',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({mode,pair}),cache:'no-store'});}catch(_){}}
- async function status(){try{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});const d=await r.json();const master=d.role==='MASTER';badge.textContent=master?'MASTER / MAIN PANEL':'VIEWER / SECONDARY';badge.className=master?'master':'viewer';claim.hidden=master||d.master_count>=2;overlay.style.display=(master||d.master_count<2)?'flex':'none';
+ async function status(){try{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});const d=await r.json();const master=d.role==='MASTER';badge.textContent=master?'MASTER / MAIN PANEL':'VIEWER / SECONDARY';badge.className=master?'master':'viewer';
+   const full=!master&&d.master_count>=2;
+   claim.hidden=master||(!full&&d.master_count>=2);
+   if(full){claim.hidden=false;claim.textContent='RESTORE MASTER'}
+   overlay.style.display=(master||full||d.master_count<2)?'flex':'none';
    const mode=document.getElementById('mode'),pair=document.getElementById('pair');
    if(mode&&pair&&d.pair&&d.mode){mode.value=d.mode;Array.from(pair.options).forEach(o=>o.hidden=o.dataset.market&&o.dataset.market!==d.mode);pair.value=d.pair;mode.disabled=!master;pair.disabled=!master;if(master)syncMasterSession(d.mode,d.pair);}
    if(!master&&d.result&&typeof window.renderResult==='function'){
@@ -156,7 +168,7 @@ def init_master_access(app) -> None:
      if(key!==lastSharedSignalKey){lastSharedSignalKey=key;window.renderResult(r);if(window.alertForSignal)window.alertForSignal(r);}
    }
  }catch(_){overlay.style.display='none'}}
- claim.addEventListener('click',async()=>{const key=prompt('Master activation key:');if(!key)return;try{const r=await fetch('/master/claim',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({device_id:id,setup_key:key})});const d=await r.json();if(!r.ok)throw Error(d.message||'Master claim failed');alert(d.message);location.reload()}catch(e){alert(e.message||'Master claim failed')}});
+ claim.addEventListener('click',async()=>{const key=prompt('Master activation key:');if(!key)return;let slot='';try{const s=await (async()=>{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});return await r.json()})();if(s.master_count>=2)slot=prompt('Both Master slots are occupied. Type 1 or 2 to replace that slot:');if(slot!=='1'&&slot!=='2'&&s.master_count>=2){alert('Recovery cancelled.');return}const payload={device_id:id,setup_key:key};if(slot==='1'||slot==='2')payload.recover_slot=slot;const r=await fetch('/master/claim',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(payload)});const d=await r.json();if(!r.ok)throw Error(d.message||'Master claim failed');alert(d.message);location.reload()}catch(e){alert(e.message||'Master claim failed')}});
  async function sharedSignal(){try{if(typeof window.enableSignalAudio==='function')window.enableSignalAudio();const r=await fetch('/master/signal',{cache:'no-store',credentials:'same-origin'});const d=await r.json();if(r.ok&&d.result&&typeof window.renderResult==='function'){window.renderResult(d.result);if(window.alertForSignal)window.alertForSignal(d.result)}}catch(_) {}}
  const button=document.getElementById('signal-button');if(button){button.addEventListener('click',e=>{e.preventDefault();e.stopImmediatePropagation();sharedSignal()},true)}
  status();setInterval(status,3000);
