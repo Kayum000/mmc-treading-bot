@@ -95,6 +95,19 @@ class MasterStore:
                 )
         return True, "MASTER device locked successfully."
 
+    def update_selection(self, mode: str, pair: str, updated_at: float) -> None:
+        """Publish the Master's current market selection and invalidate old signal."""
+        with self._connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    UPDATE {_TABLE}
+                    SET mode = %s, pair = %s, result_json = NULL, updated_at = %s
+                    WHERE id = 1
+                    """,
+                    (mode, pair, updated_at),
+                )
+
     def update_signal(self, mode: str, pair: str, result: Any, updated_at: float) -> None:
         payload = json.dumps(result, default=str)
         with self._connection() as conn:
