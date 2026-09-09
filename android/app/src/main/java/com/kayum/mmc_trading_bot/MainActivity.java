@@ -31,7 +31,6 @@ import androidx.core.content.FileProvider;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -267,6 +266,13 @@ public class MainActivity extends Activity {
                 prefs.edit().putString(PREF_DEVICE_ID, id).apply();
             }
             return id;
+        }
+
+        @JavascriptInterface
+        public void setDeviceId(String id) {
+            if (id == null) return;
+            id = id.trim();
+            if (!id.isEmpty() && id.length() <= 200) prefs.edit().putString(PREF_DEVICE_ID, id).apply();
         }
 
         @JavascriptInterface
