@@ -10,8 +10,25 @@ android {
         applicationId 'com.kayum.mmc_trading_bot'
         minSdk 23
         targetSdk 36
-        versionCode 1
-        versionName '1.0'
+        versionCode (project.findProperty('versionCode') ?: '1').toInteger()
+        versionName (project.findProperty('versionName') ?: '1.0')
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    buildTypes {
+        debug {
+            buildConfigField 'String', 'BUILD_CHANNEL', '"github"'
+        }
+        release {
+            if (System.getenv('ANDROID_KEYSTORE_FILE')) {
+                signingConfig signingConfigs.release
+            }
+            minifyEnabled false
+            buildConfigField 'String', 'BUILD_CHANNEL', '"github"'
+        }
     }
 
     signingConfigs {
@@ -25,14 +42,4 @@ android {
             }
         }
     }
-
-    buildTypes {
-        release {
-            if (System.getenv('ANDROID_KEYSTORE_FILE')) {
-                signingConfig signingConfigs.release
-            }
-            minifyEnabled false
-        }
-    }
 }
-
