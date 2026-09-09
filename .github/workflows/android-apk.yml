@@ -26,8 +26,6 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
-      - name: Remove duplicate legacy icon resource
-        run: rm -f app/src/main/res/drawable/sk_bot_logo.xml
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
       - name: Publish latest APK release
