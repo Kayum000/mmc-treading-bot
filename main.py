@@ -10,6 +10,18 @@ import strategy.signal_patch
 from web.app import app
 
 
+@app.after_request
+def add_auto_signal_guard(response):
+    """Make AUTO SIGNAL one-shot so one setup cannot fire repeatedly."""
+    if response.content_type and response.content_type.startswith("text/html"):
+        html = response.get_data(as_text=True)
+        guard = '<script src="/static/auto_signal_guard.js" defer></script>'
+        if guard not in html and "</body>" in html:
+            html = html.replace("</body>", guard + "</body>")
+            response.set_data(html)
+    return response
+
+
 if __name__ == "__main__":
     import os
 
