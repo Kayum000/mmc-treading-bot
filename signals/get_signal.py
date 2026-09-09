@@ -55,6 +55,11 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         candle_time = candle_time.to_pydatetime()
     candle_time = candle_time.astimezone(timezone.utc)
 
+    # Entry is aligned to the OPEN of the next 1-minute candle. The signal itself
+    # is still generated from the latest completed candle(s).
+    next_candle_utc = signal_at_utc.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    next_candle_bd = next_candle_utc.astimezone(timezone(timedelta(hours=6)))
+    entry_delay_seconds = max(0, int((next_candle_utc - signal_at_utc).total_seconds()))
     is_entry = result.action in {"BUY", "SELL"}
     return {
         "pair": pair,
@@ -73,9 +78,9 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         "analysis_candle_time_utc": candle_time.isoformat(timespec="milliseconds"),
         "entry_price": entry_price,
         "entry_price_type": "latest_tick_mid",
-        "entry_time_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None,
-        "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
-        "entry_delay_seconds": 0 if is_entry else None,
+        "entry_time_utc": next_candle_utc.isoformat(timespec="seconds") if is_entry else None,
+        "entry_time_bd": next_candle_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
+        "entry_delay_seconds": entry_delay_seconds if is_entry else None,
         "timeframe": "1m",
         "entry_timeframe": "1-minute candle",
         "automatic": automatic,
