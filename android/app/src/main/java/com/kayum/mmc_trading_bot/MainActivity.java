@@ -17,7 +17,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
-public class MainActivity {
+public class MainActivity extends Activity {
     private static final String APP_URL = "https://mmc-treading-bot.onrender.com/";
     private static final String CHANNEL_ID = "mmc_signal_alerts";
     private WebView webView;
