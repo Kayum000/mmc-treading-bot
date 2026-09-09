@@ -189,6 +189,48 @@ def news_direction():
         return jsonify({"ok": False, "error": str(exc)}), 502
 
 
+@app.route("/market-status", methods=["GET"])
+def market_status():
+    """Return lightweight dashboard status without blocking signal generation."""
+    mode = session.get("selected_mode", "").strip().lower()
+    pair = session.get("selected_pair", "").strip().upper()
+    valid_pairs = REAL_PAIRS if mode == "real" else CRYPTO_PAIRS if mode == "crypto" else []
+    if pair not in valid_pairs:
+        return jsonify({"ok": False, "unselected": True, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"})
+
+    if mode == "crypto":
+        return jsonify({
+            "ok": True, "pair": pair, "market_mode": mode,
+            "session": "24/7",
+            "activity": "HIGH", "activity_bn": "চলমান",
+            "best_window_bn": "২৪/৭ মার্কেট",
+            "news_risk": "LOW", "news_risk_bn": "কম",
+            "next_news_time_utc": None,
+        })
+
+    # Forex is normally active Sunday-Friday. Use UTC to avoid server-local timezone drift.
+    now = time.gmtime()
+    weekday = now.tm_wday
+    hour = now.tm_hour
+    if weekday >= 5:
+        session_name, activity, activity_bn, window = "Market Closed", "LOW", "কম", "পরবর্তী Forex session"
+    elif hour < 7:
+        session_name, activity, activity_bn, window = "Asia", "MEDIUM", "মাঝারি", "London / New York overlap"
+    elif hour < 12:
+        session_name, activity, activity_bn, window = "London", "HIGH", "উচ্চ", "London / New York overlap"
+    elif hour < 17:
+        session_name, activity, activity_bn, window = "London / New York", "HIGH", "উচ্চ", "London / New York overlap"
+    else:
+        session_name, activity, activity_bn, window = "New York", "MEDIUM", "মাঝারি", "London session"
+    return jsonify({
+        "ok": True, "pair": pair, "market_mode": mode,
+        "session": session_name, "activity": activity, "activity_bn": activity_bn,
+        "best_window_bn": window,
+        "news_risk": "LOW", "news_risk_bn": "কম",
+        "next_news_time_utc": None,
+    })
+
+
 @app.after_request
 def add_dashboard_assets(response):
     """Load dashboard assets and inject the single performance panel."""
