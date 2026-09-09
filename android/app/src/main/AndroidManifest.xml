@@ -5,8 +5,8 @@
     <application
         android:theme="@style/AppTheme"
         android:label="MMC Live Signal"
-        android:icon="@drawable/sk_bot_logo"
-        android:roundIcon="@drawable/sk_bot_logo"
+        android:icon="@drawable/sk_bot_icon"
+        android:roundIcon="@drawable/sk_bot_icon"
         android:usesCleartextTraffic="false"
         android:allowBackup="false"
         android:supportsRtl="true">
