@@ -5,10 +5,12 @@ The old CSV CLI remains available as a separate module if needed.
 """
 from web.app import app
 from master_access import init_master_access
+from master_selection_sync import init_master_selection_sync
 
 # Attach the isolated Master/Viewer layer after the existing app is created.
 # This leaves the active signal strategy and existing routes intact.
 init_master_access(app)
+init_master_selection_sync(app)
 
 
 if __name__ == "__main__":
