@@ -2,6 +2,12 @@ plugins {
     id 'com.android.application'
 }
 
+def buildEpochMinutes = (System.currentTimeMillis() / 60000L) as int
+
+def suppliedVersionCode = project.findProperty('versionCode')
+def appVersionCode = suppliedVersionCode ? suppliedVersionCode.toInteger() : buildEpochMinutes
+def appVersionName = project.findProperty('versionName') ?: "1.${appVersionCode}"
+
 android {
     namespace 'com.kayum.mmc_trading_bot'
     compileSdk 36
@@ -10,8 +16,8 @@ android {
         applicationId 'com.kayum.mmc_trading_bot'
         minSdk 23
         targetSdk 36
-        versionCode (project.findProperty('versionCode') ?: '1').toInteger()
-        versionName (project.findProperty('versionName') ?: '1.0')
+        versionCode appVersionCode
+        versionName appVersionName
     }
 
     buildFeatures {
@@ -21,6 +27,7 @@ android {
     buildTypes {
         debug {
             buildConfigField 'String', 'BUILD_CHANNEL', '"github"'
+            buildConfigField 'long', 'BUILD_TIMESTAMP_MS', "${System.currentTimeMillis()}L"
         }
         release {
             if (System.getenv('ANDROID_KEYSTORE_FILE')) {
@@ -28,6 +35,7 @@ android {
             }
             minifyEnabled false
             buildConfigField 'String', 'BUILD_CHANNEL', '"github"'
+            buildConfigField 'long', 'BUILD_TIMESTAMP_MS', "${System.currentTimeMillis()}L"
         }
     }
 
