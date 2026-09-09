@@ -54,23 +54,14 @@ class MasterStore:
                     )
                     """
                 )
-                cur.execute(
-                    f"ALTER TABLE {_TABLE} ADD COLUMN IF NOT EXISTS master_device_hash_2 TEXT"
-                )
-                cur.execute(
-                    f"""
-                    INSERT INTO {_TABLE} (id)
-                    VALUES (1)
-                    ON CONFLICT (id) DO NOTHING
-                    """
-                )
+                cur.execute(f"ALTER TABLE {_TABLE} ADD COLUMN IF NOT EXISTS master_device_hash_2 TEXT")
+                cur.execute(f"""INSERT INTO {_TABLE} (id) VALUES (1) ON CONFLICT (id) DO NOTHING""")
 
     def get_state(self) -> dict[str, Any]:
         with self._connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT master_device_hash, master_device_hash_2, mode, pair, result_json, updated_at "
-                    f"FROM {_TABLE} WHERE id = 1"
+                    f"SELECT master_device_hash, master_device_hash_2, mode, pair, result_json, updated_at FROM {_TABLE} WHERE id = 1"
                 )
                 row = cur.fetchone()
         if not row:
@@ -87,42 +78,45 @@ class MasterStore:
     def claim_master(self, device_hash: str) -> tuple[bool, str]:
         with self._connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT master_device_hash, master_device_hash_2 FROM {_TABLE} WHERE id = 1 FOR UPDATE"
-                )
+                cur.execute(f"SELECT master_device_hash, master_device_hash_2 FROM {_TABLE} WHERE id = 1 FOR UPDATE")
                 row = cur.fetchone()
                 first = row[0] if row else None
                 second = row[1] if row else None
                 if device_hash == first or device_hash == second:
                     return True, "MASTER device is already authorized."
                 if not first:
-                    cur.execute(
-                        f"UPDATE {_TABLE} SET master_device_hash = %s WHERE id = 1",
-                        (device_hash,),
-                    )
+                    cur.execute(f"UPDATE {_TABLE} SET master_device_hash = %s WHERE id = 1", (device_hash,))
                     return True, "MASTER device 1 authorized successfully."
                 if not second:
-                    cur.execute(
-                        f"UPDATE {_TABLE} SET master_device_hash_2 = %s WHERE id = 1",
-                        (device_hash,),
-                    )
+                    cur.execute(f"UPDATE {_TABLE} SET master_device_hash_2 = %s WHERE id = 1", (device_hash,))
                     return True, "MASTER device 2 authorized successfully."
                 return False, "Both MASTER device slots are already in use."
+
+    def recover_master(self, device_hash: str, slot: int) -> tuple[bool, str]:
+        """Explicitly replace one Master slot; caller must validate the setup key."""
+        if slot not in (1, 2):
+            return False, "Invalid MASTER slot."
+        with self._connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT master_device_hash, master_device_hash_2 FROM {_TABLE} WHERE id = 1 FOR UPDATE")
+                row = cur.fetchone()
+                first = row[0] if row else None
+                second = row[1] if row else None
+                if device_hash == first or device_hash == second:
+                    return True, "MASTER device is already authorized."
+                column = "master_device_hash" if slot == 1 else "master_device_hash_2"
+                cur.execute(f"UPDATE {_TABLE} SET {column} = %s WHERE id = 1", (device_hash,))
+                return True, f"MASTER device {slot} was restored successfully."
 
     def is_master_hash(self, device_hash: str) -> bool:
         state = self.get_state()
         return device_hash in {state.get("master_device_hash"), state.get("master_device_hash_2")}
 
     def update_selection(self, mode: str, pair: str, updated_at: float) -> None:
-        """Publish the current selection for both synchronized Master devices."""
         with self._connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"""
-                    UPDATE {_TABLE}
-                    SET mode = %s, pair = %s, result_json = NULL, updated_at = %s
-                    WHERE id = 1
-                    """,
+                    f"""UPDATE {_TABLE} SET mode = %s, pair = %s, result_json = NULL, updated_at = %s WHERE id = 1""",
                     (mode, pair, updated_at),
                 )
 
@@ -131,11 +125,7 @@ class MasterStore:
         with self._connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"""
-                    UPDATE {_TABLE}
-                    SET mode = %s, pair = %s, result_json = %s::jsonb, updated_at = %s
-                    WHERE id = 1
-                    """,
+                    f"""UPDATE {_TABLE} SET mode = %s, pair = %s, result_json = %s::jsonb, updated_at = %s WHERE id = 1""",
                     (mode, pair, payload, updated_at),
                 )
 
