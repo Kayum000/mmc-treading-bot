@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/sk_bot_icon_bg" />
+    <foreground>
+        <inset
+            android:inset="9dp"
+            android:drawable="@drawable/sk_bot_logo_exact" />
+    </foreground>
+</adaptive-icon>
