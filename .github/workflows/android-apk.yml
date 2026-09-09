@@ -1,59 +1,41 @@
 name: Build Android APK
 
 on:
-  workflow_dispatch:
   push:
-    paths:
-      - 'android/**'
-      - '.github/workflows/android-apk.yml'
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
-  build:
+  build-apk:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      actions: write
-
+    defaults:
+      run:
+        working-directory: android
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Restore SK BOT logo
-        working-directory: android
-        run: |
-          base64 --decode app/icon/ic_sk_bot_logo.b64 > app/src/main/res/drawable/ic_sk_bot_logo.jpg
-
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
-
       - name: Build debug APK
-        working-directory: android
-        run: gradle --no-daemon assembleDebug
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: mmc-trading-bot-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-
+        run: gradle assembleDebug --no-daemon
       - name: Publish latest APK release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: MMC Trading Bot Latest APK
-          body: Latest automatically built Android APK.
-          prerelease: false
+          name: MMC Trading Bot - Latest APK
+          body: Automatically built Android APK for the current main branch.
           make_latest: true
           files: android/app/build/outputs/apk/debug/app-debug.apk
-          fail_on_unmatched_files: true
+          overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
