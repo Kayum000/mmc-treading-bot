@@ -1,4 +1,4 @@
-"""Live signal generation using the Microprice Run Alignment strategy."""
+"""Live 1-minute signal generation using the tick-pressure strategy."""
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
@@ -31,10 +31,12 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     if not pair:
         raise ValueError("No market selected")
     if market_mode != "real":
-        raise ValueError("The Microprice Run strategy is enabled for real Forex only")
+        raise ValueError("The 1-minute tick-pressure strategy is enabled for real Forex only")
 
     signal_at_utc = datetime.now(timezone.utc)
-    ticks = fetch_tick_history(pair, count=1000)
+    # The browser AUTO SIGNAL scheduler requests this once per minute.
+    # Use a fresh tick window for every 1-minute decision instead of candle history.
+    ticks = fetch_tick_history(pair, count=1200)
     result = generate_signal(ticks, run_length=3, microprice_threshold=0.40)
 
     last = ticks.iloc[-1]
@@ -65,8 +67,8 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         "entry_time_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None,
         "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_delay_seconds": 0 if is_entry else None,
-        "timeframe": "tick-run",
-        "entry_timeframe": "next qualifying tick" if is_entry else "wait for qualifying tick",
+        "timeframe": "1m",
+        "entry_timeframe": "1-minute signal",
         "automatic": automatic,
         "confidence": result.confidence,
         "mmc_level_type": None,
