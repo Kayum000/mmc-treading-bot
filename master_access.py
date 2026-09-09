@@ -147,7 +147,12 @@ def init_master_access(app) -> None:
  if(!badge)return;
  const KEY='mmc_master_device_id'; let id=localStorage.getItem(KEY); if(!id){id=(crypto.randomUUID?crypto.randomUUID():(Date.now()+'-'+Math.random()));localStorage.setItem(KEY,id)}
  async function status(){try{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});const d=await r.json();badge.textContent=d.role==='MASTER'?'MASTER / MAIN PANEL':'VIEWER / SECONDARY';badge.className=d.role==='MASTER'?'master':'viewer';claim.hidden=d.role==='MASTER';
-   if(d.role==='VIEWER'&&d.pair){const mode=document.getElementById('mode'),pair=document.getElementById('pair');if(mode&&pair&&(mode.value!==d.mode||pair.value!==d.pair)){mode.value=d.mode;Array.from(pair.options).forEach(o=>o.hidden=o.dataset.market&&o.dataset.market!==d.mode);pair.value=d.pair;pair.dispatchEvent(new Event('change',{bubbles:true}));}}
+   const mode=document.getElementById('mode'),pair=document.getElementById('pair');
+   if(mode&&pair){
+     const viewer=d.role!=='MASTER';
+     mode.disabled=viewer; pair.disabled=viewer;
+     if(viewer&&d.pair){mode.value=d.mode;Array.from(pair.options).forEach(o=>o.hidden=o.dataset.market&&o.dataset.market!==d.mode);pair.value=d.pair;}
+   }
  }catch(_){badge.textContent='MASTER STATUS OFFLINE'}}
  claim.addEventListener('click',async()=>{const key=prompt('Master activation key:');if(!key)return;try{const r=await fetch('/master/claim',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({device_id:id,setup_key:key})});const d=await r.json();if(!r.ok)throw Error(d.message||'Master claim failed');alert(d.message);location.reload()}catch(e){alert(e.message||'Master claim failed')}});
  async function sharedSignal(){try{const r=await fetch('/master/signal',{cache:'no-store',credentials:'same-origin'});const d=await r.json();if(r.ok&&d.result&&typeof window.renderResult==='function'){window.renderResult(d.result);if(window.alertForSignal)window.alertForSignal(d.result)}}catch(_) {}}
