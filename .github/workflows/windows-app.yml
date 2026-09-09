@@ -1,0 +1,35 @@
+name: Build Windows App
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PyInstaller
+        run: python -m pip install --upgrade pip pyinstaller
+      - name: Build Windows EXE
+        run: pyinstaller --onefile --noconsole --name MMC-Trading-Bot desktop/mmc_trading_bot_launcher.py
+      - name: Publish latest Windows release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-windows
+          name: MMC Trading Bot - Windows
+          body: Windows desktop launcher for the current MMC Trading Bot web app.
+          make_latest: false
+          files: dist/MMC-Trading-Bot.exe
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
