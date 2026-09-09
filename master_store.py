@@ -46,12 +46,16 @@ class MasterStore:
                     CREATE TABLE IF NOT EXISTS {_TABLE} (
                         id SMALLINT PRIMARY KEY CHECK (id = 1),
                         master_device_hash TEXT,
+                        master_device_hash_2 TEXT,
                         mode TEXT NOT NULL DEFAULT '',
                         pair TEXT NOT NULL DEFAULT '',
                         result_json JSONB,
                         updated_at DOUBLE PRECISION NOT NULL DEFAULT 0
                     )
                     """
+                )
+                cur.execute(
+                    f"ALTER TABLE {_TABLE} ADD COLUMN IF NOT EXISTS master_device_hash_2 TEXT"
                 )
                 cur.execute(
                     f"""
@@ -65,38 +69,52 @@ class MasterStore:
         with self._connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT master_device_hash, mode, pair, result_json, updated_at "
+                    f"SELECT master_device_hash, master_device_hash_2, mode, pair, result_json, updated_at "
                     f"FROM {_TABLE} WHERE id = 1"
                 )
                 row = cur.fetchone()
         if not row:
-            return {"master_device_hash": None, "mode": "", "pair": "", "result": None, "updated_at": 0.0}
+            return {"master_device_hash": None, "master_device_hash_2": None, "mode": "", "pair": "", "result": None, "updated_at": 0.0}
         return {
             "master_device_hash": row[0],
-            "mode": row[1] or "",
-            "pair": row[2] or "",
-            "result": row[3],
-            "updated_at": float(row[4] or 0.0),
+            "master_device_hash_2": row[1],
+            "mode": row[2] or "",
+            "pair": row[3] or "",
+            "result": row[4],
+            "updated_at": float(row[5] or 0.0),
         }
 
     def claim_master(self, device_hash: str) -> tuple[bool, str]:
         with self._connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT master_device_hash FROM {_TABLE} WHERE id = 1 FOR UPDATE"
+                    f"SELECT master_device_hash, master_device_hash_2 FROM {_TABLE} WHERE id = 1 FOR UPDATE"
                 )
                 row = cur.fetchone()
-                current = row[0] if row else None
-                if current and current != device_hash:
-                    return False, "Another device is already locked as MASTER."
-                cur.execute(
-                    f"UPDATE {_TABLE} SET master_device_hash = %s WHERE id = 1",
-                    (device_hash,),
-                )
-        return True, "MASTER device locked successfully."
+                first = row[0] if row else None
+                second = row[1] if row else None
+                if device_hash == first or device_hash == second:
+                    return True, "MASTER device is already authorized."
+                if not first:
+                    cur.execute(
+                        f"UPDATE {_TABLE} SET master_device_hash = %s WHERE id = 1",
+                        (device_hash,),
+                    )
+                    return True, "MASTER device 1 authorized successfully."
+                if not second:
+                    cur.execute(
+                        f"UPDATE {_TABLE} SET master_device_hash_2 = %s WHERE id = 1",
+                        (device_hash,),
+                    )
+                    return True, "MASTER device 2 authorized successfully."
+                return False, "Both MASTER device slots are already in use."
+
+    def is_master_hash(self, device_hash: str) -> bool:
+        state = self.get_state()
+        return device_hash in {state.get("master_device_hash"), state.get("master_device_hash_2")}
 
     def update_selection(self, mode: str, pair: str, updated_at: float) -> None:
-        """Publish the Master's current market selection and invalidate old signal."""
+        """Publish the current selection for both synchronized Master devices."""
         with self._connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
