@@ -1,4 +1,4 @@
-"""Live 1-minute signal generation using the existing tick strategy."""
+"""Live 1-minute signal generation using the v2.1 tick strategy."""
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
@@ -15,12 +15,14 @@ def _bengali_reason(reason: str) -> str:
         ("BUY", "ক্রয়"), ("SELL", "বিক্রয়"), ("HOLD", "ট্রেড নয়"),
         ("upward", "উর্ধ্বমুখী"),
         ("downward", "নিম্নমুখী"),
-        ("tick run and displacement disagree", "tick run ও displacement একই দিকে নেই"),
+        ("run and microprice pressure are not aligned", "tick run ও microprice pressure একই দিকে নেই"),
         ("spread too wide", "spread বেশি"),
         ("insufficient tick history", "পর্যাপ্ত tick history নেই"),
-        ("short tick-run confirmation absent", "কমপক্ষে ২টি একই দিকের tick পাওয়া যায়নি"),
-        ("five-tick displacement below threshold", "৫-tick displacement ৭ pip-এর নিচে"),
-        ("five-tick displacement unavailable", "৫-tick displacement পাওয়া যায়নি"),
+        ("run confirmation absent", "প্রয়োজনীয় tick-run confirmation পাওয়া যায়নি"),
+        ("microprice pressure", "microprice pressure"),
+        ("microprice volume unavailable", "microprice volume পাওয়া যায়নি"),
+        ("fast tick confirmation", "দ্রুত tick confirmation"),
+        ("fast tick", "দ্রুত tick"),
     )
     for source, translated in replacements:
         text = text.replace(source, translated)
@@ -33,13 +35,14 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     if not pair:
         raise ValueError("No market selected")
     if market_mode != "real":
-        raise ValueError("The 1-minute tick displacement strategy is enabled for real Forex only")
+        raise ValueError("The 1-minute v2.1 tick strategy is enabled for real Forex only")
 
     signal_at_utc = datetime.now(timezone.utc)
 
-    # Keep the original tick strategy completely intact. For a 1-minute signal,
-    # evaluate only the ticks belonging to the latest fully completed 1-minute bar.
-    # This changes the signal window, not the underlying tick-run/displacement rules.
+    # v2.1 remains fully tick-based. Only the signal window is aligned to
+    # the latest fully completed 1-minute candle; the underlying tick rules
+    # are unchanged: 3-tick default run, microprice threshold 0.40,
+    # spread filter and fast-tick confirmation/fallback.
     ticks = fetch_tick_history(pair, count=1000)
     ticks["timestamp"] = pd.to_datetime(ticks["timestamp"], utc=True, errors="coerce")
     completed_minute = signal_at_utc.replace(second=0, microsecond=0) - timedelta(minutes=1)
@@ -50,8 +53,8 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     ].copy()
     result = generate_signal(
         minute_ticks,
-        min_run_length=2,
-        displacement_pips=7.0,
+        run_length=3,
+        microprice_threshold=0.40,
     )
 
     latest_tick = fetch_latest_tick(pair)
@@ -78,7 +81,8 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         "pair": pair,
         "requested_pair": pair,
         "market_mode": market_mode,
-        "source": "BiQuote tick history — existing tick strategy, 1-minute window",
+        "source": "BiQuote tick history — v2.1 tick strategy, 1-minute window",
+        "strategy_version": "v2.1",
         "signal": result.action,
         "market_bias": result.action,
         "entry_signal": result.action,
