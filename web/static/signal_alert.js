@@ -42,7 +42,7 @@
     if (Notification.permission === 'granted') {
       try {
         new Notification(`MMC ${signal}`, {
-          body: `${pair || 'Market'} — ${signal} signal` 
+          body: `${pair || 'Market'} — ${signal} signal`
         });
       } catch (_) {}
     }
@@ -74,5 +74,24 @@
     }
   };
 
+  function configureDownloadApp() {
+    const link = document.querySelector('.download-app');
+    if (!link) return;
+    const ua = navigator.userAgent || '';
+    const isAndroid = /Android/i.test(ua);
+    const isWindows = /Windows NT/i.test(ua);
+    if (isAndroid) {
+      link.href = 'https://github.com/Kayum000/mmc-treading-bot/releases/download/latest/app-debug.apk';
+      link.textContent = '📲 Download Android App';
+    } else if (isWindows) {
+      link.href = 'https://github.com/Kayum000/mmc-treading-bot/releases/download/latest-windows/MMC-Trading-Bot.exe';
+      link.textContent = '💻 Download Windows App';
+    } else {
+      link.href = 'https://github.com/Kayum000/mmc-treading-bot/releases/download/latest/app-debug.apk';
+      link.textContent = '📲 Download Android App';
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', configureDownloadApp);
   document.addEventListener('click', () => window.enableSignalAudio(), { once: true });
 })();
