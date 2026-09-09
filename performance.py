@@ -1,12 +1,16 @@
-"""Persistent 24-hour performance and exact one-loss protection for clean MMC."""
+"""Persistent 1-minute direction performance for the active tick-run strategy.
+
+A recorded BUY/SELL signal is settled against the NEXT completed 1-minute
+Forex candle from the same BiQuote feed. This keeps performance aligned with
+the live strategy's 1-minute trading objective and avoids the old MMC/MTF
+performance logic.
+"""
 from __future__ import annotations
 
 import os
 from datetime import datetime, timezone, timedelta
 
-from data.twelve_data_forex import fetch_forex_candles
-from data.binance_crypto import fetch_crypto_candles, fetch_crypto_candle_at
-from strategy.mmc import level_for_side, final_confirmation
+from data.biquote_forex import fetch_forex_candles
 
 RETENTION = timedelta(hours=24)
 
@@ -60,125 +64,23 @@ def init_db() -> None:
                     UNIQUE (market_mode, pair, signal, entry_time_utc)
                 )
             """)
-            cur.execute("ALTER TABLE mmc_signal_performance ADD COLUMN IF NOT EXISTS mmc_level_type VARCHAR(16)")
-            cur.execute("ALTER TABLE mmc_signal_performance ADD COLUMN IF NOT EXISTS mmc_level_price DOUBLE PRECISION")
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS mmc_signal_performance_signal_time_idx
                 ON mmc_signal_performance (signal_time_utc DESC)
-            """)
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS mmc_loss_locks (
-                    market_mode VARCHAR(16) NOT NULL,
-                    pair VARCHAR(32) NOT NULL,
-                    loss_signal VARCHAR(8) NOT NULL CHECK (loss_signal IN ('BUY','SELL')),
-                    loss_entry_time_utc TIMESTAMPTZ NOT NULL,
-                    loss_level_type VARCHAR(16),
-                    loss_level_price DOUBLE PRECISION,
-                    waiting_for_new_level BOOLEAN NOT NULL DEFAULT TRUE,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    PRIMARY KEY (market_mode, pair)
-                )
-            """)
-            cur.execute("ALTER TABLE mmc_loss_locks ADD COLUMN IF NOT EXISTS loss_level_type VARCHAR(16)")
-            cur.execute("ALTER TABLE mmc_loss_locks ADD COLUMN IF NOT EXISTS loss_level_price DOUBLE PRECISION")
-            cur.execute("ALTER TABLE mmc_loss_locks ADD COLUMN IF NOT EXISTS waiting_for_new_level BOOLEAN NOT NULL DEFAULT TRUE")
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS mmc_loss_locks_created_idx
-                ON mmc_loss_locks (created_at DESC)
             """)
             cur.execute("DELETE FROM mmc_signal_performance WHERE signal_time_utc < NOW() - INTERVAL '24 hours'")
         conn.commit()
 
 
-def _get_loss_lock(mode: str, pair: str):
-    with _connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT loss_signal, loss_entry_time_utc, loss_level_type, loss_level_price, waiting_for_new_level
-                FROM mmc_loss_locks WHERE market_mode=%s AND pair=%s
-            """, (mode, pair))
-            return cur.fetchone()
-
-
-def _clear_loss_lock(mode: str, pair: str) -> None:
-    with _connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM mmc_loss_locks WHERE market_mode=%s AND pair=%s", (mode, pair))
-        conn.commit()
-
-
-def loss_lock_reason(mode: str, pair: str, signal_action: str, frame=None, level_info=None) -> str | None:
-    """After one LOSS, allow a signal only on a new strong level + fresh MMC confirmation."""
-    action = str(signal_action).upper()
-    if action not in {"BUY", "SELL", "NO_TRADE"}:
-        return None
-    try:
-        init_db()
-        lock = _get_loss_lock(mode, pair)
-        if not lock:
-            return None
-        loss_signal, loss_entry_time, old_type, old_price, waiting_for_new_level = lock
-
-        if action in {"BUY", "SELL"} and frame is not None and level_info is not None:
-            new_type, new_price = level_info
-            same_old_level = (
-                old_type == new_type and old_price is not None and
-                abs(float(new_price) - float(old_price)) <= max(abs(float(old_price)) * 0.0005, 1e-12)
-            )
-            fresh_confirmation = final_confirmation(frame, action.lower())
-            if not same_old_level and fresh_confirmation:
-                _clear_loss_lock(mode, pair)
-                return None
-
-        if action in {"BUY", "SELL"}:
-            return (
-                f"LOSS_LOCKED: {mode.upper()} {pair}-এ সর্বশেষ {loss_signal} entry LOSS হয়েছে "
-                f"({_minute_start(loss_entry_time).isoformat()})। নতুন strong level এবং fresh MMC confirmation "
-                "একসাথে না আসা পর্যন্ত signal OFF থাকবে."
-            )
-        return None
-    except Exception:
-        if action in {"BUY", "SELL"}:
-            return "LOSS_LOCKED: loss-protection state যাচাই করা যায়নি; নিরাপত্তার জন্য signal OFF রাখা হয়েছে।"
-        return None
-
-
-def pending_trade_reason(mode: str, pair: str) -> str | None:
-    """Return a lock only while a due/active entry still genuinely needs settlement."""
-    try:
-        init_db()
-        now = datetime.now(timezone.utc)
-        with _connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT signal, entry_time_utc FROM mmc_signal_performance
-                    WHERE market_mode=%s AND pair=%s AND result='PENDING'
-                    ORDER BY entry_time_utc ASC LIMIT 1
-                """, (mode, pair))
-                row = cur.fetchone()
-        if not row:
-            return None
-        signal, entry_time = row
-        entry_time = _minute_start(entry_time)
-        if entry_time > now:
-            return (
-                f"PENDING_LOCK: এই {mode.upper()} {pair} market-এ আগের {signal} entry এখনো active "
-                f"({entry_time.isoformat()})। ওই 1-minute candle শেষ না হওয়া পর্যন্ত নতুন BUY/SELL বন্ধ।"
-            )
-        return (
-            f"PENDING_LOCK: এই {mode.upper()} {pair} market-এ আগের {signal} entry-এর result এখনো settle হয়নি "
-            f"({entry_time.isoformat()})। completed 1-minute candle-এর WIN/LOSS নিশ্চিত না হওয়া পর্যন্ত নতুন BUY/SELL বন্ধ।"
-        )
-    except Exception:
-        return "PENDING_LOCK: performance state যাচাই করা যায়নি; নিরাপত্তার জন্য নতুন BUY/SELL সাময়িকভাবে বন্ধ।"
-
-
 def record_signal(result: dict) -> None:
+    """Record one unique 1-minute BUY/SELL decision."""
     signal = str(result.get("signal", "")).upper()
     if signal not in {"BUY", "SELL"}:
         return
     try:
         init_db()
+        signal_time = _utc(result["signal_time_utc"])
+        entry_time = _minute_start(result.get("entry_time_utc") or result["signal_time_utc"])
         with _connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
@@ -189,126 +91,87 @@ def record_signal(result: dict) -> None:
                     ON CONFLICT (market_mode, pair, signal, entry_time_utc) DO NOTHING
                 """, (
                     result.get("market_mode", "real"), result.get("pair", ""), signal,
-                    _utc(result["signal_time_utc"]), _minute_start(result["entry_time_utc"]),
-                    result.get("entry_price"), result.get("reason"),
-                    result.get("mmc_level_type"), result.get("mmc_level_price"),
+                    signal_time, entry_time, result.get("entry_price"), result.get("reason"),
+                    None, None,
                 ))
             conn.commit()
     except Exception:
         return
 
 
-def _frame_for_market(mode: str, pair: str):
-    if mode == "crypto":
-        return fetch_crypto_candles(pair.replace("/", ""), "1m", limit=200)
-    return fetch_forex_candles(pair, "1min", outputsize=2000)
+def _next_candle(frame, entry_time: datetime):
+    if frame is None or frame.empty:
+        return None
+    target = _minute_start(entry_time) + timedelta(minutes=1)
+    timestamps = frame["timestamp"].apply(_minute_start)
+    matches = frame.loc[timestamps == target]
+    return matches.iloc[-1] if not matches.empty else None
 
 
-def _candle_from_frame(frame, entry_time: datetime, mode: str | None = None, pair: str | None = None):
-    if frame is not None and not frame.empty:
-        target = _minute_start(entry_time)
-        timestamps = frame["timestamp"].apply(_minute_start)
-        matches = frame.loc[timestamps == target]
-        if not matches.empty:
-            return matches.iloc[-1]
-    if mode == "crypto" and pair:
-        try:
-            historical = fetch_crypto_candle_at(pair.replace("/", ""), entry_time)
-            if historical is not None and not historical.empty:
-                return historical.iloc[-1]
-        except Exception:
-            return None
-    return None
-
-
-def _candle_color(candle) -> str:
-    candle_open, candle_close = float(candle["open"]), float(candle["close"])
-    return "GREEN" if candle_close > candle_open else "RED" if candle_close < candle_open else "DOJI"
-
-
-def _outcome_from_color(signal: str, candle_color: str) -> str | None:
-    if candle_color == "GREEN":
-        return "WIN" if signal == "BUY" else "LOSS"
-    if candle_color == "RED":
-        return "WIN" if signal == "SELL" else "LOSS"
-    if candle_color == "DOJI":
+def _outcome(signal: str, candle) -> str | None:
+    if candle is None:
+        return None
+    opening = float(candle["open"])
+    closing = float(candle["close"])
+    if closing == opening:
         return "VOID"
-    return None
+    direction = "BUY" if closing > opening else "SELL"
+    return "WIN" if direction == signal else "LOSS"
 
 
-def settle_pending(frames_override=None) -> None:
-    """Resolve due entries from the exact next completed 1m candle.
-
-    A caller may provide already-fetched closed frames so settlement and signal
-    generation use the same market snapshot instead of making two live-data calls.
-    DOJI is resolved as VOID so it cannot leave PENDING_LOCK stuck forever.
-    """
+def settle_pending() -> None:
+    """Resolve each due signal using the exact NEXT completed 1m candle."""
     init_db()
     now = datetime.now(timezone.utc)
-    frames = dict(frames_override or {})
+    frames = {}
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT id, market_mode, pair, signal, entry_time_utc,
-                       mmc_level_type, mmc_level_price
+                SELECT id, market_mode, pair, signal, entry_time_utc
                 FROM mmc_signal_performance
-                WHERE result='PENDING' AND entry_time_utc <= %s
+                WHERE result='PENDING'
+                  AND entry_time_utc + INTERVAL '1 minute' <= %s
                   AND signal_time_utc >= %s
                 ORDER BY entry_time_utc ASC
             """, (now, now - RETENTION))
             rows = cur.fetchall()
-            for row_id, mode, pair, signal, entry_time, level_type, level_price in rows:
+            for row_id, mode, pair, signal, entry_time in rows:
+                if mode != "real":
+                    continue
                 key = (mode, pair)
                 if key not in frames:
                     try:
-                        frames[key] = _frame_for_market(mode, pair)
+                        frames[key] = fetch_forex_candles(pair, "1min", outputsize=200)
                     except Exception:
                         frames[key] = None
-                entry_time = _minute_start(entry_time)
-                candle = _candle_from_frame(frames[key], entry_time, mode, pair)
-                if candle is None:
-                    continue
-                candle_color = _candle_color(candle)
-                outcome = _outcome_from_color(signal, candle_color)
+                candle = _next_candle(frames[key], entry_time)
+                outcome = _outcome(signal, candle)
                 if outcome is None:
                     continue
                 cur.execute("""
                     UPDATE mmc_signal_performance
-                    SET entry_price_actual=%s, result_price=%s, result=%s,
-                        reason=COALESCE(reason,'') || %s, resolved_at=%s
+                    SET entry_price_actual=%s,
+                        result_price=%s,
+                        result=%s,
+                        reason=COALESCE(reason,'') || %s,
+                        resolved_at=%s
                     WHERE id=%s AND result='PENDING'
                 """, (
                     float(candle["open"]), float(candle["close"]), outcome,
-                    f" Result candle color: {candle_color}.", now, row_id,
+                    f" Next 1m candle: {_minute_start(candle['timestamp']).isoformat()}.",
+                    now, row_id,
                 ))
-                if outcome == "LOSS":
-                    cur.execute("""
-                        INSERT INTO mmc_loss_locks
-                            (market_mode, pair, loss_signal, loss_entry_time_utc,
-                             loss_level_type, loss_level_price, waiting_for_new_level)
-                        VALUES (%s,%s,%s,%s,%s,%s,TRUE)
-                        ON CONFLICT (market_mode, pair) DO UPDATE SET
-                            loss_signal=EXCLUDED.loss_signal,
-                            loss_entry_time_utc=EXCLUDED.loss_entry_time_utc,
-                            loss_level_type=EXCLUDED.loss_level_type,
-                            loss_level_price=EXCLUDED.loss_level_price,
-                            waiting_for_new_level=TRUE,
-                            created_at=NOW()
-                    """, (mode, pair, signal, entry_time, level_type, level_price))
             cur.execute("DELETE FROM mmc_signal_performance WHERE signal_time_utc < NOW() - INTERVAL '24 hours'")
         conn.commit()
 
 
 def clear_performance_history() -> dict:
-    """Clear only confirmed performance history; never remove PENDING entries or loss locks."""
+    """Clear confirmed result history only."""
     try:
         init_db()
         with _connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("""
-                    DELETE FROM mmc_signal_performance
-                    WHERE result IN ('WIN','LOSS','VOID')
-                """)
+                cur.execute("DELETE FROM mmc_signal_performance WHERE result IN ('WIN','LOSS','VOID')")
                 cleared = cur.rowcount
             conn.commit()
         return {"ok": True, "cleared": int(cleared)}
@@ -322,37 +185,45 @@ def get_performance() -> dict:
         with _connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT signal, COUNT(*) FILTER (WHERE result IN ('WIN','LOSS')),
-                           COUNT(*) FILTER (WHERE result='WIN'), COUNT(*) FILTER (WHERE result='LOSS')
-                    FROM mmc_signal_performance
-                    WHERE signal_time_utc >= NOW() - INTERVAL '24 hours'
-                    GROUP BY signal ORDER BY signal
-                """)
-                by_signal = {r[0]: {"total": int(r[1]), "wins": int(r[2]), "losses": int(r[3])} for r in cur.fetchall()}
-                cur.execute("""
                     SELECT COUNT(*) FILTER (WHERE result IN ('WIN','LOSS')),
-                           COUNT(*) FILTER (WHERE result='WIN'), COUNT(*) FILTER (WHERE result='LOSS')
+                           COUNT(*) FILTER (WHERE result='WIN'),
+                           COUNT(*) FILTER (WHERE result='LOSS')
                     FROM mmc_signal_performance
                     WHERE signal_time_utc >= NOW() - INTERVAL '24 hours'
+                      AND market_mode='real'
                 """)
                 total, wins, losses = [int(x or 0) for x in cur.fetchone()]
+                accuracy = (wins / total * 100.0) if total else 0.0
                 cur.execute("""
                     SELECT id, market_mode, pair, signal, signal_time_utc, entry_time_utc,
                            entry_price_actual, result_price, result
                     FROM mmc_signal_performance
                     WHERE signal_time_utc >= NOW() - INTERVAL '24 hours'
+                      AND market_mode='real'
                       AND result IN ('WIN','LOSS')
                     ORDER BY signal_time_utc DESC LIMIT 50
                 """)
-                history = [
-                    {"id": int(r[0]), "market_mode": r[1], "pair": r[2], "signal": r[3],
-                     "signal_time_utc": _utc(r[4]).isoformat(timespec="seconds"),
-                     "entry_time_utc": _utc(r[5]).isoformat(timespec="seconds"),
-                     "entry_price": r[6], "result_price": r[7], "result": r[8]}
-                    for r in cur.fetchall()
-                ]
-        rate = round((wins / (wins + losses)) * 100, 2) if wins + losses else 0.0
-        return {"ok": True, "total": total, "wins": wins, "losses": losses,
-                "win_rate": rate, "by_signal": by_signal, "history": history, "window": "24h"}
+                history = []
+                for row in cur.fetchall():
+                    history.append({
+                        "id": int(row[0]), "market_mode": row[1], "pair": row[2],
+                        "signal": row[3], "signal_time_utc": row[4].isoformat(),
+                        "entry_time_utc": row[5].isoformat(),
+                        "entry_price": float(row[6]) if row[6] is not None else None,
+                        "result_price": float(row[7]) if row[7] is not None else None,
+                        "result": row[8],
+                    })
+        return {
+            "ok": True,
+            "total": total,
+            "wins": wins,
+            "losses": losses,
+            "accuracy": round(accuracy, 2),
+            "win_rate": round(accuracy, 2),
+            "history": history,
+            "timeframe": "1m",
+            "evaluation": "next completed 1-minute candle direction",
+            "strategy": "tick_run_pressure",
+        }
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
