@@ -40,7 +40,6 @@ def _claim_master(device_id: str, setup_key: str) -> tuple[bool, str]:
         return False, "Device ID is required."
     if not hmac.compare_digest(setup_key, configured_key):
         return False, "Invalid Master activation key."
-
     ok, message = store.claim_master(_device_hash(device_id)) if store.enabled else (True, "MASTER device authorized successfully.")
     if not ok:
         return False, message
@@ -51,10 +50,9 @@ def _claim_master(device_id: str, setup_key: str) -> tuple[bool, str]:
 
 def _state_payload() -> dict:
     state = _state()
-    role = "MASTER" if _is_master() else "VIEWER"
     return {
         "ok": True,
-        "role": role,
+        "role": "MASTER" if _is_master() else "VIEWER",
         "master_count": int(bool(state.get("master_device_hash"))) + int(bool(state.get("master_device_hash_2"))),
         "pair": state.get("pair", ""),
         "mode": state.get("mode", ""),
@@ -77,6 +75,20 @@ def init_master_access(app) -> None:
             str(data.get("setup_key", "")).strip(),
         )
         return jsonify({"ok": ok, "message": message, "role": "MASTER" if ok else "VIEWER"}), (200 if ok else 403)
+
+    @app.route("/master/sync-selection", methods=["POST"])
+    def master_sync_selection():
+        """Update a Master browser session from the already-published shared selection."""
+        if not _is_master():
+            return jsonify({"ok": False, "error": "MASTER authorization required."}), 403
+        data = request.get_json(silent=True) or request.form
+        mode = str(data.get("mode", "")).strip().lower()
+        pair = str(data.get("pair", "")).strip().upper()
+        if not mode or not pair:
+            return jsonify({"ok": False}), 400
+        session["selected_mode"] = mode
+        session["selected_pair"] = pair
+        return jsonify({"ok": True, "mode": mode, "pair": pair})
 
     @app.route("/master/signal", methods=["GET"])
     def master_signal():
@@ -101,7 +113,6 @@ def init_master_access(app) -> None:
             record_signal(result)
         except Exception as exc:
             return jsonify({"ok": False, "error": str(exc)}), 502
-
         now = time.time()
         if store.enabled:
             store.update_signal(mode, pair, result, now)
@@ -109,7 +120,7 @@ def init_master_access(app) -> None:
 
     @app.before_request
     def _master_guard():
-        if request.endpoint in {"master_status", "master_claim"}:
+        if request.endpoint in {"master_status", "master_claim", "master_sync_selection"}:
             return None
         if not session.get("authenticated"):
             return None
@@ -136,15 +147,10 @@ def init_master_access(app) -> None:
  if(!overlay||!badge)return;
  const KEY='mmc_master_device_id'; let id=localStorage.getItem(KEY); if(!id){id=(crypto.randomUUID?crypto.randomUUID():(Date.now()+'-'+Math.random()));localStorage.setItem(KEY,id)}
  let lastSharedSignalKey='';
+ async function syncMasterSession(mode,pair){try{await fetch('/master/sync-selection',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({mode,pair}),cache:'no-store'});}catch(_){}}
  async function status(){try{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});const d=await r.json();const master=d.role==='MASTER';badge.textContent=master?'MASTER / MAIN PANEL':'VIEWER / SECONDARY';badge.className=master?'master':'viewer';claim.hidden=master||d.master_count>=2;overlay.style.display=(master||d.master_count<2)?'flex':'none';
    const mode=document.getElementById('mode'),pair=document.getElementById('pair');
-   if(mode&&pair&&d.pair&&d.mode){
-     mode.value=d.mode;
-     Array.from(pair.options).forEach(o=>o.hidden=o.dataset.market&&o.dataset.market!==d.mode);
-     pair.value=d.pair;
-     mode.disabled=!master;
-     pair.disabled=!master;
-   }
+   if(mode&&pair&&d.pair&&d.mode){mode.value=d.mode;Array.from(pair.options).forEach(o=>o.hidden=o.dataset.market&&o.dataset.market!==d.mode);pair.value=d.pair;mode.disabled=!master;pair.disabled=!master;if(master)syncMasterSession(d.mode,d.pair);}
    if(!master&&d.result&&typeof window.renderResult==='function'){
      const r=d.result;const key=`${r.pair||d.pair||''}|${r.signal||''}|${r.entry_time_utc||d.updated_at||''}`;
      if(key!==lastSharedSignalKey){lastSharedSignalKey=key;window.renderResult(r);if(window.alertForSignal)window.alertForSignal(r);}
