@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 
+import pandas as pd
+
 from data.biquote_forex import fetch_latest_tick, fetch_tick_history
 from strategy.tick_run_pressure import generate_signal
 
@@ -39,7 +41,7 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     # evaluate only the ticks belonging to the latest fully completed 1-minute bar.
     # This changes the signal window, not the underlying tick-run/displacement rules.
     ticks = fetch_tick_history(pair, count=1000)
-    ticks["timestamp"] = __import__("pandas").to_datetime(ticks["timestamp"], utc=True, errors="coerce")
+    ticks["timestamp"] = pd.to_datetime(ticks["timestamp"], utc=True, errors="coerce")
     completed_minute = signal_at_utc.replace(second=0, microsecond=0) - timedelta(minutes=1)
     completed_minute_end = completed_minute + timedelta(minutes=1)
     minute_ticks = ticks[
