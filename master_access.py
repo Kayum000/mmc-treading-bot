@@ -1,8 +1,8 @@
 """Master/Viewer control layer for the shared MMC dashboard.
 
-This module is deliberately isolated from the signal strategy. It adds a
-server-side master claim, shared latest-signal state, and a small dashboard
-overlay without changing the existing strategy code.
+This module is deliberately isolated from the signal strategy. Master lock,
+selected pair/mode, and latest signal are persisted in the existing Render
+PostgreSQL database when DATABASE_URL is available.
 """
 from __future__ import annotations
 
@@ -16,30 +16,28 @@ from flask import jsonify, request, session
 
 from signals.get_signal import get_signal
 from performance import record_signal
+from master_store import store
 
 _MASTER_LOCK = RLock()
-_MASTER_DEVICE_HASH: str | None = None
-_LATEST_STATE: dict = {
-    "mode": "",
-    "pair": "",
-    "result": None,
-    "updated_at": 0.0,
-}
 
 
 def _device_hash(device_id: str) -> str:
     return hashlib.sha256(device_id.encode("utf-8")).hexdigest()
 
 
+def _state() -> dict:
+    if store.enabled:
+        return store.get_state()
+    return {"master_device_hash": None, "mode": "", "pair": "", "result": None, "updated_at": 0.0}
+
+
 def _is_master() -> bool:
     device_id = str(session.get("master_device_id") or "")
     if not session.get("master") or not device_id:
         return False
-    with _MASTER_LOCK:
-        global _MASTER_DEVICE_HASH
-        if _MASTER_DEVICE_HASH is None:
-            _MASTER_DEVICE_HASH = _device_hash(device_id)
-        return hmac.compare_digest(_MASTER_DEVICE_HASH, _device_hash(device_id))
+    state = _state()
+    current = state.get("master_device_hash")
+    return bool(current) and hmac.compare_digest(current, _device_hash(device_id))
 
 
 def _claim_master(device_id: str, setup_key: str) -> tuple[bool, str]:
@@ -51,28 +49,25 @@ def _claim_master(device_id: str, setup_key: str) -> tuple[bool, str]:
     if not hmac.compare_digest(setup_key, configured_key):
         return False, "Invalid Master activation key."
 
-    global _MASTER_DEVICE_HASH
-    candidate = _device_hash(device_id)
-    with _MASTER_LOCK:
-        if _MASTER_DEVICE_HASH is not None and not hmac.compare_digest(_MASTER_DEVICE_HASH, candidate):
-            return False, "Another device is already locked as MASTER."
-        _MASTER_DEVICE_HASH = candidate
+    ok, message = store.claim_master(_device_hash(device_id)) if store.enabled else (True, "MASTER device locked successfully.")
+    if not ok:
+        return False, message
     session["master"] = True
     session["master_device_id"] = device_id
-    return True, "MASTER device locked successfully."
+    return True, message
 
 
 def _state_payload() -> dict:
-    with _MASTER_LOCK:
-        result = _LATEST_STATE.get("result")
-        return {
-            "ok": True,
-            "role": "MASTER" if _is_master() else "VIEWER",
-            "pair": _LATEST_STATE.get("pair", ""),
-            "mode": _LATEST_STATE.get("mode", ""),
-            "result": result,
-            "updated_at": _LATEST_STATE.get("updated_at", 0.0),
-        }
+    state = _state()
+    return {
+        "ok": True,
+        "role": "MASTER" if _is_master() else "VIEWER",
+        "pair": state.get("pair", ""),
+        "mode": state.get("mode", ""),
+        "result": state.get("result"),
+        "updated_at": state.get("updated_at", 0.0),
+        "storage": "postgres" if store.enabled else "memory-fallback",
+    }
 
 
 def init_master_access(app) -> None:
@@ -100,10 +95,10 @@ def init_master_access(app) -> None:
             return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
 
         if not _is_master():
-            with _MASTER_LOCK:
-                result = _LATEST_STATE.get("result")
-                state_pair = _LATEST_STATE.get("pair", "")
-                state_mode = _LATEST_STATE.get("mode", "")
+            state = _state()
+            result = state.get("result")
+            state_pair = state.get("pair", "")
+            state_mode = state.get("mode", "")
             if result is None:
                 return jsonify({"ok": False, "error": "MASTER এখনো কোনো signal তৈরি করেনি।"}), 409
             if state_mode != mode or state_pair != pair:
@@ -116,8 +111,9 @@ def init_master_access(app) -> None:
         except Exception as exc:
             return jsonify({"ok": False, "error": str(exc)}), 502
 
-        with _MASTER_LOCK:
-            _LATEST_STATE.update({"mode": mode, "pair": pair, "result": result, "updated_at": time.time()})
+        now = time.time()
+        if store.enabled:
+            store.update_signal(mode, pair, result, now)
         return jsonify({"ok": True, "result": result, "role": "MASTER"})
 
     @app.before_request
