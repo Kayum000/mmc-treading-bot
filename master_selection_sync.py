@@ -2,7 +2,7 @@
 
 This layer sits beside the existing Master/Viewer access layer. It does not
 change signal strategy logic; it only makes the selected market a shared
-state and prevents Viewer-side selection events from causing reload loops.
+state and rejects Viewer-side market changes.
 """
 from __future__ import annotations
 
@@ -43,23 +43,3 @@ def init_master_selection_sync(app) -> None:
         if store.enabled:
             store.update_selection(mode, pair, time.time())
         return jsonify({"ok": True, "mode": mode, "pair": pair, "role": "MASTER"})
-
-    @app.after_request
-    def _selection_ui_patch(response):
-        if not (response.content_type or "").startswith("text/html"):
-            return response
-        html = response.get_data(as_text=True)
-        patch = r'''<script>
-(()=>{
-  const mode=document.getElementById('mode'),pair=document.getElementById('pair');
-  if(!mode||!pair)return;
-  async function viewer(){try{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});const d=await r.json();return d.role!=='MASTER'}catch(_){return false}}
-  pair.addEventListener('change',async e=>{if(await viewer())e.stopImmediatePropagation()},true);
-  mode.addEventListener('change',async e=>{if(await viewer())e.stopImmediatePropagation()},true);
-})();
-</script>'''
-        if "selection-ui-patch" not in html and "</body>" in html:
-            patch = patch.replace("<script>", '<script id="selection-ui-patch">', 1)
-            html = html.replace("</body>", patch + "</body>", 1)
-            response.set_data(html)
-        return response
