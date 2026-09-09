@@ -147,14 +147,24 @@ def init_master_access(app) -> None:
 (()=>{
  const overlay=document.getElementById('master-control-overlay'),badge=document.getElementById('master-role-badge'),claim=document.getElementById('master-claim-btn');
  if(!overlay||!badge)return;
- const KEY='mmc_master_device_id';
- let id=localStorage.getItem(KEY)||'';
- try{if(id&&window.AndroidSignalAlert&&typeof window.AndroidSignalAlert.setDeviceId==='function')window.AndroidSignalAlert.setDeviceId(id);}catch(_){ }
- if(!id){try{if(window.AndroidSignalAlert&&typeof window.AndroidSignalAlert.getDeviceId==='function')id=window.AndroidSignalAlert.getDeviceId()||'';}catch(_){ }}
- if(!id){id=(crypto.randomUUID?crypto.randomUUID():(Date.now()+'-'+Math.random()));localStorage.setItem(KEY,id)}
- else{localStorage.setItem(KEY,id)}
+ const KEY='mmc_master_device_id',SETUP_KEY='mmc_master_setup_key';
+ let nativeId='';
+ try{if(window.AndroidSignalAlert&&typeof window.AndroidSignalAlert.getDeviceId==='function')nativeId=window.AndroidSignalAlert.getDeviceId()||'';}catch(_){ }
+ let id=nativeId||localStorage.getItem(KEY)||'';
+ if(!id){id=(crypto.randomUUID?crypto.randomUUID():(Date.now()+'-'+Math.random()));}
+ localStorage.setItem(KEY,id);
+ try{if(window.AndroidSignalAlert&&typeof window.AndroidSignalAlert.setDeviceId==='function')window.AndroidSignalAlert.setDeviceId(id);}catch(_){ }
  let lastSharedSignalKey='';
  async function syncMasterSession(mode,pair){try{await fetch('/master/sync-selection',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({mode,pair}),cache:'no-store'});}catch(_){}}
+ async function autoClaim(){
+   const key=localStorage.getItem(SETUP_KEY)||'';
+   if(!key)return false;
+   try{
+     const r=await fetch('/master/claim',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({device_id:id,setup_key:key}),cache:'no-store'});
+     if(r.ok){location.reload();return true;}
+   }catch(_){ }
+   return false;
+ }
  async function status(){try{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});const d=await r.json();const master=d.role==='MASTER';badge.textContent=master?'MASTER / MAIN PANEL':'VIEWER / SECONDARY';badge.className=master?'master':'viewer';
    const full=!master&&d.master_count>=2;
    claim.hidden=!(full||(!master&&d.master_count<2));
@@ -166,11 +176,12 @@ def init_master_access(app) -> None:
      const r=d.result;const key=`${r.pair||d.pair||''}|${r.signal||''}|${r.entry_time_utc||d.updated_at||''}`;
      if(key!==lastSharedSignalKey){lastSharedSignalKey=key;window.renderResult(r);if(window.alertForSignal)window.alertForSignal(r);}
    }
+   if(!master&&localStorage.getItem(SETUP_KEY))autoClaim();
  }catch(_){overlay.style.display='none'}}
- claim.addEventListener('click',async()=>{const key=prompt('Master activation key:');if(!key)return;let slot='';try{const s=await (async()=>{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});return await r.json()})();if(s.master_count>=2)slot=prompt('Both Master slots are occupied. Type 1 or 2 to replace that slot:');if(slot!=='1'&&slot!=='2'&&s.master_count>=2){alert('Recovery cancelled.');return}const payload={device_id:id,setup_key:key};if(slot==='1'||slot==='2')payload.recover_slot=slot;const r=await fetch('/master/claim',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(payload)});const d=await r.json();if(!r.ok)throw Error(d.message||'Master claim failed');alert(d.message);location.reload()}catch(e){alert(e.message||'Master claim failed')}});
+ claim.addEventListener('click',async()=>{let key=localStorage.getItem(SETUP_KEY)||prompt('Master activation key:');if(!key)return;localStorage.setItem(SETUP_KEY,key.trim());let slot='';try{const s=await (async()=>{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});return await r.json()})();if(s.master_count>=2)slot=prompt('Both Master slots are occupied. Type 1 or 2 to replace that slot:');if(slot!=='1'&&slot!=='2'&&s.master_count>=2){alert('Recovery cancelled.');return}const payload={device_id:id,setup_key:key.trim()};if(slot==='1'||slot==='2')payload.recover_slot=slot;const r=await fetch('/master/claim',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(payload)});const d=await r.json();if(!r.ok)throw Error(d.message||'Master claim failed');alert(d.message);location.reload()}catch(e){alert(e.message||'Master claim failed')}});
  async function sharedSignal(){try{if(typeof window.enableSignalAudio==='function')window.enableSignalAudio();const r=await fetch('/master/signal',{cache:'no-store',credentials:'same-origin'});const d=await r.json();if(r.ok&&d.result&&typeof window.renderResult==='function'){window.renderResult(d.result);if(window.alertForSignal)window.alertForSignal(d.result)}}catch(_) {}}
  const button=document.getElementById('signal-button');if(button){button.addEventListener('click',e=>{e.preventDefault();e.stopImmediatePropagation();sharedSignal()},true)}
- status();setInterval(status,3000);
+ autoClaim();status();setInterval(status,3000);
 })();
 </script>'''
         if "</body>" in html:
