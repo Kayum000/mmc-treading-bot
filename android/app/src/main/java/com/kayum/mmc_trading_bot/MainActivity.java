@@ -9,6 +9,9 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.media.AudioAttributes;
+import android.media.RingtoneManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.webkit.JavascriptInterface;
@@ -19,7 +22,7 @@ import android.webkit.WebViewClient;
 
 public class MainActivity extends Activity {
     private static final String APP_URL = "https://mmc-treading-bot.onrender.com/";
-    private static final String CHANNEL_ID = "mmc_signal_alerts";
+    private static final String CHANNEL_ID = "mmc_signal_alerts_v2";
     private WebView webView;
 
     @Override
@@ -60,6 +63,14 @@ public class MainActivity extends Activity {
         );
         channel.setDescription("BUY and SELL signal alerts");
         channel.enableVibration(true);
+
+        Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+        AudioAttributes audioAttributes = new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build();
+        channel.setSound(soundUri, audioAttributes);
+
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager != null) manager.createNotificationChannel(channel);
     }
@@ -124,6 +135,9 @@ public class MainActivity extends Activity {
                     .setPriority(Notification.PRIORITY_HIGH)
                     .setAutoCancel(true)
                     .setDefaults(Notification.DEFAULT_ALL);
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                builder.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION));
+            }
             if (pendingIntent != null) builder.setContentIntent(pendingIntent);
             manager.notify((int) (System.currentTimeMillis() & 0x7fffffff), builder.build());
         }
