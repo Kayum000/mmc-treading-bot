@@ -136,24 +136,24 @@ def init_master_access(app) -> None:
         if "id=\"master-control-overlay\"" in html:
             return response
         overlay = r'''<style>
-#master-control-overlay{position:fixed;left:10px;bottom:10px;z-index:9999;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.12);padding:8px 10px;font:700 12px Arial;color:#172033;display:flex;align-items:center;gap:8px}
+#master-control-overlay{position:fixed;left:10px;bottom:10px;z-index:9999;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.12);padding:8px 10px;font:700 12px Arial;color:#172033;display:none;align-items:center;gap:8px}
 #master-role-badge{padding:5px 8px;border-radius:7px;background:#eef2f7;color:#475569}
 #master-role-badge.master{background:#dcfce7;color:#166534}#master-role-badge.viewer{background:#e2e8f0;color:#334155}
 #master-claim-btn{border:0;border-radius:7px;padding:6px 9px;background:#2563eb;color:#fff;font-weight:800;cursor:pointer}
 </style><div id="master-control-overlay"><span id="master-role-badge">Checking…</span><button id="master-claim-btn" type="button" hidden>SET AS MASTER</button></div>
 <script>
 (()=>{
- const badge=document.getElementById('master-role-badge'),claim=document.getElementById('master-claim-btn');
- if(!badge)return;
+ const overlay=document.getElementById('master-control-overlay'),badge=document.getElementById('master-role-badge'),claim=document.getElementById('master-claim-btn');
+ if(!overlay||!badge)return;
  const KEY='mmc_master_device_id'; let id=localStorage.getItem(KEY); if(!id){id=(crypto.randomUUID?crypto.randomUUID():(Date.now()+'-'+Math.random()));localStorage.setItem(KEY,id)}
- async function status(){try{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});const d=await r.json();badge.textContent=d.role==='MASTER'?'MASTER / MAIN PANEL':'VIEWER / SECONDARY';badge.className=d.role==='MASTER'?'master':'viewer';claim.hidden=d.role==='MASTER';
+ async function status(){try{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});const d=await r.json();const master=d.role==='MASTER';badge.textContent=master?'MASTER / MAIN PANEL':'VIEWER / SECONDARY';badge.className=master?'master':'viewer';claim.hidden=master;overlay.style.display=master?'flex':'none';
    const mode=document.getElementById('mode'),pair=document.getElementById('pair');
    if(mode&&pair){
-     const viewer=d.role!=='MASTER';
+     const viewer=!master;
      mode.disabled=viewer; pair.disabled=viewer;
      if(viewer&&d.pair){mode.value=d.mode;Array.from(pair.options).forEach(o=>o.hidden=o.dataset.market&&o.dataset.market!==d.mode);pair.value=d.pair;}
    }
- }catch(_){badge.textContent='MASTER STATUS OFFLINE'}}
+ }catch(_){overlay.style.display='none'}}
  claim.addEventListener('click',async()=>{const key=prompt('Master activation key:');if(!key)return;try{const r=await fetch('/master/claim',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({device_id:id,setup_key:key})});const d=await r.json();if(!r.ok)throw Error(d.message||'Master claim failed');alert(d.message);location.reload()}catch(e){alert(e.message||'Master claim failed')}});
  async function sharedSignal(){try{const r=await fetch('/master/signal',{cache:'no-store',credentials:'same-origin'});const d=await r.json();if(r.ok&&d.result&&typeof window.renderResult==='function'){window.renderResult(d.result);if(window.alertForSignal)window.alertForSignal(d.result)}}catch(_) {}}
  const button=document.getElementById('signal-button');if(button){button.addEventListener('click',e=>{e.preventDefault();e.stopImmediatePropagation();sharedSignal()},true)}
