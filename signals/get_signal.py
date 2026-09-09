@@ -1,10 +1,10 @@
-"""Live 1-minute signal generation using the tick displacement strategy."""
+"""Live 1-minute signal generation using the existing displacement strategy."""
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 
-from data.biquote_forex import fetch_tick_history
-from strategy.tick_run_pressure import generate_signal
+from data.biquote_forex import fetch_forex_candles, fetch_latest_tick
+from strategy.tick_run_pressure import generate_candle_signal
 
 
 def _bengali_reason(reason: str) -> str:
@@ -13,14 +13,12 @@ def _bengali_reason(reason: str) -> str:
         ("BUY", "ক্রয়"), ("SELL", "বিক্রয়"), ("HOLD", "ট্রেড নয়"),
         ("upward", "উর্ধ্বমুখী"),
         ("downward", "নিম্নমুখী"),
-        ("tick-run confirmation", "tick-run confirmation"),
-        ("five-tick displacement", "৫-tick price displacement"),
-        ("tick run and displacement disagree", "tick run ও displacement একই দিকে নেই"),
+        ("candle run and displacement disagree", "candle run ও displacement একই দিকে নেই"),
         ("spread too wide", "spread বেশি"),
-        ("insufficient tick history", "পর্যাপ্ত tick history নেই"),
-        ("short tick-run confirmation absent", "কমপক্ষে ২-tick run পাওয়া যায়নি"),
-        ("five-tick displacement below threshold", "৫-tick displacement ৭ pip-এর নিচে"),
-        ("five-tick displacement unavailable", "৫-tick displacement পাওয়া যায়নি"),
+        ("insufficient 1-minute candle history", "পর্যাপ্ত 1-minute candle history নেই"),
+        ("short candle-run confirmation absent", "কমপক্ষে ২টি একই দিকের 1-minute candle পাওয়া যায়নি"),
+        ("five-candle displacement below threshold", "৫-candle displacement ৭ pip-এর নিচে"),
+        ("five-candle displacement unavailable", "৫-candle displacement পাওয়া যায়নি"),
     )
     for source, translated in replacements:
         text = text.replace(source, translated)
@@ -33,26 +31,36 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     if not pair:
         raise ValueError("No market selected")
     if market_mode != "real":
-        raise ValueError("The 1-minute tick displacement strategy is enabled for real Forex only")
+        raise ValueError("The 1-minute candle displacement strategy is enabled for real Forex only")
 
     signal_at_utc = datetime.now(timezone.utc)
-    # Fresh tick window for every decision; no candle/indicator dependency.
-    ticks = fetch_tick_history(pair, count=1200)
-    result = generate_signal(ticks, min_run_length=2, displacement_pips=7.0)
 
-    last = ticks.iloc[-1]
+    # Analyze only completed 1-minute candles. The current forming candle is excluded
+    # by fetch_forex_candles(), so the signal cannot change because of an unfinished bar.
+    candles = fetch_forex_candles(pair, interval="1min", outputsize=200)
+    result = generate_candle_signal(candles, min_run_length=2, displacement_pips=7.0)
+
+    latest_tick = fetch_latest_tick(pair)
+    try:
+        ask = float(latest_tick["ask"])
+        bid = float(latest_tick["bid"])
+        entry_price = (ask + bid) / 2.0
+    except (KeyError, TypeError, ValueError):
+        last_candle = candles.iloc[-1]
+        entry_price = float(last_candle["close"])
+
     signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
-    tick_time = last["timestamp"]
-    if hasattr(tick_time, "to_pydatetime"):
-        tick_time = tick_time.to_pydatetime()
-    tick_time = tick_time.astimezone(timezone.utc)
+    candle_time = candles.iloc[-1]["timestamp"]
+    if hasattr(candle_time, "to_pydatetime"):
+        candle_time = candle_time.to_pydatetime()
+    candle_time = candle_time.astimezone(timezone.utc)
 
     is_entry = result.action in {"BUY", "SELL"}
     return {
         "pair": pair,
         "requested_pair": pair,
         "market_mode": market_mode,
-        "source": "BiQuote tick history",
+        "source": "BiQuote completed 1-minute candles",
         "signal": result.action,
         "market_bias": result.action,
         "entry_signal": result.action,
@@ -61,15 +69,15 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         "reason": _bengali_reason(result.reason),
         "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
         "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
-        "candle_time": None,
-        "analysis_candle_time_utc": tick_time.isoformat(timespec="milliseconds"),
-        "entry_price": float((last["askPrice"] + last["bidPrice"]) / 2),
+        "candle_time": candle_time.isoformat(timespec="seconds"),
+        "analysis_candle_time_utc": candle_time.isoformat(timespec="milliseconds"),
+        "entry_price": entry_price,
         "entry_price_type": "latest_tick_mid",
         "entry_time_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None,
         "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_delay_seconds": 0 if is_entry else None,
         "timeframe": "1m",
-        "entry_timeframe": "1-minute signal",
+        "entry_timeframe": "1-minute candle",
         "automatic": automatic,
         "confidence": result.confidence,
         "mmc_level_type": None,
