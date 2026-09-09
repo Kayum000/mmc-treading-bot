@@ -122,8 +122,6 @@ def init_master_access(app) -> None:
             return None
         if not session.get("authenticated"):
             return None
-        # Existing /auto-signal becomes a shared endpoint: MASTER generates,
-        # VIEWER receives the latest MASTER signal instead of generating its own.
         if request.path == "/auto-signal":
             return master_signal()
         return None
@@ -146,12 +144,13 @@ def init_master_access(app) -> None:
  const overlay=document.getElementById('master-control-overlay'),badge=document.getElementById('master-role-badge'),claim=document.getElementById('master-claim-btn');
  if(!overlay||!badge)return;
  const KEY='mmc_master_device_id'; let id=localStorage.getItem(KEY); if(!id){id=(crypto.randomUUID?crypto.randomUUID():(Date.now()+'-'+Math.random()));localStorage.setItem(KEY,id)}
+ let lastSharedSignalKey='';
  async function status(){try{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});const d=await r.json();const master=d.role==='MASTER';badge.textContent=master?'MASTER / MAIN PANEL':'VIEWER / SECONDARY';badge.className=master?'master':'viewer';claim.hidden=master;overlay.style.display=master?'flex':'none';
    const mode=document.getElementById('mode'),pair=document.getElementById('pair');
-   if(mode&&pair){
-     const viewer=!master;
-     mode.disabled=viewer; pair.disabled=viewer;
-     if(viewer&&d.pair){mode.value=d.mode;Array.from(pair.options).forEach(o=>o.hidden=o.dataset.market&&o.dataset.market!==d.mode);pair.value=d.pair;}
+   if(mode&&pair){const viewer=!master;mode.disabled=viewer;pair.disabled=viewer;if(viewer&&d.pair){mode.value=d.mode;Array.from(pair.options).forEach(o=>o.hidden=o.dataset.market&&o.dataset.market!==d.mode);pair.value=d.pair;}}
+   if(!master&&d.result&&typeof window.renderResult==='function'){
+     const r=d.result;const key=`${r.pair||d.pair||''}|${r.signal||''}|${r.entry_time_utc||d.updated_at||''}`;
+     if(key!==lastSharedSignalKey){lastSharedSignalKey=key;window.renderResult(r);if(window.alertForSignal)window.alertForSignal(r);}
    }
  }catch(_){overlay.style.display='none'}}
  claim.addEventListener('click',async()=>{const key=prompt('Master activation key:');if(!key)return;try{const r=await fetch('/master/claim',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({device_id:id,setup_key:key})});const d=await r.json();if(!r.ok)throw Error(d.message||'Master claim failed');alert(d.message);location.reload()}catch(e){alert(e.message||'Master claim failed')}});
