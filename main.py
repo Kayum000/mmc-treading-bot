@@ -4,6 +4,11 @@ The deployed service is the on-demand signal UI. It does not place trades.
 The old CSV CLI remains available as a separate module if needed.
 """
 from web.app import app
+from master_access import init_master_access
+
+# Attach the isolated Master/Viewer layer after the existing app is created.
+# This leaves the active signal strategy and existing routes intact.
+init_master_access(app)
 
 
 if __name__ == "__main__":
