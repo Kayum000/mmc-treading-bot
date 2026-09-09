@@ -2,17 +2,10 @@
 
 v3.0 — built from the April 1-7 EURUSD tick study.
 
-Core finding:
-- a short same-direction quote run is useful only when it is backed by
-  meaningful short-horizon displacement;
-- on the supplied 7-day EURUSD data, the strongest stable rule tested was:
-    * at least 2 consecutive same-direction mid-price ticks
-    * 5-tick displacement >= 7 pips in the same direction
-- fixed walk-forward check (Apr 1-3 -> Apr 5-7): about 67% next-tick
-  directional accuracy on qualifying signals.
-
-The live strategy is deliberately quote-only because the production feed does
-not reliably provide usable trade-volume/order-book fields.
+The original tick strategy is kept intact. A separate candle adapter below
+applies the same core rule to completed 1-minute candles:
+- at least 2 consecutive same-direction candles;
+- 5-candle close displacement >= 7 pips in the same direction.
 """
 from __future__ import annotations
 
@@ -109,6 +102,70 @@ def generate_signal(
         action,
         confidence,
         f"{abs(run)}-tick {direction_text} run + {abs(displacement):.1f}-pip 5-tick displacement",
+    )
+
+
+def generate_candle_signal(
+    candles: pd.DataFrame,
+    min_run_length: int = 2,
+    displacement_pips: float = 7.0,
+) -> TickRunSignal:
+    """Apply the same signal rule to completed 1-minute OHLC candles."""
+    required = {"timestamp", "open", "high", "low", "close"}
+    missing = required - set(candles.columns)
+    if missing:
+        raise ValueError(f"missing candle columns: {sorted(missing)}")
+
+    x = candles.copy()
+    x["timestamp"] = pd.to_datetime(x["timestamp"], utc=True, errors="coerce")
+    for c in ["open", "high", "low", "close"]:
+        x[c] = pd.to_numeric(x[c], errors="coerce")
+    x = x.dropna(subset=list(required)).sort_values("timestamp").drop_duplicates("timestamp")
+    if len(x) < 10:
+        return TickRunSignal("HOLD", 0.0, "insufficient 1-minute candle history")
+
+    # Candle direction is determined by close vs open. Doji candles reset the run.
+    x["direction"] = np.sign(x["close"] - x["open"])
+    directions = x["direction"].to_numpy()
+    run = np.zeros(len(x), dtype=int)
+    previous = 0.0
+    length = 0
+    for i, value in enumerate(directions):
+        if value == 0:
+            length = 0
+            previous = 0.0
+        elif value == previous:
+            length += 1
+        else:
+            length = 1
+        run[i] = int(length * (1 if value > 0 else -1)) if value != 0 else 0
+        previous = value
+    x["run"] = run
+
+    multiplier = _pip_multiplier(float(x.iloc[-1]["close"]))
+    x["displacement_5"] = x["close"].diff(5) * multiplier
+
+    last = x.iloc[-1]
+    run_value = int(last["run"])
+    displacement = float(last["displacement_5"])
+    if not np.isfinite(displacement):
+        return TickRunSignal("HOLD", 0.0, "five-candle displacement unavailable")
+
+    run_direction = np.sign(run_value)
+    displacement_direction = np.sign(displacement)
+    if abs(run_value) < int(min_run_length):
+        return TickRunSignal("HOLD", 0.0, "short candle-run confirmation absent")
+    if abs(displacement) < float(displacement_pips):
+        return TickRunSignal("HOLD", 0.0, "five-candle displacement below threshold")
+    if run_direction != displacement_direction:
+        return TickRunSignal("HOLD", 0.0, "candle run and displacement disagree")
+
+    action = "BUY" if run_direction > 0 else "SELL"
+    direction_text = "upward" if action == "BUY" else "downward"
+    return TickRunSignal(
+        action,
+        0.67,
+        f"{abs(run_value)}-candle {direction_text} run + {abs(displacement):.1f}-pip 5-candle displacement",
     )
 
 
