@@ -74,14 +74,11 @@ def init_master_access(app) -> None:
         data = request.get_json(silent=True) or request.form
         recover_raw = str(data.get("recover_slot", "")).strip()
         recover_slot = int(recover_raw) if recover_raw in {"1", "2"} else None
-        ok, message = _claim_master(
-            str(data.get("device_id", "")).strip(),
-            str(data.get("setup_key", "")).strip(),
-            recover_slot,
-        )
+        device_id = str(data.get("device_id", "")).strip()
+        ok, message = _claim_master(device_id, str(data.get("setup_key", "")).strip(), recover_slot)
         if ok:
             session["master"] = True
-            session["master_device_id"] = str(data.get("device_id", "")).strip()
+            session["master_device_id"] = device_id
         return jsonify({"ok": ok, "message": message, "role": "MASTER" if ok else "VIEWER"}), (200 if ok else 403)
 
     @app.route("/master/sync-selection", methods=["POST"])
@@ -151,15 +148,17 @@ def init_master_access(app) -> None:
  const overlay=document.getElementById('master-control-overlay'),badge=document.getElementById('master-role-badge'),claim=document.getElementById('master-claim-btn');
  if(!overlay||!badge)return;
  const KEY='mmc_master_device_id';
- let id='';
- try{if(window.AndroidSignalAlert&&typeof window.AndroidSignalAlert.getDeviceId==='function')id=window.AndroidSignalAlert.getDeviceId()||'';}catch(_){ }
- if(!id){id=localStorage.getItem(KEY)||'';if(!id){id=(crypto.randomUUID?crypto.randomUUID():(Date.now()+'-'+Math.random()));localStorage.setItem(KEY,id)}}
+ let id=localStorage.getItem(KEY)||'';
+ try{if(id&&window.AndroidSignalAlert&&typeof window.AndroidSignalAlert.setDeviceId==='function')window.AndroidSignalAlert.setDeviceId(id);}catch(_){ }
+ if(!id){try{if(window.AndroidSignalAlert&&typeof window.AndroidSignalAlert.getDeviceId==='function')id=window.AndroidSignalAlert.getDeviceId()||'';}catch(_){ }}
+ if(!id){id=(crypto.randomUUID?crypto.randomUUID():(Date.now()+'-'+Math.random()));localStorage.setItem(KEY,id)}
+ else{localStorage.setItem(KEY,id)}
  let lastSharedSignalKey='';
  async function syncMasterSession(mode,pair){try{await fetch('/master/sync-selection',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({mode,pair}),cache:'no-store'});}catch(_){}}
  async function status(){try{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});const d=await r.json();const master=d.role==='MASTER';badge.textContent=master?'MASTER / MAIN PANEL':'VIEWER / SECONDARY';badge.className=master?'master':'viewer';
    const full=!master&&d.master_count>=2;
-   claim.hidden=master||(!full&&d.master_count>=2);
-   if(full){claim.hidden=false;claim.textContent='RESTORE MASTER'}
+   claim.hidden=!(full||(!master&&d.master_count<2));
+   claim.textContent=full?'RESTORE MASTER':'SET AS MASTER 2';
    overlay.style.display=(master||full||d.master_count<2)?'flex':'none';
    const mode=document.getElementById('mode'),pair=document.getElementById('pair');
    if(mode&&pair&&d.pair&&d.mode){mode.value=d.mode;Array.from(pair.options).forEach(o=>o.hidden=o.dataset.market&&o.dataset.market!==d.mode);pair.value=d.pair;mode.disabled=!master;pair.disabled=!master;if(master)syncMasterSession(d.mode,d.pair);}
