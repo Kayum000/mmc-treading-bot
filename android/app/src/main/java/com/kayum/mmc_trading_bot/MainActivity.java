@@ -17,7 +17,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
-public class MainActivity extends Activity {
+public class MainActivity {
     private static final String APP_URL = "https://mmc-treading-bot.onrender.com/";
     private static final String CHANNEL_ID = "mmc_signal_alerts";
     private WebView webView;
@@ -118,7 +118,7 @@ public class MainActivity extends Activity {
             Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                     ? new Notification.Builder(context, CHANNEL_ID)
                     : new Notification.Builder(context);
-            builder.setSmallIcon(R.drawable.ic_sk_bot_logo)
+            builder.setSmallIcon(R.drawable.ic_sk_bot)
                     .setContentTitle("MMC " + upper + " SIGNAL")
                     .setContentText((pair == null ? "Market" : pair) + " — " + upper)
                     .setPriority(Notification.PRIORITY_HIGH)
