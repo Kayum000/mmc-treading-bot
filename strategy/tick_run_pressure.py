@@ -6,6 +6,7 @@ Latest version: v2.0
 - spread filter
 - fast-tick confirmation (<200ms) when tick timestamps are available
 - volume-weighted microprice when bid/ask volume exists
+- quote-pressure fallback when Forex volume is unavailable
 
 The strategy is intentionally tick-based and does not use MMC, MTF, S/R,
 ORB, candles, EMA, RSI or MACD.
@@ -31,13 +32,15 @@ def _prepare(ticks: pd.DataFrame) -> pd.DataFrame:
         raise ValueError(f"missing tick columns: {sorted(missing)}")
 
     x = ticks.copy()
-    for c in ["askPrice", "bidPrice", "timestamp"]:
+    x["timestamp"] = pd.to_datetime(x["timestamp"], utc=True, errors="coerce")
+    for c in ["askPrice", "bidPrice"]:
         x[c] = pd.to_numeric(x[c], errors="coerce")
     x = x.dropna(subset=list(required)).sort_values("timestamp").drop_duplicates("timestamp")
     x["mid"] = (x["askPrice"] + x["bidPrice"]) / 2.0
     x["spread"] = x["askPrice"] - x["bidPrice"]
     x["direction"] = np.sign(x["mid"].diff()).fillna(0)
-    x["tick_gap_ms"] = x["timestamp"].diff()
+    # Keep the gap in milliseconds; BiQuote timestamps are UTC datetimes.
+    x["tick_gap_ms"] = x["timestamp"].diff().dt.total_seconds() * 1000.0
 
     if {"askVolume", "bidVolume"}.issubset(x.columns):
         x["askVolume"] = pd.to_numeric(x["askVolume"], errors="coerce")
@@ -49,9 +52,17 @@ def _prepare(ticks: pd.DataFrame) -> pd.DataFrame:
         x["micro_alignment"] = (
             (x["microprice"] - x["mid"]) / x["spread"].replace(0, np.nan)
         )
+        x["pressure_source"] = "volume-weighted microprice"
     else:
-        x["microprice"] = np.nan
-        x["micro_alignment"] = np.nan
+        # BiQuote Forex/CFD ticks do not provide bid/ask volume. Use the
+        # observed price displacement across the confirmed local run as a
+        # quote-only pressure proxy instead of blocking every signal.
+        displacement = x["mid"].diff()
+        x["microprice"] = x["mid"] + displacement
+        x["micro_alignment"] = (
+            displacement / x["spread"].replace(0, np.nan)
+        ).clip(-1.0, 1.0)
+        x["pressure_source"] = "quote-price pressure fallback"
 
     return x.dropna(subset=["mid", "direction"])
 
@@ -88,22 +99,24 @@ def generate_signal(
 
     micro = float(x.iloc[last]["micro_alignment"]) if not pd.isna(x.iloc[last]["micro_alignment"]) else np.nan
     if np.isnan(micro):
-        return TickRunSignal("HOLD", 0.0, "microprice volume unavailable")
+        return TickRunSignal("HOLD", 0.0, "quote pressure unavailable")
 
     gap = float(x.iloc[last]["tick_gap_ms"]) if not pd.isna(x.iloc[last]["tick_gap_ms"]) else np.nan
     fast_tick = not np.isnan(gap) and gap <= 200.0
+    source = str(x.iloc[last]["pressure_source"])
+    source_suffix = "" if source == "volume-weighted microprice" else "; quote-pressure fallback"
 
     if np.all(run > 0) and micro >= microprice_threshold:
         confidence = 0.76 if fast_tick else 0.73
         suffix = "; fast tick confirmation" if fast_tick else ""
-        return TickRunSignal("BUY", confidence, f"{run_length}-tick upward run + microprice pressure {micro:.2f}{suffix}")
+        return TickRunSignal("BUY", confidence, f"{run_length}-tick upward run + pressure {micro:.2f}{source_suffix}{suffix}")
 
     if np.all(run < 0) and micro <= -microprice_threshold:
         confidence = 0.78 if fast_tick else 0.74
         suffix = "; fast tick confirmation" if fast_tick else ""
-        return TickRunSignal("SELL", confidence, f"{run_length}-tick downward run + microprice pressure {micro:.2f}{suffix}")
+        return TickRunSignal("SELL", confidence, f"{run_length}-tick downward run + pressure {micro:.2f}{source_suffix}{suffix}")
 
-    return TickRunSignal("HOLD", 0.0, "run and microprice pressure are not aligned")
+    return TickRunSignal("HOLD", 0.0, "run and pressure are not aligned")
 
 
 def backtest_labels(
