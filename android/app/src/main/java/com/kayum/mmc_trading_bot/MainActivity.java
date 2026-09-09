@@ -35,6 +35,10 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+import java.util.TimeZone;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -147,23 +151,25 @@ public class MainActivity extends Activity {
                 connection.setReadTimeout(7000);
                 connection.setRequestProperty("Accept", "application/vnd.github+json");
                 if (connection.getResponseCode() != 200) return;
-                InputStream stream = connection.getInputStream();
-                BufferedReader reader = new BufferedReader(new InputStreamReader(stream));
+                BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
                 StringBuilder body = new StringBuilder();
                 String line;
                 while ((line = reader.readLine()) != null) body.append(line);
                 reader.close();
-                Matcher nameMatcher = Pattern.compile("\\\"name\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"").matcher(body.toString());
-                if (!nameMatcher.find()) return;
-                Matcher versionMatcher = Pattern.compile("(?i)\\bv(\\d+)\\b").matcher(nameMatcher.group(1));
-                if (!versionMatcher.find()) return;
-                int latestVersion = Integer.parseInt(versionMatcher.group(1));
-                if (latestVersion <= BuildConfig.VERSION_CODE) return;
+                Matcher publishedMatcher = Pattern.compile("\\\"published_at\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"").matcher(body.toString());
+                if (!publishedMatcher.find()) return;
+                SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
+                format.setTimeZone(TimeZone.getTimeZone("UTC"));
+                Date published = format.parse(publishedMatcher.group(1));
+                if (published == null) return;
+                long buildTime = BuildConfig.BUILD_TIMESTAMP_MS;
+                if (published.getTime() <= buildTime + (10 * 60 * 1000L)) return;
                 SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
                 long existingId = prefs.getLong(PREF_UPDATE_ID, -1L);
-                int existingVersion = prefs.getInt(PREF_UPDATE_VERSION, -1);
-                if (existingVersion == latestVersion && existingId > 0) return;
-                runOnUiThread(() -> startUpdateDownload(latestVersion));
+                long releaseTime = published.getTime();
+                long existingVersion = prefs.getLong(PREF_UPDATE_VERSION, -1L);
+                if (existingVersion == releaseTime && existingId > 0) return;
+                runOnUiThread(() -> startUpdateDownload(releaseTime));
             } catch (Exception ignored) {
             } finally {
                 updateCheckRunning = false;
@@ -171,12 +177,12 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void startUpdateDownload(int version) {
+    private void startUpdateDownload(long releaseTime) {
         if (downloadManager == null) return;
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         long existingId = prefs.getLong(PREF_UPDATE_ID, -1L);
-        int existingVersion = prefs.getInt(PREF_UPDATE_VERSION, -1);
-        if (existingId > 0 && existingVersion == version) return;
+        long existingVersion = prefs.getLong(PREF_UPDATE_VERSION, -1L);
+        if (existingId > 0 && existingVersion == releaseTime) return;
 
         File apk = new File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "MMC-Live-Signal-update.apk");
         if (apk.exists()) apk.delete();
@@ -187,7 +193,7 @@ public class MainActivity extends Activity {
         request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
         request.setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, "MMC-Live-Signal-update.apk");
         long id = downloadManager.enqueue(request);
-        prefs.edit().putLong(PREF_UPDATE_ID, id).putInt(PREF_UPDATE_VERSION, version).apply();
+        prefs.edit().putLong(PREF_UPDATE_ID, id).putLong(PREF_UPDATE_VERSION, releaseTime).apply();
         Toast.makeText(this, "নতুন অ্যাপ ভার্সন ডাউনলোড হচ্ছে…", Toast.LENGTH_LONG).show();
     }
 
