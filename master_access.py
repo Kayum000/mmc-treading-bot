@@ -10,14 +10,14 @@ import hashlib
 import hmac
 import os
 import time
-from threading import Lock
+from threading import RLock
 
 from flask import jsonify, request, session
 
 from signals.get_signal import get_signal
 from performance import record_signal
 
-_MASTER_LOCK = Lock()
+_MASTER_LOCK = RLock()
 _MASTER_DEVICE_HASH: str | None = None
 _LATEST_STATE: dict = {
     "mode": "",
