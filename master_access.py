@@ -129,16 +129,22 @@ def init_master_access(app) -> None:
 #master-role-badge{padding:5px 8px;border-radius:7px;background:#eef2f7;color:#475569}
 #master-role-badge.master{background:#dcfce7;color:#166534}
 #master-claim-btn{border:0;border-radius:7px;padding:6px 9px;background:#2563eb;color:#fff;font-weight:800;cursor:pointer}
-</style><div id="master-control-overlay"><span id="master-role-badge">Checking…</span><button id="master-claim-btn" type="button" hidden>SET AS MASTER</button></div>
+</style><div id="master-control-overlay"><span id="master-role-badge">Checking…</span><button id="master-claim-btn" type="button" hidden>SET AS MASTER 2</button></div>
 <script>
 (()=>{
  const overlay=document.getElementById('master-control-overlay'),badge=document.getElementById('master-role-badge'),claim=document.getElementById('master-claim-btn');
  if(!overlay||!badge)return;
  const KEY='mmc_master_device_id'; let id=localStorage.getItem(KEY); if(!id){id=(crypto.randomUUID?crypto.randomUUID():(Date.now()+'-'+Math.random()));localStorage.setItem(KEY,id)}
  let lastSharedSignalKey='';
- async function status(){try{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});const d=await r.json();const master=d.role==='MASTER';badge.textContent=master?'MASTER / MAIN PANEL':'VIEWER / SECONDARY';badge.className=master?'master':'viewer';claim.hidden=master;overlay.style.display=master?'flex':'none';
+ async function status(){try{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});const d=await r.json();const master=d.role==='MASTER';badge.textContent=master?'MASTER / MAIN PANEL':'VIEWER / SECONDARY';badge.className=master?'master':'viewer';claim.hidden=master||d.master_count>=2;overlay.style.display=(master||d.master_count<2)?'flex':'none';
    const mode=document.getElementById('mode'),pair=document.getElementById('pair');
-   if(mode&&pair){const viewer=!master;mode.disabled=viewer;pair.disabled=viewer;if(viewer&&d.pair){mode.value=d.mode;Array.from(pair.options).forEach(o=>o.hidden=o.dataset.market&&o.dataset.market!==d.mode);pair.value=d.pair;}}
+   if(mode&&pair&&d.pair&&d.mode){
+     mode.value=d.mode;
+     Array.from(pair.options).forEach(o=>o.hidden=o.dataset.market&&o.dataset.market!==d.mode);
+     pair.value=d.pair;
+     mode.disabled=!master;
+     pair.disabled=!master;
+   }
    if(!master&&d.result&&typeof window.renderResult==='function'){
      const r=d.result;const key=`${r.pair||d.pair||''}|${r.signal||''}|${r.entry_time_utc||d.updated_at||''}`;
      if(key!==lastSharedSignalKey){lastSharedSignalKey=key;window.renderResult(r);if(window.alertForSignal)window.alertForSignal(r);}
