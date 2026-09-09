@@ -1,4 +1,4 @@
-"""Live 1-minute signal generation using the tick-pressure strategy."""
+"""Live 1-minute signal generation using the tick displacement strategy."""
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
@@ -11,14 +11,16 @@ def _bengali_reason(reason: str) -> str:
     text = str(reason or "").strip()
     replacements = (
         ("BUY", "ক্রয়"), ("SELL", "বিক্রয়"), ("HOLD", "ট্রেড নয়"),
-        ("upward run", "উর্ধ্বমুখী tick run"),
-        ("downward run", "নিম্নমুখী tick run"),
-        ("microprice pressure", "microprice চাপ"),
-        ("microprice volume unavailable", "microprice volume পাওয়া যায়নি"),
-        ("run and microprice pressure are not aligned", "tick run ও microprice চাপ একই দিকে নেই"),
+        ("upward", "উর্ধ্বমুখী"),
+        ("downward", "নিম্নমুখী"),
+        ("tick-run confirmation", "tick-run confirmation"),
+        ("five-tick displacement", "৫-tick price displacement"),
+        ("tick run and displacement disagree", "tick run ও displacement একই দিকে নেই"),
         ("spread too wide", "spread বেশি"),
         ("insufficient tick history", "পর্যাপ্ত tick history নেই"),
-        ("run confirmation absent", "tick-run confirmation পাওয়া যায়নি"),
+        ("short tick-run confirmation absent", "কমপক্ষে ২-tick run পাওয়া যায়নি"),
+        ("five-tick displacement below threshold", "৫-tick displacement ৭ pip-এর নিচে"),
+        ("five-tick displacement unavailable", "৫-tick displacement পাওয়া যায়নি"),
     )
     for source, translated in replacements:
         text = text.replace(source, translated)
@@ -31,13 +33,12 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     if not pair:
         raise ValueError("No market selected")
     if market_mode != "real":
-        raise ValueError("The 1-minute tick-pressure strategy is enabled for real Forex only")
+        raise ValueError("The 1-minute tick displacement strategy is enabled for real Forex only")
 
     signal_at_utc = datetime.now(timezone.utc)
-    # The browser AUTO SIGNAL scheduler requests this once per minute.
-    # Use a fresh tick window for every 1-minute decision instead of candle history.
+    # Fresh tick window for every decision; no candle/indicator dependency.
     ticks = fetch_tick_history(pair, count=1200)
-    result = generate_signal(ticks, run_length=3, microprice_threshold=0.40)
+    result = generate_signal(ticks, min_run_length=2, displacement_pips=7.0)
 
     last = ticks.iloc[-1]
     signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
