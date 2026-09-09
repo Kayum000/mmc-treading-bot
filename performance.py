@@ -1,10 +1,4 @@
-"""Persistent 1-minute direction performance for the active tick-run strategy.
-
-A recorded BUY/SELL signal is settled against the NEXT completed 1-minute
-Forex candle from the same BiQuote feed. This keeps performance aligned with
-the live strategy's 1-minute trading objective and avoids the old MMC/MTF
-performance logic.
-"""
+"""Persistent 1-minute candle-color performance for the active tick-run strategy."""
 from __future__ import annotations
 
 import os
@@ -108,19 +102,40 @@ def _next_candle(frame, entry_time: datetime):
     return matches.iloc[-1] if not matches.empty else None
 
 
-def _outcome(signal: str, candle) -> str | None:
+def _candle_color(candle) -> str | None:
+    """Return the candle's directional color from its OHLC values.
+
+    Green/bullish means close > open; red/bearish means close < open.
+    A true OHLC doji (close == open) has no directional color and is VOID.
+    Candle body size is deliberately ignored.
+    """
     if candle is None:
         return None
     opening = float(candle["open"])
     closing = float(candle["close"])
-    if closing == opening:
+    if closing > opening:
+        return "GREEN"
+    if closing < opening:
+        return "RED"
+    return "DOJI"
+
+
+def _outcome(signal: str, candle) -> str | None:
+    """Evaluate strictly from the next completed candle's color."""
+    color = _candle_color(candle)
+    if color is None:
+        return None
+    if color == "DOJI":
         return "VOID"
-    direction = "BUY" if closing > opening else "SELL"
-    return "WIN" if direction == signal else "LOSS"
+    if signal == "BUY":
+        return "WIN" if color == "GREEN" else "LOSS"
+    if signal == "SELL":
+        return "WIN" if color == "RED" else "LOSS"
+    return None
 
 
 def settle_pending() -> None:
-    """Resolve each due signal using the exact NEXT completed 1m candle."""
+    """Resolve each due signal using only the NEXT completed 1m candle color."""
     init_db()
     now = datetime.now(timezone.utc)
     frames = {}
@@ -148,6 +163,7 @@ def settle_pending() -> None:
                 outcome = _outcome(signal, candle)
                 if outcome is None:
                     continue
+                color = _candle_color(candle)
                 cur.execute("""
                     UPDATE mmc_signal_performance
                     SET entry_price_actual=%s,
@@ -158,7 +174,7 @@ def settle_pending() -> None:
                     WHERE id=%s AND result='PENDING'
                 """, (
                     float(candle["open"]), float(candle["close"]), outcome,
-                    f" Next 1m candle: {_minute_start(candle['timestamp']).isoformat()}.",
+                    f" Next 1m candle color: {color}; open={float(candle['open'])}; close={float(candle['close'])}.",
                     now, row_id,
                 ))
             cur.execute("DELETE FROM mmc_signal_performance WHERE signal_time_utc < NOW() - INTERVAL '24 hours'")
@@ -222,7 +238,7 @@ def get_performance() -> dict:
             "win_rate": round(accuracy, 2),
             "history": history,
             "timeframe": "1m",
-            "evaluation": "next completed 1-minute candle direction",
+            "evaluation": "next completed 1-minute candle color",
             "strategy": "tick_run_pressure",
         }
     except Exception as exc:
