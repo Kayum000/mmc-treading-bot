@@ -9,13 +9,14 @@ import base64
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
 
 
-def _mime_and_bytes(data_url: str) -> tuple[str, str]:
+def _mime_and_bytes(data_url: str) -> tuple[str, bytes]:
     try:
         header, encoded = data_url.split(",", 1)
         mime = header.split(":", 1)[1].split(";", 1)[0].lower()
@@ -92,19 +93,12 @@ visible evidence, not certainty.
     }
 
     body = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt},
-                    {
-                        "inlineData": {
-                            "mimeType": mime_type,
-                            "data": encoded,
-                        }
-                    },
-                ]
-            }
-        ],
+        "contents": [{
+            "parts": [
+                {"text": prompt},
+                {"inlineData": {"mimeType": mime_type, "data": encoded}},
+            ]
+        }],
         "generationConfig": {
             "responseMimeType": "application/json",
             "responseSchema": schema,
