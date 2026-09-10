@@ -8,6 +8,7 @@ from remember_me import init_remember_me
 from master_access import init_master_access
 from master_selection_sync import init_master_selection_sync
 from master_session_restore import init_master_session_restore
+from master_recovery_ui import init_master_recovery_ui
 
 # Attach the isolated login persistence layer before the existing Master/Viewer
 # layers. This leaves the active authentication and signal strategy intact.
@@ -15,6 +16,7 @@ init_remember_me(app)
 init_master_access(app)
 init_master_selection_sync(app)
 init_master_session_restore(app)
+init_master_recovery_ui(app)
 
 
 if __name__ == "__main__":
