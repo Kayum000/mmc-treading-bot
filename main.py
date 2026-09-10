@@ -4,11 +4,13 @@ The deployed service is the on-demand signal UI. It does not place trades.
 The old CSV CLI remains available as a separate module if needed.
 """
 from web.app import app
+from remember_me import init_remember_me
 from master_access import init_master_access
 from master_selection_sync import init_master_selection_sync
 
-# Attach the isolated Master/Viewer layer after the existing app is created.
-# This leaves the active signal strategy and existing routes intact.
+# Attach the isolated login persistence layer before the existing Master/Viewer
+# layers. This leaves the active authentication and signal strategy intact.
+init_remember_me(app)
 init_master_access(app)
 init_master_selection_sync(app)
 
