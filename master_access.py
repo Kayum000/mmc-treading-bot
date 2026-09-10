@@ -41,7 +41,11 @@ def _claim_master(device_id: str, setup_key: str, recover_slot: int | None = Non
     if not hmac.compare_digest(setup_key, configured_key):
         return False, "Invalid Master activation key."
     if recover_slot in (1, 2) and store.enabled:
-        return store.recover_master(_device_hash(device_id), recover_slot)
+        ok, message = store.recover_master(_device_hash(device_id), recover_slot)
+        if ok:
+            session["master"] = True
+            session["master_device_id"] = device_id
+        return ok, message
     ok, message = store.claim_master(_device_hash(device_id)) if store.enabled else (True, "MASTER device authorized successfully.")
     if not ok:
         return False, message
@@ -142,11 +146,11 @@ def init_master_access(app) -> None:
 #master-role-badge{padding:5px 8px;border-radius:7px;background:#eef2f7;color:#475569}
 #master-role-badge.master{background:#dcfce7;color:#166534}
 #master-claim-btn{border:0;border-radius:7px;padding:6px 9px;background:#2563eb;color:#fff;font-weight:800;cursor:pointer}
-</style><div id="master-control-overlay"><span id="master-role-badge">Checking…</span><button id="master-claim-btn" type="button" hidden>SET AS MASTER 2</button></div>
+</style><div id="master-control-overlay"><span id="master-role-badge">Checking…</span><button id="master-claim-btn" type="button" hidden>GET MASTER ACCESS</button></div>
 <script>
 (()=>{
  const overlay=document.getElementById('master-control-overlay'),badge=document.getElementById('master-role-badge'),claim=document.getElementById('master-claim-btn');
- if(!overlay||!badge)return;
+ if(!overlay||!badge||!claim)return;
  const KEY='mmc_master_device_id',SETUP_KEY='mmc_master_setup_key';
  let nativeId='';
  try{if(window.AndroidSignalAlert&&typeof window.AndroidSignalAlert.getDeviceId==='function')nativeId=window.AndroidSignalAlert.getDeviceId()||'';}catch(_){ }
@@ -185,9 +189,10 @@ def init_master_access(app) -> None:
  }
  async function status(){try{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});const d=await r.json();const master=d.role==='MASTER';badge.textContent=master?'MASTER / MAIN PANEL':'VIEWER / SECONDARY';badge.className=master?'master':'viewer';
    const hasFreeMasterSlot=!master&&d.master_count<2;
-   claim.hidden=!hasFreeMasterSlot;
-   claim.textContent='SET AS MASTER 2';
-   overlay.style.display=(master||hasFreeMasterSlot)?'flex':'none';
+   const needsRecovery=!master&&d.master_count>=2;
+   claim.hidden=!(hasFreeMasterSlot||needsRecovery);
+   claim.textContent=needsRecovery?'RESTORE MASTER':'GET MASTER ACCESS';
+   overlay.style.display=(master||hasFreeMasterSlot||needsRecovery)?'flex':'none';
    const mode=document.getElementById('mode'),pair=document.getElementById('pair');
    if(mode&&pair&&d.pair&&d.mode){
      const central=`${d.mode}|${d.pair}`;
@@ -208,7 +213,28 @@ def init_master_access(app) -> None:
    }
    if(!master&&localStorage.getItem(SETUP_KEY))autoClaim();
  }catch(_){overlay.style.display='none'}}
- claim.addEventListener('click',async()=>{let key=localStorage.getItem(SETUP_KEY)||prompt('Master activation key:');if(!key)return;localStorage.setItem(SETUP_KEY,key.trim());try{const r=await fetch('/master/claim',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({device_id:id,setup_key:key.trim()})});const d=await r.json();if(!r.ok)throw Error(d.message||'Master claim failed');alert(d.message);location.reload()}catch(e){alert(e.message||'Master claim failed')}});
+ claim.addEventListener('click',async()=>{
+   let key=localStorage.getItem(SETUP_KEY)||prompt('Master activation key:');
+   if(!key)return;
+   key=key.trim();
+   localStorage.setItem(SETUP_KEY,key);
+   const full=claim.textContent==='RESTORE MASTER';
+   let recoverSlot='';
+   if(full){
+     recoverSlot=prompt('এই ফোনটি আগে কোন Master slot-এ ছিল?\n1 = MASTER 1\n2 = MASTER 2\n\nভুল slot দিলে সেই slot-এর পুরোনো ডিভাইসটি replace হবে।','2');
+     if(recoverSlot!=='1'&&recoverSlot!=='2')return;
+     if(!confirm(`MASTER ${recoverSlot} এই ফোনে restore করবেন?`))return;
+   }
+   try{
+     const payload={device_id:id,setup_key:key};
+     if(recoverSlot)payload.recover_slot=recoverSlot;
+     const r=await fetch('/master/claim',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(payload),cache:'no-store'});
+     const d=await r.json();
+     if(!r.ok)throw Error(d.message||'Master access failed');
+     alert(d.message||'Master access granted.');
+     location.reload();
+   }catch(e){alert(e.message||'Master access failed')}
+ });
  async function sharedSignal(){try{if(typeof window.enableSignalAudio==='function')window.enableSignalAudio();const r=await fetch('/master/signal',{cache:'no-store',credentials:'same-origin'});const d=await r.json();if(r.ok&&d.result&&typeof window.renderResult==='function'){window.renderResult(d.result);if(window.alertForSignal)window.alertForSignal(d.result)}}catch(_) {}}
  const button=document.getElementById('signal-button');if(button){button.addEventListener('click',e=>{e.preventDefault();e.stopImmediatePropagation();sharedSignal()},true)}
  const pairControl=document.getElementById('pair');
