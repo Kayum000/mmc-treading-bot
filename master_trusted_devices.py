@@ -45,7 +45,6 @@ def init_master_trusted_devices(app) -> None:
 
     @app.route("/master/trusted/self", methods=["POST"])
     def trusted_self():
-        """Allow the currently authorized Master device to also be recorded as trusted."""
         if not _is_master():
             return jsonify({"ok": False, "error": "MASTER authorization required."}), 403
         data = request.get_json(silent=True) or {}
@@ -102,76 +101,59 @@ def init_master_trusted_devices(app) -> None:
             return response
         script = r'''<style>
 #master-trusted-ui{display:none}
-#mtd-panel{position:fixed;left:50%;bottom:64px;transform:translateX(-50%);z-index:10002;width:min(92vw,420px);background:#fff;border:1px solid #cbd5e1;border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,.2);padding:14px;font:600 13px Arial;color:#172033}
+#mtd-open{border:0;border-radius:7px;padding:7px 10px;background:#0f766e;color:#fff;font-weight:800;cursor:pointer;margin-left:7px}
+#mtd-panel{position:fixed;left:50%;bottom:70px;transform:translateX(-50%);z-index:10002;width:min(92vw,430px);max-height:70vh;overflow:auto;background:#fff;border:1px solid #cbd5e1;border-radius:14px;box-shadow:0 10px 35px rgba(0,0,0,.22);padding:14px;font:600 13px Arial;color:#172033}
 #mtd-panel[hidden]{display:none}
-#mtd-panel h3{margin:0 0 10px;font-size:15px}
-#mtd-actions{display:flex;flex-wrap:wrap;gap:7px}
-#mtd-actions button{border:0;border-radius:8px;padding:8px 10px;background:#2563eb;color:#fff;font-weight:800;cursor:pointer}
-#mtd-actions button.secondary{background:#475569}
-#mtd-list{margin-top:10px;line-height:1.6;word-break:break-word;color:#475569}
-#mtd-close{float:right;border:0;background:transparent;font-size:18px;cursor:pointer}
-#mtd-open{border:0;border-radius:7px;padding:6px 9px;background:#0f766e;color:#fff;font-weight:800;cursor:pointer}
+#mtd-panel h3{margin:0 0 10px;font-size:15px}.mtd-close{float:right;border:0;background:transparent;font-size:20px;cursor:pointer}
+#mtd-actions{display:flex;flex-wrap:wrap;gap:7px}.mtd-action{border:0;border-radius:8px;padding:9px 11px;background:#2563eb;color:#fff;font-weight:800;cursor:pointer}.mtd-action.secondary{background:#475569}
+#mtd-list{margin-top:11px;line-height:1.6;word-break:break-word;color:#475569}
 </style>
-<div id="master-trusted-ui" aria-hidden="true">
-  <button id="mtd-open" type="button" hidden>TRUSTED DEVICES</button>
-  <div id="mtd-panel" hidden>
-    <button id="mtd-close" type="button">×</button>
-    <h3>MASTER / TRUSTED DEVICES</h3>
-    <div id="mtd-actions">
-      <button id="mtd-add" type="button" hidden>ADD TRUSTED</button>
-      <button id="mtd-self" type="button" hidden>TRUST THIS DEVICE</button>
-      <button id="mtd-join" type="button" hidden>JOIN TRUSTED</button>
-    </div>
-    <div id="mtd-list">Loading…</div>
-  </div>
-</div>
+<div id="master-trusted-ui"><button id="mtd-open" type="button" hidden>TRUSTED DEVICES</button><div id="mtd-panel" hidden><button class="mtd-close" id="mtd-close" type="button">×</button><h3>MASTER / TRUSTED DEVICES</h3><div id="mtd-actions"><button class="mtd-action" id="mtd-add" type="button" hidden>ADD TRUSTED</button><button class="mtd-action" id="mtd-self" type="button" hidden>TRUST THIS DEVICE</button><button class="mtd-action" id="mtd-join" type="button" hidden>JOIN TRUSTED</button></div><div id="mtd-list">Checking…</div></div></div>
 <script id="master-trusted-ui-script">(function(){
-  var host=document.getElementById('master-trusted-ui'),open=document.getElementById('mtd-open'),panel=document.getElementById('mtd-panel'),close=document.getElementById('mtd-close'),add=document.getElementById('mtd-add'),self=document.getElementById('mtd-self'),join=document.getElementById('mtd-join'),list=document.getElementById('mtd-list');
+  const host=document.getElementById('master-trusted-ui'),open=document.getElementById('mtd-open'),panel=document.getElementById('mtd-panel'),close=document.getElementById('mtd-close'),add=document.getElementById('mtd-add'),self=document.getElementById('mtd-self'),join=document.getElementById('mtd-join'),list=document.getElementById('mtd-list');
   if(!host||!open||!panel)return;
-  var K='mmc_master_device_id',id=localStorage.getItem(K)||'';
-  if(!id){id=(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random());localStorage.setItem(K,id)}
-  function bindToMasterPanel(){
-    var badge=document.getElementById('master-role-badge');
-    if(!badge||open.parentNode===badge.parentNode)return false;
-    badge.parentNode.insertBefore(open,badge.nextSibling);
-    open.hidden=false;
-    return true;
+  const KEY='mmc_master_device_id';
+  let id=localStorage.getItem(KEY)||'';
+  try{if(window.AndroidSignalAlert&&window.AndroidSignalAlert.getDeviceId) id=window.AndroidSignalAlert.getDeviceId()||id;}catch(_){ }
+  if(!id) id=(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random());
+  localStorage.setItem(KEY,id);
+  try{if(window.AndroidSignalAlert&&window.AndroidSignalAlert.setDeviceId)window.AndroidSignalAlert.setDeviceId(id);}catch(_){ }
+  function place(){
+    const overlay=document.getElementById('master-control-overlay');
+    const badge=document.getElementById('master-role-badge');
+    if(overlay){
+      open.hidden=false;
+      if(open.parentNode!==overlay){
+        if(badge&&badge.parentNode===overlay) overlay.insertBefore(open,badge.nextSibling); else overlay.appendChild(open);
+      }
+      return true;
+    }
+    return false;
   }
-  function toggle(){panel.hidden=!panel.hidden;if(!panel.hidden)refresh();}
-  open.onclick=toggle;close.onclick=function(){panel.hidden=true};
   async function refresh(){
     try{
-      var s=await (await fetch('/master/status',{credentials:'same-origin',cache:'no-store'})).json(),master=s.role==='MASTER';
-      add.hidden=!master;self.hidden=!master;join.hidden=master;
+      const s=await (await fetch('/master/status',{credentials:'same-origin',cache:'no-store'})).json();
+      const master=s.role==='MASTER';
+      add.hidden=!master; self.hidden=!master;
       if(master){
-        var x=await (await fetch('/master/trusted/list',{credentials:'same-origin',cache:'no-store'})).json();
-        list.textContent=(x.devices||[]).map(function(v){return v.name+' ['+v.device_hash+']'}).join(' • ')||'No trusted devices';
+        join.hidden=true;
+        const x=await (await fetch('/master/trusted/list',{credentials:'same-origin',cache:'no-store'})).json();
+        list.textContent=(x.devices||[]).map(v=>v.name+' ['+v.device_hash+']').join(' • ')||'No trusted devices';
       }else{
-        var t=await (await fetch('/master/trusted/status',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({device_id:id})})).json();
-        list.textContent=t.trusted?'এই ডিভাইসটি Trusted হিসেবে সংরক্ষিত আছে।':'এই ডিভাইসটি এখনো Trusted নয়।';
-        join.hidden=!!t.trusted;
+        const t=await (await fetch('/master/trusted/status',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({device_id:id}),cache:'no-store'})).json();
+        const trusted=!!t.trusted;
+        join.hidden=trusted;
+        list.textContent=trusted?'এই ডিভাইসটি Trusted হিসেবে সংরক্ষিত আছে।':'এই ডিভাইসটি এখনো Trusted নয়।';
       }
-    }catch(e){list.textContent='Trusted Device status unavailable.'}
+    }catch(e){list.textContent='Trusted Device status unavailable.';}
   }
-  add.onclick=async function(){
-    var x=await (await fetch('/master/trusted/invite',{method:'POST',credentials:'same-origin'})).json();
-    if(x.code)prompt('এই code-টি অন্য ডিভাইসে দিন। ১০ মিনিট valid এবং একবার ব্যবহারযোগ্য।',x.code); else alert(x.error||'Invite তৈরি হয়নি।');
-  };
-  self.onclick=async function(){
-    var name=prompt('এই ডিভাইসের নাম:','My Phone / Main Device');if(name===null)return;
-    var x=await (await fetch('/master/trusted/self',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({device_id:id,name:name||'This device'})})).json();
-    alert(x.message||x.error||'Done');refresh();
-  };
-  join.onclick=async function(){
-    var c=prompt('Master-এর Trusted code দিন:');if(!c)return;
-    var n=prompt('Device name:','My Phone')||'Trusted device';
-    var x=await (await fetch('/master/trusted/enroll',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({code:c,device_id:id,name:n})})).json();
-    alert(x.message||x.error||'Done');refresh();
-  };
-  bindToMasterPanel();
-  var mo=new MutationObserver(function(){bindToMasterPanel()});
-  mo.observe(document.documentElement,{childList:true,subtree:true});
-  setInterval(function(){if(!panel.hidden)refresh()},10000);
+  open.onclick=()=>{panel.hidden=false;refresh()}; close.onclick=()=>panel.hidden=true;
+  add.onclick=async()=>{try{const x=await (await fetch('/master/trusted/invite',{method:'POST',credentials:'same-origin'})).json();if(x.code)prompt('এই code-টি অন্য ডিভাইসে দিন। ১০ মিনিট valid এবং একবার ব্যবহারযোগ্য।',x.code);else alert(x.error||'Invite তৈরি হয়নি।');}catch(e){alert('Invite তৈরি করা যায়নি।')}};
+  self.onclick=async()=>{const name=prompt('এই ডিভাইসের নাম:','Main Device');if(name===null)return;try{const x=await (await fetch('/master/trusted/self',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({device_id:id,name:name||'This device'})})).json();alert(x.message||x.error||'Done');refresh();}catch(e){alert('Trusted Device সংরক্ষণ করা যায়নি।')}};
+  join.onclick=async()=>{const code=prompt('Master-এর Trusted code দিন:');if(!code)return;const name=prompt('Device name:','My Phone')||'Trusted device';try{const x=await (await fetch('/master/trusted/enroll',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({code:code,device_id:id,name:name})})).json();alert(x.message||x.error||'Done');refresh();}catch(e){alert('Trusted Device যোগ করা যায়নি।')}};
+  place();
+  new MutationObserver(place).observe(document.documentElement,{childList:true,subtree:true});
+  setInterval(()=>{if(!panel.hidden)refresh()},10000);
 })();</script>'''
         response.set_data(html.replace("</body>", script + "</body>", 1))
         return response
