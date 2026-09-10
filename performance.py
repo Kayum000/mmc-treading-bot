@@ -67,14 +67,14 @@ def init_db() -> None:
 
 
 def record_signal(result: dict) -> None:
-    """Record one unique 1-minute BUY/SELL decision for its NEXT candle."""
+    """Record one unique BUY/SELL decision for the SAME signal candle."""
     signal = str(result.get("signal", "")).upper()
     if signal not in {"BUY", "SELL"}:
         return
     try:
         init_db()
         signal_time = _utc(result["signal_time_utc"])
-        entry_time = _minute_start(result.get("entry_time_utc") or (signal_time + timedelta(minutes=1)))
+        entry_time = _minute_start(result.get("entry_time_utc") or signal_time)
         with _connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
@@ -116,7 +116,7 @@ def _candle_color(candle) -> str | None:
 
 
 def _outcome(signal: str, candle) -> str | None:
-    """Evaluate strictly from the SIGNAL'S entry candle color."""
+    """Evaluate strictly from the SAME 1-minute candle that generated the signal."""
     color = _candle_color(candle)
     if color is None:
         return None
@@ -130,7 +130,7 @@ def _outcome(signal: str, candle) -> str | None:
 
 
 def settle_pending() -> None:
-    """Resolve each due signal using the exact NEXT 1-minute entry candle."""
+    """Resolve each signal after its signal candle has completed."""
     init_db()
     now = datetime.now(timezone.utc)
     frames = {}
@@ -169,7 +169,7 @@ def settle_pending() -> None:
                     WHERE id=%s AND result='PENDING'
                 """, (
                     float(candle["open"]), float(candle["close"]), outcome,
-                    f" Entry candle color: {color}; candle={_minute_start(entry_time).isoformat()}; open={float(candle['open'])}; close={float(candle['close'])}.",
+                    f" Signal candle color: {color}; candle={_minute_start(entry_time).isoformat()}; open={float(candle['open'])}; close={float(candle['close'])}.",
                     now, row_id,
                 ))
             cur.execute("DELETE FROM mmc_signal_performance WHERE signal_time_utc < NOW() - INTERVAL '24 hours'")
@@ -233,7 +233,7 @@ def get_performance() -> dict:
             "win_rate": round(accuracy, 2),
             "history": history,
             "timeframe": "1m",
-            "evaluation": "entry candle (the next 1-minute candle after signal)",
+            "evaluation": "signal candle (the current 1-minute candle in which the signal was generated)",
             "strategy": "tick_run_pressure",
         }
     except Exception as exc:
