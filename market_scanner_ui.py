@@ -16,11 +16,12 @@ def init_market_scanner_ui(app):
     def market_scanner():
         mode = request.args.get("mode", "").strip().lower()
         pair = request.args.get("pair", "").strip().upper()
-        if mode != "real" or not pair:
-            mode = app.view_functions.get("index") and "real" or mode
-            pair = pair or ""
         if not pair:
             return jsonify({"ok": False, "unselected": True, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"})
+        if mode not in {"real", "crypto"}:
+            mode = "real"
+        if mode == "crypto":
+            return jsonify({"ok": False, "error": "Shadow Market Scanner এখন real Forex-এর জন্য সক্রিয়।"}), 400
         try:
             result = cached_scan(pair, fetch_tick_history)
             result["market_mode"] = mode
@@ -37,7 +38,7 @@ def init_market_scanner_ui(app):
             html = response.get_data(as_text=True)
         except Exception:
             return response
-        if "id=\"market-state-trigger\"" in html:
+        if 'id="market-state-trigger"' in html:
             return response
 
         css = """
@@ -62,8 +63,8 @@ def init_market_scanner_ui(app):
 @media(max-width:600px){#market-state-trigger{font-size:12px;padding:8px 9px}.market-state-card{padding:15px}.market-state-head h3{font-size:21px}.market-state-grid{grid-template-columns:1fr}.market-state-name{font-size:24px}}
 </style>
 """
-        markup = """
-<button type="button" id="market-state-trigger" aria-haspopup="dialog" aria-controls="market-state-overlay">📊 MARKET STATE</button>
+        trigger = '<button type="button" id="market-state-trigger" aria-haspopup="dialog" aria-controls="market-state-overlay">📊 MARKET STATE</button>'
+        popup = """
 <div id="market-state-overlay" role="dialog" aria-modal="true" aria-labelledby="market-state-title">
   <div class="market-state-card">
     <div class="market-state-head"><h3 id="market-state-title">📊 Market State</h3><button type="button" id="market-state-close">CLOSE</button></div>
@@ -81,16 +82,12 @@ def init_market_scanner_ui(app):
   const pairSelect=document.getElementById('pair');
   let timer=null;
   const esc=v=>String(v??'—').replace(/[&<>\\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\\"':'&quot;',"'":'&#39;'}[c]));
-  function current(){
-    const mode=document.getElementById('mode')?.value||'';
-    const pair=pairSelect?.value||'';
-    return {mode,pair};
-  }
+  function current(){return {mode:document.getElementById('mode')?.value||'',pair:pairSelect?.value||''}}
   function item(label,value){return `<div class="market-state-item"><div class="market-state-label">${esc(label)}</div><div class="market-state-value">${esc(value)}</div></div>`}
   function render(d){
     if(!d.ok){content.innerHTML=`<div class="market-state-error">${esc(d.error||'Market scanner unavailable.')}</div>`;return;}
     document.getElementById('market-state-pair').textContent=`${d.pair||current().pair} — ${d.market_mode==='crypto'?'CRYPTO':'REAL'}`;
-    content.innerHTML=`<div class="market-state-banner"><div class="market-state-name">${esc(d.state)}</div><div class="market-state-score">Quality Score: ${esc(d.quality_score)}/100</div></div><div class="market-state-grid">${item('Trend',d.trend)}${item('Momentum',d.momentum)}${item('Volatility',d.volatility)}${item('Tick Speed',d.tick_speed)}${item('Spread',d.spread)}${item('Spread',`${d.spread_pips} pips`)}${item('Recent Range',`${d.range_pips} pips`)}${item('Median Tick Gap',d.median_tick_gap_ms==null?'—':`${d.median_tick_gap_ms} ms`)}</div><div class="market-state-note">SHADOW MODE — এই Market State শুধু বাজারের অবস্থা দেখাচ্ছে। বর্তমান v2.1 signal logic-এর BUY/SELL/HOLD সিদ্ধান্ত এতে পরিবর্তন হচ্ছে না।</div>`;
+    content.innerHTML=`<div class="market-state-banner"><div class="market-state-name">${esc(d.state)}</div><div class="market-state-score">Quality Score: ${esc(d.quality_score)}/100</div></div><div class="market-state-grid">${item('Trend',d.trend)}${item('Momentum',d.momentum)}${item('Volatility',d.volatility)}${item('Tick Speed',d.tick_speed)}${item('Spread State',d.spread)}${item('Spread',`${d.spread_pips} pips`)}${item('Recent Range',`${d.range_pips} pips`)}${item('Median Tick Gap',d.median_tick_gap_ms==null?'—':`${d.median_tick_gap_ms} ms`)}</div><div class="market-state-note">SHADOW MODE — এই Market State শুধু বাজারের অবস্থা দেখাচ্ছে। বর্তমান v2.1 signal logic-এর BUY/SELL/HOLD সিদ্ধান্ত এতে পরিবর্তন হচ্ছে না।</div>`;
   }
   async function load(){
     const {mode,pair}=current();
@@ -104,13 +101,15 @@ def init_market_scanner_ui(app):
 })();
 </script>
 """
-        # Place the new control exactly beside the existing AUTO SIGNAL area.
-        marker = '<div class="auto-row">'
-        if marker in html:
-            html = html.replace(marker, marker, 1)
-            anchor = '</div>\n{% if error %}'
-            if anchor in html:
-                html = html.replace(anchor, '</div>\n' + markup + '\n{% if error %}', 1)
+        # Put only the trigger inside the existing AUTO SIGNAL/header area,
+        # matching the user's marked location. The popup itself is appended
+        # near the end of the document so it cannot disturb the header layout.
+        header_anchor = '</span></div>\n{% if error %}'
+        if header_anchor in html:
+            html = html.replace(header_anchor, '</span>' + trigger + '</div>\n{% if error %}', 1)
+        else:
+            html = html.replace('</body>', trigger + '</body>', 1)
         html = html.replace('</head>', css + '</head>', 1)
+        html = html.replace('</body>', popup + '</body>', 1)
         response.set_data(html)
         return response
