@@ -111,5 +111,22 @@ def init_market_scanner_ui(app):
             html = html.replace('</body>', trigger + '</body>', 1)
         html = html.replace('</head>', css + '</head>', 1)
         html = html.replace('</body>', popup + '</body>', 1)
+
+        # Keep the entry display aligned with the new signal-candle timing.
+        # This only changes the dashboard label; signal generation is untouched.
+        entry_label_patch = """
+<script>
+(function(){
+  function patchEntryLabel(){
+    document.querySelectorAll('.entry-title').forEach(function(el){
+      el.textContent='ENTRY NOW — SIGNAL TIME';
+    });
+  }
+  patchEntryLabel();
+  new MutationObserver(patchEntryLabel).observe(document.body,{childList:true,subtree:true});
+})();
+</script>
+"""
+        html = html.replace('</body>', entry_label_patch + '</body>', 1)
         response.set_data(html)
         return response
