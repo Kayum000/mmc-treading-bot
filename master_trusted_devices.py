@@ -102,7 +102,7 @@ def init_master_trusted_devices(app) -> None:
         script = r'''<style>
 #master-trusted-ui{display:none}
 #mtd-open{border:0;border-radius:7px;padding:7px 10px;background:#0f766e;color:#fff;font-weight:800;cursor:pointer;margin-left:7px}
-#mtd-panel{position:fixed;left:50%;bottom:70px;transform:translateX(-50%);z-index:10002;width:min(92vw,430px);max-height:70vh;overflow:auto;background:#fff;border:1px solid #cbd5e1;border-radius:14px;box-shadow:0 10px 35px rgba(0,0,0,.22);padding:14px;font:600 13px Arial;color:#172033}
+#mtd-panel{position:absolute;right:0;bottom:calc(100% + 8px);z-index:10002;width:min(92vw,430px);max-height:70vh;overflow:auto;background:#fff;border:1px solid #cbd5e1;border-radius:14px;box-shadow:0 10px 35px rgba(0,0,0,.22);padding:14px;font:600 13px Arial;color:#172033}
 #mtd-panel[hidden]{display:none}
 #mtd-panel h3{margin:0 0 10px;font-size:15px}.mtd-close{float:right;border:0;background:transparent;font-size:20px;cursor:pointer}
 #mtd-actions{display:flex;flex-wrap:wrap;gap:7px}.mtd-action{border:0;border-radius:8px;padding:9px 11px;background:#2563eb;color:#fff;font-weight:800;cursor:pointer}.mtd-action.secondary{background:#475569}
@@ -126,6 +126,7 @@ def init_master_trusted_devices(app) -> None:
       if(open.parentNode!==overlay){
         if(badge&&badge.parentNode===overlay) overlay.insertBefore(open,badge.nextSibling); else overlay.appendChild(open);
       }
+      if(panel.parentNode!==overlay) overlay.appendChild(panel);
       return true;
     }
     return false;
