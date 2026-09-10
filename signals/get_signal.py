@@ -45,6 +45,11 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     tick_time = tick_time.astimezone(timezone.utc)
 
     is_entry = result.action in {"BUY", "SELL"}
+    # A signal generated during the current minute is always an instruction
+    # for the NEXT 1-minute candle. Never use the current candle as entry.
+    next_entry_utc = signal_at_utc.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    next_entry_bd = next_entry_utc.astimezone(timezone(timedelta(hours=6)))
+
     return {
         "pair": pair,
         "requested_pair": pair,
@@ -58,15 +63,15 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         "reason": _bengali_reason(result.reason),
         "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
         "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
-        "candle_time": None,
+        "candle_time": next_entry_utc.isoformat(timespec="seconds") if is_entry else None,
         "analysis_candle_time_utc": tick_time.isoformat(timespec="milliseconds"),
         "entry_price": float((last["askPrice"] + last["bidPrice"]) / 2),
-        "entry_price_type": "latest_tick_mid",
-        "entry_time_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None,
-        "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
-        "entry_delay_seconds": 0 if is_entry else None,
+        "entry_price_type": "latest_tick_mid_reference",
+        "entry_time_utc": next_entry_utc.isoformat(timespec="seconds") if is_entry else None,
+        "entry_time_bd": next_entry_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
+        "entry_delay_seconds": max(0, int((next_entry_utc - signal_at_utc).total_seconds())) if is_entry else None,
         "timeframe": "tick-run",
-        "entry_timeframe": "next qualifying tick" if is_entry else "wait for qualifying tick",
+        "entry_timeframe": "next 1-minute candle",
         "automatic": automatic,
         "confidence": result.confidence,
         "mmc_level_type": None,
