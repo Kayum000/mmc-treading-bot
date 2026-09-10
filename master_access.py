@@ -17,6 +17,13 @@ def _device_hash(device_id: str) -> str:
     return hashlib.sha256(device_id.encode("utf-8")).hexdigest()
 
 
+def _is_trusted() -> bool:
+    device_id = str(session.get("trusted_device_id") or session.get("master_device_id") or "").strip()
+    if not device_id or not store.enabled:
+        return False
+    return bool(session.get("trusted_device") and store.is_trusted_hash(_device_hash(device_id)))
+
+
 def _state() -> dict:
     if store.enabled:
         return store.get_state()
@@ -45,20 +52,27 @@ def _claim_master(device_id: str, setup_key: str, recover_slot: int | None = Non
         if ok:
             session["master"] = True
             session["master_device_id"] = device_id
+            session["trusted_device"] = False
+            session.pop("trusted_device_id", None)
         return ok, message
     ok, message = store.claim_master(_device_hash(device_id)) if store.enabled else (True, "MASTER device authorized successfully.")
     if not ok:
         return False, message
     session["master"] = True
     session["master_device_id"] = device_id
+    session["trusted_device"] = False
+    session.pop("trusted_device_id", None)
     return True, message
 
 
 def _state_payload() -> dict:
     state = _state()
+    master = _is_master()
+    trusted = (not master) and _is_trusted()
     return {
         "ok": True,
-        "role": "MASTER" if _is_master() else "VIEWER",
+        "role": "MASTER" if master else ("TRUSTED" if trusted else "VIEWER"),
+        "trusted": trusted,
         "master_count": int(bool(state.get("master_device_hash"))) + int(bool(state.get("master_device_hash_2"))),
         "pair": state.get("pair", ""),
         "mode": state.get("mode", ""),
@@ -113,7 +127,7 @@ def init_master_access(app) -> None:
                 return jsonify({"ok": False, "error": "MASTER এখনো কোনো signal তৈরি করেনি।"}), 409
             if state_mode != mode or state_pair != pair:
                 return jsonify({"ok": False, "error": "MASTER বর্তমানে অন্য pair নির্বাচন করেছে.", "master_pair": state_pair}), 409
-            return jsonify({"ok": True, "result": result, "role": "VIEWER"})
+            return jsonify({"ok": True, "result": result, "role": "TRUSTED" if _is_trusted() else "VIEWER"})
         try:
             result = get_signal(pair, mode, automatic=True)
             record_signal(result)
@@ -187,12 +201,12 @@ def init_master_access(app) -> None:
    const version=localSelectionVersion;
    setTimeout(()=>persistSelection(mode.value,pair.value,version),80);
  }
- async function status(){try{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});const d=await r.json();const master=d.role==='MASTER';badge.textContent=master?'MASTER / MAIN PANEL':'VIEWER / SECONDARY';badge.className=master?'master':'viewer';
-   const hasFreeMasterSlot=!master&&d.master_count<2;
-   const needsRecovery=!master&&d.master_count>=2;
+ async function status(){try{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});const d=await r.json();const master=d.role==='MASTER';const trusted=d.role==='TRUSTED'||!!d.trusted;badge.textContent=master?'MASTER / MAIN PANEL':(trusted?'TRUSTED / SECONDARY':'VIEWER / SECONDARY');badge.className=master?'master':'viewer';
+   const hasFreeMasterSlot=!master&&!trusted&&d.master_count<2;
+   const needsRecovery=!master&&!trusted&&d.master_count>=2;
    claim.hidden=!(hasFreeMasterSlot||needsRecovery);
    claim.textContent=needsRecovery?'RESTORE MASTER':'GET MASTER ACCESS';
-   overlay.style.display=(master||hasFreeMasterSlot||needsRecovery)?'flex':'none';
+   overlay.style.display=(master||trusted||hasFreeMasterSlot||needsRecovery)?'flex':'none';
    const mode=document.getElementById('mode'),pair=document.getElementById('pair');
    if(mode&&pair&&d.pair&&d.mode){
      const central=`${d.mode}|${d.pair}`;
@@ -211,7 +225,7 @@ def init_master_access(app) -> None:
      const r=d.result;const key=`${r.pair||d.pair||''}|${r.signal||''}|${r.entry_time_utc||d.updated_at||''}`;
      if(key!==lastSharedSignalKey){lastSharedSignalKey=key;window.renderResult(r);if(window.alertForSignal)window.alertForSignal(r);}
    }
-   if(!master&&localStorage.getItem(SETUP_KEY))autoClaim();
+   if(!master&&!trusted&&localStorage.getItem(SETUP_KEY))autoClaim();
  }catch(_){overlay.style.display='none'}}
  claim.addEventListener('click',async()=>{
    let key=localStorage.getItem(SETUP_KEY)||prompt('Master activation key:');
