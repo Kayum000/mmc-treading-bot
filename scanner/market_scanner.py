@@ -6,12 +6,15 @@ same tick history already available to the live Forex path.
 """
 from __future__ import annotations
 
+import json
+import os
 import time
 from datetime import datetime, timezone
 from threading import Lock
 
 import numpy as np
 import pandas as pd
+import psycopg2
 
 
 _CACHE = {}
@@ -150,3 +153,41 @@ def cached_scan(pair: str, fetch_ticks) -> dict:
     with _CACHE_LOCK:
         _CACHE[key] = (now, result)
     return dict(result)
+
+
+def record_shadow_scan(pair: str, market_mode: str, signal: str, signal_time_utc: str,
+                       entry_time_utc: str | None, scanner_state: dict) -> None:
+    """Persist scanner state next to each signal attempt without affecting it."""
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        return
+    try:
+        with psycopg2.connect(url) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS mmc_shadow_scanner_log (
+                        id BIGSERIAL PRIMARY KEY,
+                        signal_time_utc TIMESTAMPTZ NOT NULL,
+                        pair TEXT NOT NULL,
+                        market_mode TEXT NOT NULL,
+                        signal TEXT NOT NULL,
+                        entry_time_utc TIMESTAMPTZ,
+                        scanner_json JSONB NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """)
+                cur.execute("""
+                    INSERT INTO mmc_shadow_scanner_log
+                    (signal_time_utc, pair, market_mode, signal, entry_time_utc, scanner_json)
+                    VALUES (%s, %s, %s, %s, %s, %s::jsonb)
+                """, (signal_time_utc, pair, market_mode, signal, entry_time_utc,
+                      json.dumps(scanner_state, ensure_ascii=False)))
+                cur.execute("""
+                    DELETE FROM mmc_shadow_scanner_log
+                    WHERE created_at < NOW() - INTERVAL '7 days'
+                """)
+            conn.commit()
+    except Exception:
+        # Scanner persistence is strictly shadow-only; DB problems must never
+        # change or block the live signal path.
+        return
