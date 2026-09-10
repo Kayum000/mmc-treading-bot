@@ -155,6 +155,8 @@ def init_master_access(app) -> None:
  localStorage.setItem(KEY,id);
  try{if(window.AndroidSignalAlert&&typeof window.AndroidSignalAlert.setDeviceId==='function')window.AndroidSignalAlert.setDeviceId(id);}catch(_){ }
  let lastSharedSignalKey='';
+ let localSelectionVersion=0;
+ let pendingSelection='';
  async function syncMasterSession(mode,pair){try{await fetch('/master/sync-selection',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({mode,pair}),cache:'no-store'});}catch(_){}}
  async function autoClaim(){
    const key=localStorage.getItem(SETUP_KEY)||'';
@@ -165,13 +167,41 @@ def init_master_access(app) -> None:
    }catch(_){ }
    return false;
  }
+ async function persistSelection(mode,pair,version){
+   try{
+     const body=new URLSearchParams({mode,pair});
+     const r=await fetch('/select-market',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'},body,credentials:'same-origin',cache:'no-store'});
+     if(r.ok&&version===localSelectionVersion) pendingSelection='';
+     else if(!r.ok&&version===localSelectionVersion) pendingSelection='';
+   }catch(_){ }
+ }
+ function noteLocalSelection(){
+   const mode=document.getElementById('mode'),pair=document.getElementById('pair');
+   if(!mode||!pair||!mode.value||!pair.value)return;
+   localSelectionVersion++;
+   pendingSelection=`${mode.value}|${pair.value}`;
+   const version=localSelectionVersion;
+   setTimeout(()=>persistSelection(mode.value,pair.value,version),80);
+ }
  async function status(){try{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});const d=await r.json();const master=d.role==='MASTER';badge.textContent=master?'MASTER / MAIN PANEL':'VIEWER / SECONDARY';badge.className=master?'master':'viewer';
    const hasFreeMasterSlot=!master&&d.master_count<2;
    claim.hidden=!hasFreeMasterSlot;
    claim.textContent='SET AS MASTER 2';
    overlay.style.display=(master||hasFreeMasterSlot)?'flex':'none';
    const mode=document.getElementById('mode'),pair=document.getElementById('pair');
-   if(mode&&pair&&d.pair&&d.mode){mode.value=d.mode;Array.from(pair.options).forEach(o=>o.hidden=o.dataset.market&&o.dataset.market!==d.mode);pair.value=d.pair;mode.disabled=!master;pair.disabled=!master;if(master)syncMasterSession(d.mode,d.pair);}
+   if(mode&&pair&&d.pair&&d.mode){
+     const central=`${d.mode}|${d.pair}`;
+     const local=`${mode.value}|${pair.value}`;
+     const shouldApplyCentral=master ? (!pendingSelection || pendingSelection===central || local===central) : true;
+     if(shouldApplyCentral){
+       mode.value=d.mode;
+       Array.from(pair.options).forEach(o=>o.hidden=o.dataset.market&&o.dataset.market!==d.mode);
+       pair.value=d.pair;
+       mode.disabled=!master;
+       pair.disabled=!master;
+     }
+     if(master)syncMasterSession(d.mode,d.pair);
+   }
    if(!master&&d.result&&typeof window.renderResult==='function'){
      const r=d.result;const key=`${r.pair||d.pair||''}|${r.signal||''}|${r.entry_time_utc||d.updated_at||''}`;
      if(key!==lastSharedSignalKey){lastSharedSignalKey=key;window.renderResult(r);if(window.alertForSignal)window.alertForSignal(r);}
@@ -181,6 +211,9 @@ def init_master_access(app) -> None:
  claim.addEventListener('click',async()=>{let key=localStorage.getItem(SETUP_KEY)||prompt('Master activation key:');if(!key)return;localStorage.setItem(SETUP_KEY,key.trim());try{const r=await fetch('/master/claim',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({device_id:id,setup_key:key.trim()})});const d=await r.json();if(!r.ok)throw Error(d.message||'Master claim failed');alert(d.message);location.reload()}catch(e){alert(e.message||'Master claim failed')}});
  async function sharedSignal(){try{if(typeof window.enableSignalAudio==='function')window.enableSignalAudio();const r=await fetch('/master/signal',{cache:'no-store',credentials:'same-origin'});const d=await r.json();if(r.ok&&d.result&&typeof window.renderResult==='function'){window.renderResult(d.result);if(window.alertForSignal)window.alertForSignal(d.result)}}catch(_) {}}
  const button=document.getElementById('signal-button');if(button){button.addEventListener('click',e=>{e.preventDefault();e.stopImmediatePropagation();sharedSignal()},true)}
+ const pairControl=document.getElementById('pair');
+ if(pairControl)pairControl.addEventListener('change',()=>noteLocalSelection());
+ document.querySelectorAll('.mode-btn').forEach(b=>b.addEventListener('click',()=>setTimeout(noteLocalSelection,100)));
  status();setInterval(status,3000);
 })();
 </script>'''
