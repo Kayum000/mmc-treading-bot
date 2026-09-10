@@ -101,9 +101,6 @@ def init_market_scanner_ui(app):
 })();
 </script>
 """
-        # The HTML reaching after_request is already rendered by Jinja, so a
-        # template-only anchor cannot be matched here. Insert directly into
-        # the rendered AUTO SIGNAL row instead.
         auto_row = '<div class="auto-row">'
         if auto_row in html:
             html = html.replace(auto_row, auto_row + trigger, 1)
@@ -111,22 +108,5 @@ def init_market_scanner_ui(app):
             html = html.replace('</body>', trigger + '</body>', 1)
         html = html.replace('</head>', css + '</head>', 1)
         html = html.replace('</body>', popup + '</body>', 1)
-
-        # Keep the entry display aligned with the new signal-candle timing.
-        # This only changes the dashboard label; signal generation is untouched.
-        entry_label_patch = """
-<script>
-(function(){
-  function patchEntryLabel(){
-    document.querySelectorAll('.entry-title').forEach(function(el){
-      el.textContent='ENTRY NOW — SIGNAL TIME';
-    });
-  }
-  patchEntryLabel();
-  new MutationObserver(patchEntryLabel).observe(document.body,{childList:true,subtree:true});
-})();
-</script>
-"""
-        html = html.replace('</body>', entry_label_patch + '</body>', 1)
         response.set_data(html)
         return response
