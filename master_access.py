@@ -166,10 +166,10 @@ def init_master_access(app) -> None:
    return false;
  }
  async function status(){try{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});const d=await r.json();const master=d.role==='MASTER';badge.textContent=master?'MASTER / MAIN PANEL':'VIEWER / SECONDARY';badge.className=master?'master':'viewer';
-   const full=!master&&d.master_count>=2;
-   claim.hidden=!(full||(!master&&d.master_count<2));
-   claim.textContent=full?'RESTORE MASTER':'SET AS MASTER 2';
-   overlay.style.display=(master||full||d.master_count<2)?'flex':'none';
+   const hasFreeMasterSlot=!master&&d.master_count<2;
+   claim.hidden=!hasFreeMasterSlot;
+   claim.textContent='SET AS MASTER 2';
+   overlay.style.display=(master||hasFreeMasterSlot)?'flex':'none';
    const mode=document.getElementById('mode'),pair=document.getElementById('pair');
    if(mode&&pair&&d.pair&&d.mode){mode.value=d.mode;Array.from(pair.options).forEach(o=>o.hidden=o.dataset.market&&o.dataset.market!==d.mode);pair.value=d.pair;mode.disabled=!master;pair.disabled=!master;if(master)syncMasterSession(d.mode,d.pair);}
    if(!master&&d.result&&typeof window.renderResult==='function'){
@@ -178,7 +178,7 @@ def init_master_access(app) -> None:
    }
    if(!master&&localStorage.getItem(SETUP_KEY))autoClaim();
  }catch(_){overlay.style.display='none'}}
- claim.addEventListener('click',async()=>{let key=localStorage.getItem(SETUP_KEY)||prompt('Master activation key:');if(!key)return;localStorage.setItem(SETUP_KEY,key.trim());let slot='';try{const s=await (async()=>{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});return await r.json()})();if(s.master_count>=2)slot=prompt('Both Master slots are occupied. Type 1 or 2 to replace that slot:');if(slot!=='1'&&slot!=='2'&&s.master_count>=2){alert('Recovery cancelled.');return}const payload={device_id:id,setup_key:key.trim()};if(slot==='1'||slot==='2')payload.recover_slot=slot;const r=await fetch('/master/claim',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(payload)});const d=await r.json();if(!r.ok)throw Error(d.message||'Master claim failed');alert(d.message);location.reload()}catch(e){alert(e.message||'Master claim failed')}});
+ claim.addEventListener('click',async()=>{let key=localStorage.getItem(SETUP_KEY)||prompt('Master activation key:');if(!key)return;localStorage.setItem(SETUP_KEY,key.trim());try{const r=await fetch('/master/claim',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({device_id:id,setup_key:key.trim()})});const d=await r.json();if(!r.ok)throw Error(d.message||'Master claim failed');alert(d.message);location.reload()}catch(e){alert(e.message||'Master claim failed')}});
  async function sharedSignal(){try{if(typeof window.enableSignalAudio==='function')window.enableSignalAudio();const r=await fetch('/master/signal',{cache:'no-store',credentials:'same-origin'});const d=await r.json();if(r.ok&&d.result&&typeof window.renderResult==='function'){window.renderResult(d.result);if(window.alertForSignal)window.alertForSignal(d.result)}}catch(_) {}}
  const button=document.getElementById('signal-button');if(button){button.addEventListener('click',e=>{e.preventDefault();e.stopImmediatePropagation();sharedSignal()},true)}
  status();setInterval(status,3000);
