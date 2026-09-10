@@ -10,15 +10,16 @@ from master_selection_sync import init_master_selection_sync
 from master_session_restore import init_master_session_restore
 from master_recovery_ui import init_master_recovery_ui
 from market_scanner_ui import init_market_scanner_ui
+from chart_scanner_ui import init_chart_scanner_ui
 
-# Attach the isolated login persistence layer before the existing Master/Viewer
-# layers. This leaves the active authentication and signal strategy intact.
+# Attach isolated UI layers without changing the active authentication or signal strategy.
 init_remember_me(app)
 init_master_access(app)
 init_master_selection_sync(app)
 init_master_session_restore(app)
 init_master_recovery_ui(app)
 init_market_scanner_ui(app)
+init_chart_scanner_ui(app)
 
 
 if __name__ == "__main__":
