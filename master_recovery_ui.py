@@ -46,4 +46,3 @@ def init_master_recovery_ui(app) -> None:
         if "</body>" in html:
             response.set_data(html.replace("</body>", script + "</body>", 1))
         return response
-'''
