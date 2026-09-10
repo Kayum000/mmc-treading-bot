@@ -1,7 +1,7 @@
 """Persistent login support for the web login page.
 
 Uses Flask's signed session cookie instead of storing the user's password.
-The existing authentication check and credentials remain unchanged.
+The existing authentication check and Master device session are preserved.
 """
 from datetime import timedelta
 import hmac
@@ -29,9 +29,18 @@ def init_remember_me(app):
             if not auth_password:
                 error = "Login is not configured yet. Set APP_PASSWORD in the server environment."
             elif hmac.compare_digest(username, auth_username) and hmac.compare_digest(password, auth_password):
+                # Do not clear the Master device identity when refreshing login.
+                # This is important because Master authorization is persisted in
+                # Postgres and tied to the stable device ID.
+                master_device_id = session.get("master_device_id")
+                was_master = bool(session.get("master"))
                 session.clear()
                 session.permanent = remember
                 session["authenticated"] = True
+                if master_device_id:
+                    session["master_device_id"] = master_device_id
+                if was_master:
+                    session["master"] = True
                 return redirect(url_for("index"))
             else:
                 error = "Invalid username or password."
