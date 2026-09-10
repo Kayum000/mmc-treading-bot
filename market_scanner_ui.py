@@ -101,12 +101,12 @@ def init_market_scanner_ui(app):
 })();
 </script>
 """
-        # Put only the trigger inside the existing AUTO SIGNAL/header area,
-        # matching the user's marked location. The popup itself is appended
-        # near the end of the document so it cannot disturb the header layout.
-        header_anchor = '</span></div>\n{% if error %}'
-        if header_anchor in html:
-            html = html.replace(header_anchor, '</span>' + trigger + '</div>\n{% if error %}', 1)
+        # The HTML reaching after_request is already rendered by Jinja, so a
+        # template-only anchor cannot be matched here. Insert directly into
+        # the rendered AUTO SIGNAL row instead.
+        auto_row = '<div class="auto-row">'
+        if auto_row in html:
+            html = html.replace(auto_row, auto_row + trigger, 1)
         else:
             html = html.replace('</body>', trigger + '</body>', 1)
         html = html.replace('</head>', css + '</head>', 1)
