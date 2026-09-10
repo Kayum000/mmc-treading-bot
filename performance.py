@@ -67,14 +67,14 @@ def init_db() -> None:
 
 
 def record_signal(result: dict) -> None:
-    """Record one unique 1-minute BUY/SELL decision."""
+    """Record one unique 1-minute BUY/SELL decision for its NEXT candle."""
     signal = str(result.get("signal", "")).upper()
     if signal not in {"BUY", "SELL"}:
         return
     try:
         init_db()
         signal_time = _utc(result["signal_time_utc"])
-        entry_time = _minute_start(result.get("entry_time_utc") or result["signal_time_utc"])
+        entry_time = _minute_start(result.get("entry_time_utc") or (signal_time + timedelta(minutes=1)))
         with _connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
@@ -93,22 +93,17 @@ def record_signal(result: dict) -> None:
         return
 
 
-def _next_candle(frame, entry_time: datetime):
+def _entry_candle(frame, entry_time: datetime):
     if frame is None or frame.empty:
         return None
-    target = _minute_start(entry_time) + timedelta(minutes=1)
+    target = _minute_start(entry_time)
     timestamps = frame["timestamp"].apply(_minute_start)
     matches = frame.loc[timestamps == target]
     return matches.iloc[-1] if not matches.empty else None
 
 
 def _candle_color(candle) -> str | None:
-    """Return the candle's directional color from its OHLC values.
-
-    Green/bullish means close > open; red/bearish means close < open.
-    A true OHLC doji (close == open) has no directional color and is VOID.
-    Candle body size is deliberately ignored.
-    """
+    """Return the candle's directional color from its OHLC values."""
     if candle is None:
         return None
     opening = float(candle["open"])
@@ -121,7 +116,7 @@ def _candle_color(candle) -> str | None:
 
 
 def _outcome(signal: str, candle) -> str | None:
-    """Evaluate strictly from the next completed candle's color."""
+    """Evaluate strictly from the SIGNAL'S entry candle color."""
     color = _candle_color(candle)
     if color is None:
         return None
@@ -135,7 +130,7 @@ def _outcome(signal: str, candle) -> str | None:
 
 
 def settle_pending() -> None:
-    """Resolve each due signal using only the NEXT completed 1m candle color."""
+    """Resolve each due signal using the exact NEXT 1-minute entry candle."""
     init_db()
     now = datetime.now(timezone.utc)
     frames = {}
@@ -159,7 +154,7 @@ def settle_pending() -> None:
                         frames[key] = fetch_forex_candles(pair, "1min", outputsize=200)
                     except Exception:
                         frames[key] = None
-                candle = _next_candle(frames[key], entry_time)
+                candle = _entry_candle(frames[key], entry_time)
                 outcome = _outcome(signal, candle)
                 if outcome is None:
                     continue
@@ -174,7 +169,7 @@ def settle_pending() -> None:
                     WHERE id=%s AND result='PENDING'
                 """, (
                     float(candle["open"]), float(candle["close"]), outcome,
-                    f" Next 1m candle color: {color}; open={float(candle['open'])}; close={float(candle['close'])}.",
+                    f" Entry candle color: {color}; candle={_minute_start(entry_time).isoformat()}; open={float(candle['open'])}; close={float(candle['close'])}.",
                     now, row_id,
                 ))
             cur.execute("DELETE FROM mmc_signal_performance WHERE signal_time_utc < NOW() - INTERVAL '24 hours'")
@@ -238,7 +233,7 @@ def get_performance() -> dict:
             "win_rate": round(accuracy, 2),
             "history": history,
             "timeframe": "1m",
-            "evaluation": "next completed 1-minute candle color",
+            "evaluation": "entry candle (the next 1-minute candle after signal)",
             "strategy": "tick_run_pressure",
         }
     except Exception as exc:
