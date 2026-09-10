@@ -71,6 +71,10 @@ exactly the supplied analysis time. confidence must reflect the strength of the
 visible evidence, not certainty.
 """.strip()
 
+    # Use Gemini's JSON-Schema field instead of the older responseSchema field.
+    # responseSchema is backed by a restricted protobuf Schema type and rejects
+    # standard JSON-Schema keywords such as additionalProperties with HTTP 400.
+    # responseJsonSchema accepts the JSON-Schema form used here.
     schema = {
         "type": "object",
         "properties": {
@@ -101,7 +105,7 @@ visible evidence, not certainty.
         }],
         "generationConfig": {
             "responseMimeType": "application/json",
-            "responseSchema": schema,
+            "responseJsonSchema": schema,
         },
     }
 
