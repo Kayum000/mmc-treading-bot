@@ -3,6 +3,7 @@
 The deployed service is the on-demand signal UI. It does not place trades.
 The old CSV CLI remains available as a separate module if needed.
 """
+import chart_scanner_ui
 from web.app import app
 from remember_me import init_remember_me
 from master_access import init_master_access
@@ -11,6 +12,10 @@ from master_session_restore import init_master_session_restore
 from master_recovery_ui import init_master_recovery_ui
 from market_scanner_ui import init_market_scanner_ui
 from chart_scanner_ui import init_chart_scanner_ui
+from gemini_chart_scanner import analyze_image as gemini_analyze_image
+
+# Keep the scanner UI unchanged while replacing only its vision backend with Gemini.
+chart_scanner_ui._analyze_image = gemini_analyze_image
 
 # Attach isolated UI layers without changing the active authentication or signal strategy.
 init_remember_me(app)
