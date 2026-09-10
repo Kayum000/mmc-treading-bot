@@ -1,6 +1,6 @@
 """Microprice Run Alignment strategy.
 
-Latest version: v2.0
+Latest version: v2.1
 - 2-4 tick same-direction mid-price run
 - microprice pressure threshold 0.40
 - spread filter
@@ -55,8 +55,7 @@ def _prepare(ticks: pd.DataFrame) -> pd.DataFrame:
         x["pressure_source"] = "volume-weighted microprice"
     else:
         # BiQuote Forex/CFD ticks do not provide bid/ask volume. Use the
-        # observed price displacement across the confirmed local run as a
-        # quote-only pressure proxy instead of blocking every signal.
+        # observed price displacement as a quote-only pressure proxy.
         displacement = x["mid"].diff()
         x["microprice"] = x["mid"] + displacement
         x["micro_alignment"] = (
@@ -71,6 +70,21 @@ def _pip_multiplier(mid_price: float) -> float:
     return 100.0 if abs(float(mid_price)) >= 20.0 else 10000.0
 
 
+def _confirmed_run(directions: np.ndarray) -> tuple[int, int] | None:
+    """Return (run_length, direction) for the strongest current 2-4 tick run."""
+    if len(directions) < 2:
+        return None
+    for length in (4, 3, 2):
+        if len(directions) < length:
+            continue
+        run = directions[-length:]
+        if np.all(run > 0):
+            return length, 1
+        if np.all(run < 0):
+            return length, -1
+    return None
+
+
 def generate_signal(
     ticks: pd.DataFrame,
     run_length: int = 3,
@@ -81,10 +95,27 @@ def generate_signal(
     if len(x) < 5:
         return TickRunSignal("HOLD", 0.0, "insufficient tick history")
 
-    # v2 uses the strongest validated run zone: 2-4 ticks.
-    run_length = int(np.clip(run_length, 2, 4))
+    # v2.1 honors the documented 2-4 tick validation zone. The supplied
+    # run_length remains the preferred length when it is within that zone;
+    # otherwise the strongest currently confirmed 2-4 tick run is used.
+    preferred = int(np.clip(run_length, 2, 4))
+    directions = x["direction"].to_numpy()
+    run_info = None
+    for length in (preferred, 4, 3, 2):
+        if len(directions) < length:
+            continue
+        run = directions[-length:]
+        if np.all(run > 0):
+            run_info = (length, 1)
+            break
+        if np.all(run < 0):
+            run_info = (length, -1)
+            break
+    if run_info is None:
+        return TickRunSignal("HOLD", 0.0, "run confirmation absent")
+
+    run_length_used, run_direction = run_info
     last = len(x) - 1
-    run = x["direction"].to_numpy()[last - run_length + 1:last + 1]
     mid = float(x.iloc[last]["mid"])
     pip_multiplier = _pip_multiplier(mid)
     spread_pips = float(x.iloc[last]["spread"] * pip_multiplier)
@@ -93,9 +124,6 @@ def generate_signal(
         max_spread_pips = 2.5 if pip_multiplier == 100.0 else 1.5
     if spread_pips > max_spread_pips:
         return TickRunSignal("HOLD", 0.0, f"spread too wide ({spread_pips:.1f} pips)")
-
-    if not np.all(run > 0) and not np.all(run < 0):
-        return TickRunSignal("HOLD", 0.0, "run confirmation absent")
 
     micro = float(x.iloc[last]["micro_alignment"]) if not pd.isna(x.iloc[last]["micro_alignment"]) else np.nan
     if np.isnan(micro):
@@ -106,15 +134,19 @@ def generate_signal(
     source = str(x.iloc[last]["pressure_source"])
     source_suffix = "" if source == "volume-weighted microprice" else "; quote-pressure fallback"
 
-    if np.all(run > 0) and micro >= microprice_threshold:
+    if run_direction > 0 and micro >= microprice_threshold:
         confidence = 0.76 if fast_tick else 0.73
+        if run_length_used == 2:
+            confidence -= 0.02
         suffix = "; fast tick confirmation" if fast_tick else ""
-        return TickRunSignal("BUY", confidence, f"{run_length}-tick upward run + pressure {micro:.2f}{source_suffix}{suffix}")
+        return TickRunSignal("BUY", confidence, f"{run_length_used}-tick upward run + pressure {micro:.2f}{source_suffix}{suffix}")
 
-    if np.all(run < 0) and micro <= -microprice_threshold:
+    if run_direction < 0 and micro <= -microprice_threshold:
         confidence = 0.78 if fast_tick else 0.74
+        if run_length_used == 2:
+            confidence -= 0.02
         suffix = "; fast tick confirmation" if fast_tick else ""
-        return TickRunSignal("SELL", confidence, f"{run_length}-tick downward run + pressure {micro:.2f}{source_suffix}{suffix}")
+        return TickRunSignal("SELL", confidence, f"{run_length_used}-tick downward run + pressure {micro:.2f}{source_suffix}{suffix}")
 
     return TickRunSignal("HOLD", 0.0, "run and pressure are not aligned")
 
@@ -127,18 +159,28 @@ def backtest_labels(
     x = _prepare(ticks)
     x["signal"] = "HOLD"
     d = x["direction"].to_numpy()
-    run_length = int(np.clip(run_length, 2, 4))
+    preferred = int(np.clip(run_length, 2, 4))
 
-    for i in range(run_length, len(x) - 1):
-        run = d[i-run_length+1:i+1]
-        if not np.all(run > 0) and not np.all(run < 0):
+    for i in range(2, len(x) - 1):
+        found = None
+        for length in (preferred, 4, 3, 2):
+            if i + 1 < length:
+                continue
+            run = d[i-length+1:i+1]
+            if np.all(run > 0):
+                found = 1
+                break
+            if np.all(run < 0):
+                found = -1
+                break
+        if found is None:
             continue
         micro = x.iloc[i]["micro_alignment"]
         if pd.isna(micro):
             continue
-        if np.all(run > 0) and micro >= microprice_threshold:
+        if found > 0 and micro >= microprice_threshold:
             x.iat[i, x.columns.get_loc("signal")] = "BUY"
-        elif np.all(run < 0) and micro <= -microprice_threshold:
+        elif found < 0 and micro <= -microprice_threshold:
             x.iat[i, x.columns.get_loc("signal")] = "SELL"
 
     x["future_direction"] = np.sign(x["mid"].shift(-1) - x["mid"])
