@@ -45,9 +45,8 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     tick_time = tick_time.astimezone(timezone.utc)
 
     is_entry = result.action in {"BUY", "SELL"}
-    # The signal is evaluated on the SAME 1-minute candle in which it is
-    # generated. The displayed Entry time therefore stays at signal time.
-    # Performance waits for that candle to close before settling WIN/LOSS.
+    # Entry time is the EXACT time the signal is generated. Performance still
+    # evaluates the completed 1-minute candle containing that timestamp.
     signal_candle_utc = signal_at_utc.replace(second=0, microsecond=0)
     signal_candle_bd = signal_candle_utc.astimezone(timezone(timedelta(hours=6)))
 
@@ -68,8 +67,10 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         "analysis_candle_time_utc": tick_time.isoformat(timespec="milliseconds"),
         "entry_price": float((last["askPrice"] + last["bidPrice"]) / 2),
         "entry_price_type": "latest_tick_mid_reference",
-        "entry_time_utc": signal_candle_utc.isoformat(timespec="seconds") if is_entry else None,
-        "entry_time_bd": signal_candle_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
+        "entry_time_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None,
+        "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
+        "entry_candle_time_utc": signal_candle_utc.isoformat(timespec="seconds") if is_entry else None,
+        "entry_candle_time_bd": signal_candle_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_delay_seconds": 0 if is_entry else None,
         "timeframe": "tick-run",
         "entry_timeframe": "signal candle (current 1-minute candle)",
