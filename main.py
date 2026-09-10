@@ -10,6 +10,7 @@ from master_access import init_master_access
 from master_selection_sync import init_master_selection_sync
 from master_session_restore import init_master_session_restore
 from master_recovery_ui import init_master_recovery_ui
+from master_trusted_devices import init_master_trusted_devices
 from market_scanner_ui import init_market_scanner_ui
 from chart_scanner_ui import init_chart_scanner_ui
 from gemini_chart_scanner import analyze_image as gemini_analyze_image
@@ -23,6 +24,7 @@ init_master_access(app)
 init_master_selection_sync(app)
 init_master_session_restore(app)
 init_master_recovery_ui(app)
+init_master_trusted_devices(app)
 init_market_scanner_ui(app)
 init_chart_scanner_ui(app)
 
@@ -33,7 +35,8 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
 
     if os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"):
-        os.execvp(
+        import os as _os
+        _os.execvp(
             "gunicorn",
             [
                 "gunicorn",
