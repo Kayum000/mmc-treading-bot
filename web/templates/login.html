@@ -18,6 +18,8 @@
   label{display:block;font-size:16px;font-weight:700;margin:16px 0 7px}
   input{width:100%;box-sizing:border-box;font-size:18px;padding:12px 14px;border:1px solid #cbd5e1;border-radius:10px;outline:none}
   input:focus{border-color:#2563eb}
+  .remember{display:flex;align-items:center;gap:9px;margin-top:14px;font-size:15px;font-weight:600;color:#475569;cursor:pointer}
+  .remember input{width:18px;height:18px;margin:0;accent-color:#2563eb}
   button{width:100%;margin-top:20px;font-size:19px;padding:13px;border:0;border-radius:10px;background:#2563eb;color:white;font-weight:700;cursor:pointer}
   .error{background:#fff1f2;color:#b42318;border:1px solid #fecdd3;border-radius:10px;padding:10px 12px;margin-bottom:12px}
 </style>
@@ -35,6 +37,10 @@
     <input id="username" name="username" type="text" autocomplete="username" required autofocus>
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <label class="remember" for="remember_me">
+      <input id="remember_me" name="remember_me" type="checkbox" value="1" checked>
+      <span>Remember Me</span>
+    </label>
     <button type="submit">LOGIN</button>
   </form>
 </div>
