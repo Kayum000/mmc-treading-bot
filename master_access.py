@@ -181,7 +181,7 @@ def init_master_access(app) -> None:
  claim.addEventListener('click',async()=>{let key=localStorage.getItem(SETUP_KEY)||prompt('Master activation key:');if(!key)return;localStorage.setItem(SETUP_KEY,key.trim());let slot='';try{const s=await (async()=>{const r=await fetch('/master/status',{cache:'no-store',credentials:'same-origin'});return await r.json()})();if(s.master_count>=2)slot=prompt('Both Master slots are occupied. Type 1 or 2 to replace that slot:');if(slot!=='1'&&slot!=='2'&&s.master_count>=2){alert('Recovery cancelled.');return}const payload={device_id:id,setup_key:key.trim()};if(slot==='1'||slot==='2')payload.recover_slot=slot;const r=await fetch('/master/claim',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(payload)});const d=await r.json();if(!r.ok)throw Error(d.message||'Master claim failed');alert(d.message);location.reload()}catch(e){alert(e.message||'Master claim failed')}});
  async function sharedSignal(){try{if(typeof window.enableSignalAudio==='function')window.enableSignalAudio();const r=await fetch('/master/signal',{cache:'no-store',credentials:'same-origin'});const d=await r.json();if(r.ok&&d.result&&typeof window.renderResult==='function'){window.renderResult(d.result);if(window.alertForSignal)window.alertForSignal(d.result)}}catch(_) {}}
  const button=document.getElementById('signal-button');if(button){button.addEventListener('click',e=>{e.preventDefault();e.stopImmediatePropagation();sharedSignal()},true)}
- autoClaim();status();setInterval(status,3000);
+ status();setInterval(status,3000);
 })();
 </script>'''
         if "</body>" in html:
