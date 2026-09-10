@@ -108,5 +108,8 @@ def init_market_scanner_ui(app):
             html = html.replace('</body>', trigger + '</body>', 1)
         html = html.replace('</head>', css + '</head>', 1)
         html = html.replace('</body>', popup + '</body>', 1)
+        # The main template and live renderResult() still contain the old label.
+        # Replace only that display text; signal generation and timing data remain untouched.
+        html = html.replace('ENTRY AT NEXT 1-MINUTE CANDLE', 'ENTRY NOW — SIGNAL TIME')
         response.set_data(html)
         return response
