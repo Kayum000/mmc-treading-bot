@@ -12,7 +12,7 @@ from flask import redirect, render_template, request, session, url_for
 
 def init_remember_me(app):
     """Add a persistent Remember Me option without changing app auth logic."""
-    app.config.setdefault("PERMANENT_SESSION_LIFETIME", timedelta(days=365))
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=365)
 
     def login_with_remember():
         if session.get("authenticated"):
