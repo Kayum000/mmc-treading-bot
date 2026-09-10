@@ -17,10 +17,9 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
-import android.os.Handler;
-import android.os.Looper;
 import android.provider.Settings;
 import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -52,10 +51,13 @@ public class MainActivity extends Activity {
     private static final String PREF_DEVICE_ID = "stable_device_id";
     private static final String PREF_UPDATE_ID = "download_id";
     private static final String PREF_UPDATE_VERSION = "download_version";
+    private static final int FILE_CHOOSER_REQUEST_CODE = 2101;
 
     private WebView webView;
     private DownloadManager downloadManager;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private ValueCallback<Uri[]> pendingFileCallback;
+    private Uri pendingCameraUri;
     private boolean updateCheckRunning;
     private final Runnable updatePoll = new Runnable() {
         @Override public void run() {
@@ -84,7 +86,19 @@ public class MainActivity extends Activity {
 
         webView.addJavascriptInterface(new SignalAlertBridge(this), "AndroidSignalAlert");
         webView.setWebViewClient(new WebViewClient());
-        webView.setWebChromeClient(new WebChromeClient());
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> filePathCallback,
+                                              FileChooserParams fileChooserParams) {
+                if (pendingFileCallback != null) {
+                    pendingFileCallback.onReceiveValue(null);
+                }
+                pendingFileCallback = filePathCallback;
+                pendingCameraUri = null;
+                openChartImageChooser(fileChooserParams);
+                return true;
+            }
+        });
         webView.loadUrl(APP_URL);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -93,6 +107,86 @@ public class MainActivity extends Activity {
                     this::handleBack
             );
         }
+    }
+
+    private void openChartImageChooser(WebChromeClient.FileChooserParams params) {
+        Intent galleryIntent;
+        try {
+            galleryIntent = params.createIntent();
+        } catch (Exception ignored) {
+            galleryIntent = new Intent(Intent.ACTION_GET_CONTENT);
+            galleryIntent.addCategory(Intent.CATEGORY_OPENABLE);
+            galleryIntent.setType("image/*");
+        }
+        galleryIntent.addCategory(Intent.CATEGORY_OPENABLE);
+        galleryIntent.setType("image/*");
+
+        Intent cameraIntent = new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
+        if (cameraIntent.resolveActivity(getPackageManager()) == null) {
+            launchGalleryOnly(galleryIntent);
+            return;
+        }
+
+        try {
+            File cameraFile = File.createTempFile("mmc_chart_", ".jpg", getExternalCacheDir());
+            pendingCameraUri = FileProvider.getUriForFile(
+                    this,
+                    getPackageName() + ".fileprovider",
+                    cameraFile
+            );
+            cameraIntent.putExtra(android.provider.MediaStore.EXTRA_OUTPUT, pendingCameraUri);
+            cameraIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            cameraIntent.setClipData(android.content.ClipData.newRawUri("chart", pendingCameraUri));
+
+            Intent chooser = Intent.createChooser(galleryIntent, "Select chart image or Camera");
+            chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{cameraIntent});
+            startActivityForResult(chooser, FILE_CHOOSER_REQUEST_CODE);
+        } catch (Exception ignored) {
+            pendingCameraUri = null;
+            launchGalleryOnly(galleryIntent);
+        }
+    }
+
+    private void launchGalleryOnly(Intent galleryIntent) {
+        try {
+            startActivityForResult(galleryIntent, FILE_CHOOSER_REQUEST_CODE);
+        } catch (Exception exc) {
+            finishFileChooser(null);
+            Toast.makeText(this, "ছবি নির্বাচন করার অপশন খোলা যাচ্ছে না।", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void finishFileChooser(Uri uri) {
+        if (pendingFileCallback != null) {
+            pendingFileCallback.onReceiveValue(uri == null ? null : new Uri[]{uri});
+            pendingFileCallback = null;
+        }
+        pendingCameraUri = null;
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != FILE_CHOOSER_REQUEST_CODE) return;
+
+        Uri result = null;
+        if (resultCode == RESULT_OK) {
+            if (data != null && data.getData() != null) {
+                result = data.getData();
+            } else if (pendingCameraUri != null) {
+                result = pendingCameraUri;
+            }
+        }
+        finishFileChooser(result);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (pendingFileCallback != null) {
+            pendingFileCallback.onReceiveValue(null);
+            pendingFileCallback = null;
+        }
+        super.onDestroy();
     }
 
     @Override
