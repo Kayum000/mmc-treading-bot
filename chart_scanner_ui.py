@@ -12,6 +12,7 @@ import os
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from flask import jsonify, request
 
@@ -133,7 +134,7 @@ def init_chart_scanner_ui(app):
             return jsonify({"ok": False, "error": "শুধু JPG, PNG বা WebP chart image দিন।"}), 400
         mode = request.form.get("mode", "real").strip().lower()
         pair = request.form.get("pair", "").strip().upper()
-        now_bd = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+        now_bd = datetime.now(ZoneInfo("Asia/Dhaka")).strftime("%Y-%m-%d %H:%M:%S BST")
         data_url = f"data:{content_type};base64,{base64.b64encode(raw).decode('ascii')}"
         result = _analyze_image(data_url, now_bd, pair)
         result["market_mode"] = mode
