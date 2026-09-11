@@ -42,7 +42,9 @@ def _rss_mb() -> float:
 def _client():
     try:
         import setuptools  # noqa: F401
-        from quotexpy import Quotex
+        # QuotexPy documents the client under quotexpy.new. Importing from the
+        # package root is not compatible with all 1.40.x builds.
+        from quotexpy.new import Quotex
     except Exception as exc:
         raise RuntimeError(f"QuotexPy load failed: {type(exc).__name__}: {exc}") from exc
     email = os.getenv("QUOTEX_EMAIL", "").strip()
@@ -117,9 +119,6 @@ def _child_fetch(asset: str, offset: int, conn) -> None:
 
 
 def _isolated_fetch(asset: str, offset: int):
-    # A clean spawned interpreter prevents Gunicorn state from leaking into
-    # browser/WebSocket code. The child must NOT be daemonized: Chromium and
-    # undetected-chromedriver may create their own subprocesses.
     ctx = mp.get_context("spawn")
     parent_conn, child_conn = ctx.Pipe(duplex=False)
     process = ctx.Process(target=_child_fetch, args=(asset, offset), name="quotex-fetch")
