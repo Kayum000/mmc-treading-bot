@@ -32,9 +32,6 @@ def _rss_mb() -> float:
 
 def _client():
     try:
-        # QuotexPy 1.40.7 still imports the removed stdlib distutils on some
-        # runtimes. Import setuptools first so its distutils compatibility shim
-        # is installed before QuotexPy is loaded.
         import setuptools  # noqa: F401
         from quotexpy import Quotex
     except Exception as exc:
@@ -84,7 +81,18 @@ async def _connect_and_get(client, asset: str, offset: int):
     connected = await client.connect()
     if not connected:
         raise RuntimeError("Quotex connection failed")
-    return await asyncio.wait_for(client.get_candles(asset, offset, _PERIOD), timeout=35)
+    # QuotexPy's candle API expects the end timestamp separately from the
+    # look-back offset. Passing the offset as the second positional argument
+    # makes the request start around the Unix epoch and returns no usable data.
+    return await asyncio.wait_for(
+        client.get_candles(
+            asset=asset,
+            end_from_time=int(time.time()),
+            offset=offset,
+            period=_PERIOD,
+        ),
+        timeout=35,
+    )
 
 
 def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> pd.DataFrame:
@@ -113,6 +121,9 @@ def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> 
         client = None
         try:
             client = _client()
+            # Quotex's offset is measured in seconds. Ask for enough recent
+            # history for the 1m/5m/15m analysis while allowing the library's
+            # own response-size limit to apply.
             offset = _PERIOD * min(max(int(count) + 20, 180), 12000)
             payload = asyncio.run(_connect_and_get(client, canonical, offset))
             rows = _rows(payload)
