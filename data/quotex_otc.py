@@ -1,14 +1,16 @@
-"""Quotex OTC 1-minute candle data adapter (data only; no trade execution)."""
+"""Quotex OTC 1-minute candle data adapter (data only; no trade execution).
+
+Quotex/browser work is isolated in a short-lived child process so a broken
+browser/WebSocket session cannot take down the Gunicorn worker.
+"""
 from __future__ import annotations
 
 import asyncio
-import atexit
 import inspect
 import logging
+import multiprocessing as mp
 import os
-import threading
 import time
-from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
 
 import pandas as pd
@@ -18,17 +20,13 @@ OTC_PAIRS = (
     "USDCHF_otc", "NZDUSD_otc", "EURJPY_otc", "GBPJPY_otc", "XAUUSD_otc",
 )
 _PERIOD = 60
-_FETCH_TIMEOUT = 52
-_LOCK = threading.Lock()
+_FETCH_TIMEOUT = 45
+_CACHE_TTL = 15
+_LOCK = mp.RLock()
 _CACHE: dict[tuple[str, int], tuple[float, pd.DataFrame]] = {}
 _BLOCK_UNTIL = 0.0
 _BLOCK_ERROR = ""
 _LOG = logging.getLogger(__name__)
-
-_LOOP: asyncio.AbstractEventLoop | None = None
-_LOOP_THREAD: threading.Thread | None = None
-_CLIENT = None
-_CLIENT_LOCK = threading.Lock()
 
 
 def _rss_mb() -> float:
@@ -51,15 +49,12 @@ def _client():
     password = os.getenv("QUOTEX_PASSWORD", "")
     if not email or not password:
         raise RuntimeError("Quotex OTC চালাতে QUOTEX_EMAIL/QUOTEX_PASSWORD সেট করতে হবে।")
-
     kwargs = {
         "email": email,
         "password": password,
         "lang": os.getenv("QUOTEX_LANG", "en"),
         "time_period": _PERIOD,
     }
-    # QuotexPy versions that expose browser-assisted login need it for
-    # Cloudflare-protected access. Only pass the argument when supported.
     try:
         params = inspect.signature(Quotex).parameters
         if "browser" in params:
@@ -67,6 +62,92 @@ def _client():
     except (TypeError, ValueError):
         pass
     return Quotex(**kwargs)
+
+
+async def _close_client(client) -> None:
+    if client is None:
+        return
+    try:
+        result = client.close()
+        if inspect.isawaitable(result):
+            await result
+    except Exception:
+        logging.getLogger(__name__).debug("Quotex client close failed", exc_info=True)
+
+
+async def _fetch_once(asset: str, offset: int):
+    client = None
+    try:
+        client = _client()
+        connected = await asyncio.wait_for(client.connect(), timeout=15)
+        if isinstance(connected, tuple):
+            ok = bool(connected[0])
+            reason = connected[1] if len(connected) > 1 else ""
+        else:
+            ok, reason = bool(connected), ""
+        if not ok:
+            raise RuntimeError(f"Quotex connection failed: {reason or 'no reason returned'}")
+        return await asyncio.wait_for(
+            client.get_candles(
+                asset=asset,
+                end_from_time=int(time.time()),
+                offset=offset,
+                period=_PERIOD,
+            ),
+            timeout=20,
+        )
+    finally:
+        await _close_client(client)
+
+
+def _child_fetch(asset: str, offset: int, conn) -> None:
+    try:
+        try:
+            import ctypes
+            libc = ctypes.CDLL(None)
+            libc.prctl(1, 15, 0, 0, 0)  # PR_SET_PDEATHSIG / SIGTERM
+        except Exception:
+            pass
+        payload = asyncio.run(_fetch_once(asset, offset))
+        conn.send((True, payload))
+    except BaseException as exc:
+        try:
+            conn.send((False, f"{type(exc).__name__}: {exc}"))
+        except Exception:
+            pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _isolated_fetch(asset: str, offset: int):
+    ctx = mp.get_context("fork")
+    parent_conn, child_conn = ctx.Pipe(duplex=False)
+    process = ctx.Process(target=_child_fetch, args=(asset, offset), name="quotex-fetch")
+    process.daemon = True
+    process.start()
+    child_conn.close()
+    try:
+        deadline = time.monotonic() + _FETCH_TIMEOUT
+        while time.monotonic() < deadline:
+            if parent_conn.poll(0.25):
+                ok, value = parent_conn.recv()
+                if not ok:
+                    raise RuntimeError(f"Quotex fetch failed: {value}")
+                return value
+            if not process.is_alive():
+                break
+        raise RuntimeError("Quotex request timed out; isolated browser process was terminated.")
+    finally:
+        parent_conn.close()
+        if process.is_alive():
+            process.terminate()
+        process.join(timeout=2)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=1)
 
 
 def _rows(payload):
@@ -98,112 +179,6 @@ def _rows(payload):
     return out
 
 
-async def _close_client_async(client) -> None:
-    if client is None:
-        return
-    try:
-        result = client.close()
-        if inspect.isawaitable(result):
-            await result
-    except Exception:
-        _LOG.debug("Quotex client close failed", exc_info=True)
-
-
-async def _reset_client_async() -> None:
-    global _CLIENT
-    client = _CLIENT
-    _CLIENT = None
-    await _close_client_async(client)
-
-
-async def _persistent_get(asset: str, offset: int):
-    global _CLIENT
-    last_exc = None
-    for attempt in range(2):
-        client = _CLIENT
-        try:
-            if client is None:
-                client = _client()
-                connected = await asyncio.wait_for(client.connect(), timeout=18)
-                if isinstance(connected, tuple):
-                    ok, reason = (connected + ("", ""))[:2]
-                else:
-                    ok, reason = bool(connected), ""
-                if not ok:
-                    raise RuntimeError(f"Quotex connection failed: {reason or 'no reason returned'}")
-                _CLIENT = client
-                _LOG.info("Quotex OTC session connected")
-            return await asyncio.wait_for(
-                client.get_candles(
-                    asset=asset,
-                    end_from_time=int(time.time()),
-                    offset=offset,
-                    period=_PERIOD,
-                ),
-                timeout=25,
-            )
-        except Exception as exc:
-            last_exc = exc
-            _LOG.warning(
-                "Quotex OTC session attempt %s failed for %s: %s: %s",
-                attempt + 1, asset, type(exc).__name__, exc,
-            )
-            await _reset_client_async()
-            if attempt == 0:
-                await asyncio.sleep(0.25)
-    raise last_exc or RuntimeError("Quotex connection failed")
-
-
-def _loop_worker(loop: asyncio.AbstractEventLoop):
-    asyncio.set_event_loop(loop)
-    loop.run_forever()
-
-
-def _ensure_loop() -> asyncio.AbstractEventLoop:
-    global _LOOP, _LOOP_THREAD
-    with _CLIENT_LOCK:
-        if _LOOP is not None and _LOOP.is_running():
-            return _LOOP
-        loop = asyncio.new_event_loop()
-        thread = threading.Thread(target=_loop_worker, args=(loop,), name="quotex-loop", daemon=True)
-        thread.start()
-        _LOOP = loop
-        _LOOP_THREAD = thread
-        return loop
-
-
-def _run_persistent(asset: str, offset: int):
-    loop = _ensure_loop()
-    future = asyncio.run_coroutine_threadsafe(_persistent_get(asset, offset), loop)
-    try:
-        return future.result(timeout=_FETCH_TIMEOUT)
-    except FutureTimeoutError as exc:
-        future.cancel()
-        try:
-            loop.call_soon_threadsafe(lambda: asyncio.create_task(_reset_client_async()))
-        except Exception:
-            pass
-        raise RuntimeError("Quotex request timed out; browser/session was reset.") from exc
-
-
-def _shutdown_session():
-    global _LOOP, _CLIENT
-    loop = _LOOP
-    if loop is None or not loop.is_running():
-        return
-    try:
-        future = asyncio.run_coroutine_threadsafe(_reset_client_async(), loop)
-        future.result(timeout=5)
-    except Exception:
-        pass
-    finally:
-        _CLIENT = None
-        loop.call_soon_threadsafe(loop.stop)
-
-
-atexit.register(_shutdown_session)
-
-
 def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> pd.DataFrame:
     global _BLOCK_UNTIL, _BLOCK_ERROR
     asset = str(asset).strip()
@@ -212,24 +187,26 @@ def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> 
         raise ValueError("Unsupported Quotex OTC market")
     if interval != "1m":
         raise ValueError("Quotex OTC MMC uses 1-minute candles only")
+
     key = (canonical, int(count))
     now = time.monotonic()
     cached = _CACHE.get(key)
-    if cached and now - cached[0] < 15:
+    if cached and now - cached[0] < _CACHE_TTL:
         return cached[1].copy(deep=True)
     if now < _BLOCK_UNTIL:
         raise RuntimeError(_BLOCK_ERROR or "Quotex access is temporarily blocked; retry later.")
+
     with _LOCK:
         now = time.monotonic()
         cached = _CACHE.get(key)
-        if cached and now - cached[0] < 15:
+        if cached and now - cached[0] < _CACHE_TTL:
             return cached[1].copy(deep=True)
         max_rss = float(os.getenv("QUOTEX_MAX_RSS_MB", "430"))
         if _rss_mb() >= max_rss:
             raise RuntimeError("Quotex OTC temporarily paused by memory guard.")
         try:
             offset = _PERIOD * min(max(int(count) + 20, 180), 12000)
-            payload = _run_persistent(canonical, offset)
+            payload = _isolated_fetch(canonical, offset)
             rows = _rows(payload)
             if not rows:
                 raise RuntimeError(f"Quotex returned no candle data for {canonical}.")
