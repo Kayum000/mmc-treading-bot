@@ -1,10 +1,10 @@
-"""Live signal generation using the Microprice Run Alignment strategy."""
+"""Live signal generation using the Microprice Run Alignment strategy v2.2."""
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 
 from data.biquote_forex import fetch_tick_history
-from strategy.tick_run_pressure import generate_signal
+from strategy.tick_run_pressure_v22 import generate_signal
 
 
 def _bengali_reason(reason: str) -> str:
@@ -35,7 +35,12 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
 
     signal_at_utc = datetime.now(timezone.utc)
     ticks = fetch_tick_history(pair, count=1000)
-    result = generate_signal(ticks, run_length=3, microprice_threshold=0.40)
+    result = generate_signal(
+        ticks,
+        run_length=3,
+        microprice_threshold=0.50,
+        min_efficiency=0.30,
+    )
 
     last = ticks.iloc[-1]
     signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
@@ -72,7 +77,7 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         "entry_candle_time_utc": signal_candle_utc.isoformat(timespec="seconds") if is_entry else None,
         "entry_candle_time_bd": signal_candle_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_delay_seconds": 0 if is_entry else None,
-        "timeframe": "tick-run",
+        "timeframe": "tick-run v2.2",
         "entry_timeframe": "signal candle (current 1-minute candle)",
         "automatic": automatic,
         "confidence": result.confidence,
