@@ -8,6 +8,7 @@ import logging
 import os
 import threading
 import time
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
 
 import pandas as pd
@@ -17,6 +18,7 @@ OTC_PAIRS = (
     "USDCHF_otc", "NZDUSD_otc", "EURJPY_otc", "GBPJPY_otc", "XAUUSD_otc",
 )
 _PERIOD = 60
+_FETCH_TIMEOUT = 52
 _LOCK = threading.Lock()
 _CACHE: dict[tuple[str, int], tuple[float, pd.DataFrame]] = {}
 _BLOCK_UNTIL = 0.0
@@ -56,8 +58,8 @@ def _client():
         "lang": os.getenv("QUOTEX_LANG", "en"),
         "time_period": _PERIOD,
     }
-    # Some QuotexPy builds require the browser-assisted login explicitly.
-    # Enable it only when this installed build exposes the option.
+    # QuotexPy versions that expose browser-assisted login need it for
+    # Cloudflare-protected access. Only pass the argument when supported.
     try:
         params = inspect.signature(Quotex).parameters
         if "browser" in params:
@@ -107,6 +109,13 @@ async def _close_client_async(client) -> None:
         _LOG.debug("Quotex client close failed", exc_info=True)
 
 
+async def _reset_client_async() -> None:
+    global _CLIENT
+    client = _CLIENT
+    _CLIENT = None
+    await _close_client_async(client)
+
+
 async def _persistent_get(asset: str, offset: int):
     global _CLIENT
     last_exc = None
@@ -115,7 +124,7 @@ async def _persistent_get(asset: str, offset: int):
         try:
             if client is None:
                 client = _client()
-                connected = await asyncio.wait_for(client.connect(), timeout=20)
+                connected = await asyncio.wait_for(client.connect(), timeout=18)
                 if isinstance(connected, tuple):
                     ok, reason = (connected + ("", ""))[:2]
                 else:
@@ -139,12 +148,9 @@ async def _persistent_get(asset: str, offset: int):
                 "Quotex OTC session attempt %s failed for %s: %s: %s",
                 attempt + 1, asset, type(exc).__name__, exc,
             )
-            if client is not None:
-                await _close_client_async(client)
-            if _CLIENT is client:
-                _CLIENT = None
+            await _reset_client_async()
             if attempt == 0:
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.25)
     raise last_exc or RuntimeError("Quotex connection failed")
 
 
@@ -169,7 +175,15 @@ def _ensure_loop() -> asyncio.AbstractEventLoop:
 def _run_persistent(asset: str, offset: int):
     loop = _ensure_loop()
     future = asyncio.run_coroutine_threadsafe(_persistent_get(asset, offset), loop)
-    return future.result(timeout=95)
+    try:
+        return future.result(timeout=_FETCH_TIMEOUT)
+    except FutureTimeoutError as exc:
+        future.cancel()
+        try:
+            loop.call_soon_threadsafe(lambda: asyncio.create_task(_reset_client_async()))
+        except Exception:
+            pass
+        raise RuntimeError("Quotex request timed out; browser/session was reset.") from exc
 
 
 def _shutdown_session():
@@ -178,7 +192,7 @@ def _shutdown_session():
     if loop is None or not loop.is_running():
         return
     try:
-        future = asyncio.run_coroutine_threadsafe(_close_client_async(_CLIENT), loop)
+        future = asyncio.run_coroutine_threadsafe(_reset_client_async(), loop)
         future.result(timeout=5)
     except Exception:
         pass
