@@ -92,6 +92,23 @@
     }
   }
 
-  document.addEventListener('DOMContentLoaded', configureDownloadApp);
+  function cleanUnwantedAutoStatus() {
+    const el = document.getElementById('auto-status');
+    if (!el) return;
+    const unwanted = 'পরের 1-minute candle শুরু হলে signal হবে।';
+    if (!el.textContent.includes(unwanted)) return;
+    const cleaned = el.textContent.replace(unwanted, '').replace(/\s*—\s*$/, '').trim();
+    el.textContent = cleaned || 'AUTO SIGNAL চালু';
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    configureDownloadApp();
+    cleanUnwantedAutoStatus();
+    const target = document.getElementById('auto-status');
+    if (target && typeof MutationObserver !== 'undefined') {
+      const observer = new MutationObserver(cleanUnwantedAutoStatus);
+      observer.observe(target, { childList: true, characterData: true, subtree: true });
+    }
+  });
   document.addEventListener('click', () => window.enableSignalAudio(), { once: true });
 })();
