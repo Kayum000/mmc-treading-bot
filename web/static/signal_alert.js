@@ -63,6 +63,13 @@
     syncStatusPair();
     setInterval(syncStatusPair, 500);
   }
+  function syncSelectedMarket() {
+    const mode = document.getElementById('mode')?.value || '';
+    const pair = document.getElementById('pair')?.value || '';
+    if (!mode || !pair) return;
+    const body = new URLSearchParams({mode, pair});
+    fetch('/select-market', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'}, body, credentials:'same-origin', cache:'no-store'}).catch(() => {});
+  }
   function ensureSignalPanelVisible() {
     const panel = document.getElementById('result-container');
     const status = document.getElementById('market-status-panel');
@@ -90,6 +97,8 @@
     window.addEventListener('resize', ensureSignalPanelVisible);
     const target = document.getElementById('auto-status');
     if (target && typeof MutationObserver !== 'undefined') new MutationObserver(cleanUnwantedAutoStatus).observe(target, {childList:true,characterData:true,subtree:true});
+    setTimeout(syncSelectedMarket, 800);
+    setTimeout(syncSelectedMarket, 2000);
   });
   document.addEventListener('click', () => window.enableSignalAudio(), {once:true});
 })();
