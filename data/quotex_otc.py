@@ -1,8 +1,4 @@
-"""Quotex OTC 1-minute candle data adapter (data only; no trade execution).
-
-Quotex/browser work is isolated in a short-lived child process so a broken
-browser/WebSocket session cannot take down the Gunicorn worker.
-"""
+"""Quotex OTC 1-minute candle data adapter (data only; no trade execution)."""
 from __future__ import annotations
 
 import asyncio
@@ -41,10 +37,7 @@ def _rss_mb() -> float:
 
 def _client():
     try:
-        import setuptools  # noqa: F401
-        # QuotexPy documents the client under quotexpy.new. Importing from the
-        # package root is not compatible with all 1.40.x builds.
-        from quotexpy.new import Quotex
+        from quotexpy import Quotex
     except Exception as exc:
         raise RuntimeError(f"QuotexPy load failed: {type(exc).__name__}: {exc}") from exc
     email = os.getenv("QUOTEX_EMAIL", "").strip()
@@ -74,14 +67,14 @@ async def _close_client(client) -> None:
         if inspect.isawaitable(result):
             await result
     except Exception:
-        logging.getLogger(__name__).debug("Quotex client close failed", exc_info=True)
+        _LOG.debug("Quotex client close failed", exc_info=True)
 
 
 async def _fetch_once(asset: str, offset: int):
     client = None
     try:
         client = _client()
-        connected = await asyncio.wait_for(client.connect(), timeout=15)
+        connected = await asyncio.wait_for(client.connect(), timeout=20)
         if isinstance(connected, tuple):
             ok = bool(connected[0])
             reason = connected[1] if len(connected) > 1 else ""
@@ -89,15 +82,11 @@ async def _fetch_once(asset: str, offset: int):
             ok, reason = bool(connected), ""
         if not ok:
             raise RuntimeError(f"Quotex connection failed: {reason or 'no reason returned'}")
-        return await asyncio.wait_for(
-            client.get_candles(
-                asset=asset,
-                end_from_time=int(time.time()),
-                offset=offset,
-                period=_PERIOD,
-            ),
-            timeout=20,
-        )
+        params = inspect.signature(client.get_candles).parameters
+        kwargs = {"asset": asset, "offset": offset, "period": _PERIOD}
+        if "end_from_time" in params:
+            kwargs["end_from_time"] = int(time.time())
+        return await asyncio.wait_for(client.get_candles(**kwargs), timeout=20)
     finally:
         await _close_client(client)
 
@@ -109,7 +98,7 @@ def _child_fetch(asset: str, offset: int, conn) -> None:
     except BaseException as exc:
         try:
             conn.send((False, f"{type(exc).__name__}: {exc}"))
-        except Exception:
+        except BaseException:
             pass
     finally:
         try:
@@ -129,12 +118,15 @@ def _isolated_fetch(asset: str, offset: int):
         deadline = time.monotonic() + _FETCH_TIMEOUT
         while time.monotonic() < deadline:
             if parent_conn.poll(0.25):
-                ok, value = parent_conn.recv()
+                try:
+                    ok, value = parent_conn.recv()
+                except EOFError as exc:
+                    raise RuntimeError(f"Quotex child exited before returning data (exit={process.exitcode}).") from exc
                 if not ok:
                     raise RuntimeError(f"Quotex fetch failed: {value}")
                 return value
             if not process.is_alive():
-                break
+                raise RuntimeError(f"Quotex child exited without data (exit={process.exitcode}).")
         raise RuntimeError("Quotex request timed out; isolated browser process was terminated.")
     finally:
         parent_conn.close()
