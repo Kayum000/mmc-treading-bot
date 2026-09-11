@@ -8,6 +8,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
         ca-certificates \
+        chromium \
+        chromium-driver \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
