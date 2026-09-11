@@ -2,7 +2,9 @@ FROM python:3.11-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    CHROME_BIN=/usr/bin/chromium \
+    CHROMIUM_BIN=/usr/bin/chromium
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -10,6 +12,9 @@ RUN apt-get update \
         ca-certificates \
         chromium \
         chromium-driver \
+    && ln -sf /usr/bin/chromium /usr/bin/google-chrome \
+    && ln -sf /usr/bin/chromium /usr/bin/google-chrome-stable \
+    && ln -sf /usr/bin/chromium /usr/local/bin/google-chrome \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
