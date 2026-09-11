@@ -40,29 +40,18 @@ def _rss_mb() -> float:
 
 def _client():
     try:
-        from pyquotex.stable_api import Quotex
+        from quotexpy import Quotex
     except Exception as exc:
-        raise RuntimeError(f"PyQuotex load failed: {type(exc).__name__}: {exc}") from exc
+        raise RuntimeError(f"QuotexPy load failed: {type(exc).__name__}: {exc}") from exc
     email = os.getenv("QUOTEX_EMAIL", "").strip()
     password = os.getenv("QUOTEX_PASSWORD", "")
     if not email or not password:
         raise RuntimeError("Quotex OTC চালাতে QUOTEX_EMAIL/QUOTEX_PASSWORD সেট করতে হবে।")
     kwargs = {
-        "email": email,
-        "password": password,
         "lang": os.getenv("QUOTEX_LANG", "en"),
-        "root_path": "/tmp/mmc-quotex",
-        "user_data_dir": "session",
-        "period_default": _PERIOD,
+        "time_period": _PERIOD,
     }
-    proxy = os.getenv("QUOTEX_PROXY", "").strip()
-    if proxy:
-        kwargs["proxies"] = proxy
-    ua = os.getenv("QUOTEX_USER_AGENT", "").strip()
-    if ua:
-        kwargs["user_agent"] = ua
-    os.makedirs("/tmp/mmc-quotex", exist_ok=True)
-    return Quotex(**kwargs)
+    return Quotex(email=email, password=password, **kwargs)
 
 
 def _rows(payload):
@@ -121,16 +110,10 @@ def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> 
         try:
             client = _client()
             connected = _run(client.connect(), 35)
-            ok = connected[0] if isinstance(connected, tuple) else bool(connected)
-            if not ok:
-                reason = connected[1] if isinstance(connected, tuple) and len(connected) > 1 else "connection failed"
-                raise RuntimeError(f"Quotex connection failed: {reason}")
-            payload = _run(client.get_candles(
-                asset=canonical,
-                end_from_time=time.time(),
-                offset=_PERIOD * max(int(count) + 20, 220),
-                period=_PERIOD,
-            ), 25)
+            if not connected:
+                raise RuntimeError("Quotex connection failed")
+            offset = _PERIOD * min(max(int(count) + 20, 180), 12000)
+            payload = _run(client.get_candles(canonical, offset, _PERIOD), 35)
             rows = _rows(payload)
             if not rows:
                 raise RuntimeError(f"Quotex returned no candle data for {canonical}.")
@@ -152,7 +135,7 @@ def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> 
         finally:
             if client is not None:
                 try:
-                    _run(client.close(), 8)
+                    client.close()
                 except Exception:
                     pass
 
