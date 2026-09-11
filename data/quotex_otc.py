@@ -24,9 +24,6 @@ _BLOCK_ERROR = ""
 _LOG = logging.getLogger(__name__)
 
 # Keep one authenticated Quotex WebSocket session alive per Render worker.
-# The previous implementation created a fresh connection for every signal,
-# which made repeated requests much more vulnerable to session/connection
-# churn. The client and all of its async work live on this dedicated loop.
 _LOOP: asyncio.AbstractEventLoop | None = None
 _LOOP_THREAD: threading.Thread | None = None
 _CLIENT = None
@@ -53,11 +50,12 @@ def _client():
     password = os.getenv("QUOTEX_PASSWORD", "")
     if not email or not password:
         raise RuntimeError("Quotex OTC চালাতে QUOTEX_EMAIL/QUOTEX_PASSWORD সেট করতে হবে।")
-    kwargs = {
-        "lang": os.getenv("QUOTEX_LANG", "en"),
-        "time_period": _PERIOD,
-    }
-    return Quotex(email=email, password=password, **kwargs)
+    return Quotex(
+        email=email,
+        password=password,
+        lang=os.getenv("QUOTEX_LANG", "en"),
+        time_period=_PERIOD,
+    )
 
 
 def _rows(payload):
@@ -101,12 +99,7 @@ async def _close_client_async(client) -> None:
 
 
 async def _persistent_get(asset: str, offset: int):
-    """Fetch candles using one reusable authenticated async session.
-
-    A failed/stale session is discarded and retried once with a fresh session.
-    This does not bypass broker protections; it only avoids unnecessary login
-    churn during normal signal requests.
-    """
+    """Fetch candles from one reusable session, with bounded reconnects."""
     global _CLIENT
     last_exc = None
     for attempt in range(2):
@@ -114,7 +107,9 @@ async def _persistent_get(asset: str, offset: int):
         try:
             if client is None:
                 client = _client()
-                connected = await client.connect()
+                # connect() itself can hang when the broker WebSocket is
+                # unreachable, so bound it separately from get_candles().
+                connected = await asyncio.wait_for(client.connect(), timeout=20)
                 if not connected:
                     raise RuntimeError("Quotex connection failed")
                 _CLIENT = client
@@ -126,11 +121,14 @@ async def _persistent_get(asset: str, offset: int):
                     offset=offset,
                     period=_PERIOD,
                 ),
-                timeout=35,
+                timeout=25,
             )
         except Exception as exc:
             last_exc = exc
-            _LOG.warning("Quotex OTC session attempt %s failed for %s: %s", attempt + 1, asset, exc)
+            _LOG.warning(
+                "Quotex OTC session attempt %s failed for %s: %s: %s",
+                attempt + 1, asset, type(exc).__name__, exc,
+            )
             if client is not None:
                 await _close_client_async(client)
             if _CLIENT is client:
@@ -161,7 +159,8 @@ def _ensure_loop() -> asyncio.AbstractEventLoop:
 def _run_persistent(asset: str, offset: int):
     loop = _ensure_loop()
     future = asyncio.run_coroutine_threadsafe(_persistent_get(asset, offset), loop)
-    return future.result(timeout=42)
+    # Two attempts can take at most ~20+25 + 0.5 + 20+25 seconds.
+    return future.result(timeout=95)
 
 
 def _shutdown_session():
@@ -206,9 +205,6 @@ def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> 
         if _rss_mb() >= max_rss:
             raise RuntimeError("Quotex OTC temporarily paused by memory guard.")
         try:
-            # Quotex's offset is measured in seconds. Ask for enough recent
-            # history for the 1m/5m/15m analysis while allowing the library's
-            # own response-size limit to apply.
             offset = _PERIOD * min(max(int(count) + 20, 180), 12000)
             payload = _run_persistent(canonical, offset)
             rows = _rows(payload)
