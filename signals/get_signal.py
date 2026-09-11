@@ -1,10 +1,15 @@
-"""Live signal generation using the Microprice Run Alignment strategy v2.1."""
+"""Live signal generation for Real Forex v2.1 and the separate Crypto candle path."""
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
+import time
 
 from data.biquote_forex import fetch_tick_history
-from strategy.tick_run_pressure import generate_signal
+from strategy.tick_run_pressure import generate_signal as generate_forex_signal
+from data.binance_crypto import fetch_crypto_multi_timeframe
+from strategy.signal import generate_signal as generate_crypto_signal
+
+ENTRY_LEAD_SECONDS = 30
 
 
 def _bengali_reason(reason: str) -> str:
@@ -25,17 +30,72 @@ def _bengali_reason(reason: str) -> str:
     return text
 
 
+def _next_candle_boundary_utc(now_utc: datetime) -> datetime:
+    epoch = int(now_utc.timestamp())
+    return datetime.fromtimestamp(((epoch // 60) + 1) * 60, tz=timezone.utc)
+
+
+def _get_crypto_signal(pair: str, automatic: bool) -> dict:
+    requested_at_utc = datetime.now(timezone.utc)
+    next_candle_utc = _next_candle_boundary_utc(requested_at_utc)
+    signal_at_utc = next_candle_utc - timedelta(seconds=ENTRY_LEAD_SECONDS)
+    wait_seconds = (signal_at_utc - requested_at_utc).total_seconds()
+    if wait_seconds > 0:
+        time.sleep(wait_seconds)
+
+    signal_at_utc = datetime.now(timezone.utc)
+    frames = fetch_crypto_multi_timeframe(pair.replace("/", ""))
+    result = generate_crypto_signal(frames)
+    latest = frames["1m"]
+    last = latest.iloc[-1]
+    signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
+    entry_bd = next_candle_utc.astimezone(timezone(timedelta(hours=6)))
+    is_entry = result.action in {"BUY", "SELL"}
+
+    return {
+        "pair": pair,
+        "requested_pair": pair,
+        "market_mode": "crypto",
+        "source": "Binance spot candles",
+        "signal": result.action,
+        "market_bias": result.action,
+        "entry_signal": result.action,
+        "buy_score": result.buy_score,
+        "sell_score": result.sell_score,
+        "reason": result.reason,
+        "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
+        "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
+        "candle_time": str(latest.index[-1]),
+        "analysis_candle_time_utc": last["timestamp"].isoformat(),
+        "entry_price": float(last["close"]),
+        "entry_price_type": "latest_1m_close_reference",
+        "entry_time_utc": next_candle_utc.isoformat(timespec="seconds") if is_entry else None,
+        "entry_time_bd": entry_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
+        "entry_candle_time_utc": next_candle_utc.isoformat(timespec="seconds") if is_entry else None,
+        "entry_candle_time_bd": entry_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
+        "entry_delay_seconds": ENTRY_LEAD_SECONDS if is_entry else None,
+        "timeframe": "1m entry / 5m + 15m confirmation",
+        "entry_timeframe": "next 1-minute candle",
+        "automatic": automatic,
+        "confidence": None,
+        "mmc_level_type": None,
+        "mmc_level_price": None,
+    }
+
+
 def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) -> dict:
     pair = pair.strip().upper()
     market_mode = market_mode.strip().lower()
     if not pair:
         raise ValueError("No market selected")
+    if market_mode == "crypto":
+        return _get_crypto_signal(pair, automatic)
     if market_mode != "real":
-        raise ValueError("The Microprice Run strategy is enabled for real Forex only")
+        raise ValueError("Unsupported market mode")
 
     signal_at_utc = datetime.now(timezone.utc)
     ticks = fetch_tick_history(pair, count=1000)
-    result = generate_signal(
+    result = generate_forex_signal(
         ticks,
         run_length=3,
         microprice_threshold=0.40,
@@ -49,8 +109,6 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     tick_time = tick_time.astimezone(timezone.utc)
 
     is_entry = result.action in {"BUY", "SELL"}
-    # Entry time is the EXACT time the signal is generated. Performance still
-    # evaluates the completed 1-minute candle containing that timestamp.
     signal_candle_utc = signal_at_utc.replace(second=0, microsecond=0)
     signal_candle_bd = signal_candle_utc.astimezone(timezone(timedelta(hours=6)))
 
