@@ -110,7 +110,13 @@ def _child_fetch(asset: str, offset: int, conn) -> None:
 def _isolated_fetch(asset: str, offset: int):
     ctx = mp.get_context("spawn")
     parent_conn, child_conn = ctx.Pipe(duplex=False)
-    process = ctx.Process(target=_child_fetch, args=(asset, offset), name="quotex-fetch")
+    # Pass the writable pipe endpoint into the spawned child. Without it,
+    # the child exits before it can report Quotex connection/fetch errors.
+    process = ctx.Process(
+        target=_child_fetch,
+        args=(asset, offset, child_conn),
+        name="quotex-fetch",
+    )
     process.daemon = False
     process.start()
     child_conn.close()
@@ -121,11 +127,14 @@ def _isolated_fetch(asset: str, offset: int):
                 try:
                     ok, value = parent_conn.recv()
                 except EOFError as exc:
+                    process.join(timeout=0.5)
                     raise RuntimeError(f"Quotex child exited before returning data (exit={process.exitcode}).") from exc
                 if not ok:
+                    process.join(timeout=0.5)
                     raise RuntimeError(f"Quotex fetch failed: {value}")
                 return value
             if not process.is_alive():
+                process.join(timeout=0.5)
                 raise RuntimeError(f"Quotex child exited without data (exit={process.exitcode}).")
         raise RuntimeError("Quotex request timed out; isolated browser process was terminated.")
     finally:
