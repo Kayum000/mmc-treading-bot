@@ -44,18 +44,18 @@ def _client():
     password = os.getenv("QUOTEX_PASSWORD", "")
     if not email or not password:
         raise RuntimeError("Quotex OTC চালাতে QUOTEX_EMAIL/QUOTEX_PASSWORD সেট করতে হবে।")
+
+    # QuotexPy 1.40.7 does not use a `browser=` constructor flag. Its login
+    # helper defaults to headless=True, which is a bad fit for Cloudflare and
+    # has been unstable with the Debian Chromium runtime on Render. Force a
+    # visible browser and let Docker's Xvfb provide the virtual display.
     kwargs = {
         "email": email,
         "password": password,
         "lang": os.getenv("QUOTEX_LANG", "en"),
         "time_period": _PERIOD,
+        "headless": False,
     }
-    try:
-        params = inspect.signature(Quotex).parameters
-        if "browser" in params:
-            kwargs["browser"] = True
-    except (TypeError, ValueError):
-        pass
     return Quotex(**kwargs)
 
 
