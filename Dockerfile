@@ -15,6 +15,7 @@ RUN apt-get update \
         chromium \
         chromium-driver \
         xvfb \
+        xauth \
     && ln -sf /usr/bin/chromium /usr/bin/google-chrome \
     && ln -sf /usr/bin/chromium /usr/bin/google-chrome-stable \
     && ln -sf /usr/bin/chromium /usr/local/bin/google-chrome \
@@ -40,7 +41,6 @@ RUN grep -q 'chart_mount.js' web/templates/index.html || sed -i 's#</body>#<scri
 RUN grep -q 'live_stream_chart.js' web/templates/index.html || sed -i 's#</body>#<script src="/static/live_stream_chart.js" defer></script>\n</body>#' web/templates/index.html
 
 # QuotexPy opens a real Chromium session. Render has no physical display, so
-# give Chromium a virtual X server instead of letting the browser start against
-# a missing display and destabilize the worker. Software rendering also avoids
-# GPU/GL crashes in the container.
+# give Chromium a virtual X server. xauth is required by xvfb-run to create
+# the temporary Xauthority file. Software rendering also avoids GPU/GL crashes.
 CMD ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1365x768x24 -nolisten tcp", "python", "main.py"]
