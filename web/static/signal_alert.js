@@ -25,3 +25,41 @@
   document.addEventListener('click',e=>{if(e.target?.closest?.('#performance-toggle'))initPerformanceControls();if(!e.target?.closest?.('#performance-toggle'))window.enableSignalAudio()},{capture:true});
   document.addEventListener('change',e=>{if(e.target?.id==='pair'||e.target?.id==='mode')setTimeout(updateMarketStatus,50)});
 })();
+
+/* Final fallback: delegated Performance controls. These handlers deliberately
+   do not depend on the original button being inside a particular DOM container. */
+(() => {
+  const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  async function load(){
+    const err=document.getElementById('performance-error');
+    try{
+      const r=await fetch('/performance',{method:'GET',credentials:'same-origin',cache:'no-store'});
+      const d=await r.json();
+      if(!d.ok) throw new Error(d.error||'Performance unavailable.');
+      const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v};
+      set('perf-total',d.total??0);set('perf-wins',d.wins??0);set('perf-losses',d.losses??0);set('perf-rate',`${d.accuracy??0}%`);
+      const h=document.getElementById('performance-history');
+      if(h){const rows=d.history||[];h.innerHTML=rows.length?rows.map(x=>`<div class="performance-item"><span class="pair">${esc(x.pair)}</span><span class="${String(x.signal).toLowerCase()==='buy'?'signal-buy':'signal-sell'}">${esc(x.signal)}</span><span class="time">${esc(String(x.signal_time_utc||'').replace('T',' ').slice(0,19))}</span><span>${esc(x.result)}</span><span>${x.entry_price==null?'—':esc(x.entry_price)}</span></div>`).join(''):'<div class="performance-empty">No confirmed results in the last 24 hours.</div>'}
+      if(err)err.hidden=true;
+    }catch(e){if(err){err.hidden=false;err.textContent=e.message||'Performance unavailable.'}}
+  }
+  document.addEventListener('click',async e=>{
+    const toggle=e.target?.closest?.('#performance-toggle');
+    const refresh=e.target?.closest?.('#performance-refresh');
+    const clear=e.target?.closest?.('#performance-clear');
+    if(!toggle&&!refresh&&!clear)return;
+    e.preventDefault();e.stopPropagation();
+    if(toggle){const body=document.getElementById('performance-body');const open=toggle.getAttribute('aria-expanded')==='true';toggle.setAttribute('aria-expanded',String(!open));if(body)body.hidden=open;const ch=document.getElementById('performance-chevron');if(ch)ch.textContent=open?'▼':'▲';if(!open)await load();return;}
+    if(refresh){await load();return;}
+    if(clear){
+      const err=document.getElementById('performance-error');
+      try{
+        const r=await fetch('/performance',{method:'POST',credentials:'same-origin',headers:{'Accept':'application/json','Content-Type':'application/x-www-form-urlencoded'},body:''});
+        const d=await r.json();
+        if(!d.ok)throw new Error(d.error||'Unable to clear performance history.');
+        await load();
+      }catch(e2){if(err){err.hidden=false;err.textContent=e2.message||'Unable to clear performance history.'}}
+    }
+  },true);
+  window.mmcPerformanceLoad=load;
+})();
