@@ -59,20 +59,6 @@
     const select = document.getElementById('pair'); if (!select) return;
     const opts = Array.from(select.options).filter(o => o.dataset.market === 'crypto');
     opts.forEach((o, i) => { if (labels[i]) o.textContent = labels[i]; });
-
-    const statusPair = document.getElementById('status-pair');
-    const syncStatusPair = () => {
-      if (!statusPair || !select.value) return;
-      const mode = document.getElementById('mode')?.value || '';
-      if (mode !== 'crypto') return;
-      const raw = String(select.value).toUpperCase();
-      const label = OTC_LABELS[raw] || OTC_LABELS[select.value] || String(select.options[select.selectedIndex]?.textContent || '').trim();
-      if (label && statusPair.textContent !== label) statusPair.textContent = label;
-    };
-    syncStatusPair();
-    select.addEventListener('change', syncStatusPair);
-    const modeInput = document.getElementById('mode');
-    if (modeInput) modeInput.addEventListener('change', syncStatusPair);
   }
   function syncSelectedMarket() {
     const mode = document.getElementById('mode')?.value || '';
@@ -80,21 +66,6 @@
     if (!mode || !pair) return;
     const body = new URLSearchParams({mode, pair});
     fetch('/select-market', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'}, body, credentials:'same-origin', cache:'no-store'}).catch(() => {});
-  }
-  function ensureSignalPanelVisible() {
-    const panel = document.getElementById('result-container');
-    const status = document.getElementById('market-status-panel');
-    const news = document.getElementById('news-panel');
-    if (!panel || !status || !news) return;
-    if (window.innerWidth <= 850) {
-      panel.style.order = '1';
-      status.style.order = '2';
-      news.style.order = '3';
-    } else {
-      panel.style.order = '';
-      status.style.order = '';
-      news.style.order = '';
-    }
   }
   function cleanUnwantedAutoStatus() {
     const el = document.getElementById('auto-status'); if (!el) return;
@@ -104,8 +75,7 @@
     el.textContent = cleaned || 'AUTO SIGNAL চালু';
   }
   document.addEventListener('DOMContentLoaded', () => {
-    configureDownloadApp(); installQuotexLabels(); ensureSignalPanelVisible(); cleanUnwantedAutoStatus();
-    window.addEventListener('resize', ensureSignalPanelVisible);
+    configureDownloadApp(); installQuotexLabels(); cleanUnwantedAutoStatus();
     const target = document.getElementById('auto-status');
     if (target && typeof MutationObserver !== 'undefined') new MutationObserver(cleanUnwantedAutoStatus).observe(target, {childList:true,characterData:true,subtree:true});
     setTimeout(syncSelectedMarket, 800);
