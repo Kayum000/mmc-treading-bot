@@ -53,6 +53,15 @@
     const select = document.getElementById('pair'); if (!select) return;
     const opts = Array.from(select.options).filter(o => o.dataset.market === 'crypto');
     opts.forEach((o, i) => { if (labels[i]) o.textContent = labels[i]; });
+    const statusPair = document.getElementById('status-pair');
+    const syncStatusPair = () => {
+      if (statusPair && select.dataset.marketMode !== 'real' && document.getElementById('mode')?.value === 'crypto' && select.value) {
+        const selected = Array.from(select.options).find(o => o.value === select.value);
+        if (selected) statusPair.textContent = selected.textContent;
+      }
+    };
+    syncStatusPair();
+    setInterval(syncStatusPair, 500);
   }
   function cleanUnwantedAutoStatus() {
     const el = document.getElementById('auto-status'); if (!el) return;
