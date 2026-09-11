@@ -1,15 +1,16 @@
-"""Optional chart screenshot/camera scanner for independent visual analysis.
+"""Independent Gemini chart screenshot/camera scanner.
 
-This module does NOT modify the existing v2.1 tick strategy. It is an
-independent dashboard tool: the user captures/uploads a chart image and the
-vision model returns BUY/SELL/AVOID plus the exact server analysis time.
+This module is presentation/analysis-only. It does NOT modify or override the
+existing live tick-signal strategy.
 """
 from __future__ import annotations
 
 import base64
 import json
 import os
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -17,57 +18,110 @@ from zoneinfo import ZoneInfo
 from flask import jsonify, request
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
-MODEL = os.getenv("CHART_SCANNER_MODEL", "gpt-5.6-luna")
+DEFAULT_MODEL = "gemini-2.5-flash-lite"
+RETRY_DELAYS = (1.5, 3.0, 6.0)
 
 
-def _extract_output_text(payload: dict) -> str:
-    parts: list[str] = []
-    for item in payload.get("output", []) or []:
-        for content in item.get("content", []) or []:
-            text = content.get("text")
-            if text:
-                parts.append(text)
-    if parts:
-        return "\n".join(parts).strip()
-    return str(payload.get("output_text", "")).strip()
+def _extract_text(payload: dict) -> str:
+    candidates = payload.get("candidates") or []
+    if not candidates:
+        return ""
+    content = candidates[0].get("content") or {}
+    parts = content.get("parts") or []
+    return "\n".join(str(part.get("text", "")) for part in parts if part.get("text")).strip()
 
 
-def _analyze_image(data_url: str, analysis_time_bd: str, pair: str) -> dict:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+def _parse_json(text: str) -> dict:
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.strip("`").strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    try:
+        return json.loads(text)
+    except Exception:
+        start, end = text.find("{"), text.rfind("}")
+        if start >= 0 and end > start:
+            return json.loads(text[start:end + 1])
+        raise
+
+
+def _analyze_image(raw: bytes, content_type: str, analysis_time_bd: str, pair: str) -> dict:
+    api_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
     if not api_key:
-        return {"ok": False, "setup_required": True, "error": "Chart Scanner-এর জন্য OPENAI_API_KEY এখনো Render-এ সেট করা হয়নি।"}
+        return {"ok": False, "setup_required": True, "error": "Chart Scanner-এর জন্য GEMINI_API_KEY এখনো Render-এ সেট করা হয়নি।"}
+
+    model = (os.getenv("CHART_SCANNER_MODEL") or DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    encoded = base64.b64encode(raw).decode("ascii")
     prompt = f"""
-You are the independent chart-vision scanner inside an FX/crypto dashboard.
-Analyze ONLY the supplied chart image. Do not invent prices or indicators that
-are not visible. The existing bot strategy is separate and must not be changed.
+You are the independent visual chart scanner inside an FX/crypto dashboard.
+Analyze ONLY the supplied chart image. Do not invent prices, candles, indicators,
+support/resistance levels, or market data that are not visible.
 Selected market: {pair or 'unknown'}
 Analysis time (Bangladesh): {analysis_time_bd}
-Inspect visible candles, trend/market structure, support/resistance, breakouts
-or fakeouts, momentum, volatility, and any clearly visible indicators. If the
-image is unclear, cropped, stale, or insufficient for a directional decision,
-choose AVOID.
-Return ONLY valid JSON with exactly these keys:
-signal: one of BUY, SELL, AVOID
-signal_time_bd: the supplied analysis time exactly
-confidence: integer 0-100
-trend: short description
-reason: concise explanation based only on visible evidence
-risk: LOW, MEDIUM, or HIGH
+Inspect visible candles, trend/market structure, support/resistance, breakouts or
+fakeouts, momentum, volatility, and clearly visible indicators. If the image is
+unclear, cropped, stale, or insufficient for a directional decision, choose AVOID.
+A BUY or SELL decision requires multiple visible confirmations; one candle or one
+indicator alone is not enough. This scanner is independent and must not change the
+existing bot signal strategy.
+Return ONLY one JSON object with exactly these keys:
+{{"signal":"BUY|SELL|AVOID","signal_time_bd":"exact supplied time","confidence":0,"trend":"short description","reason":"concise visible-evidence reason","risk":"LOW|MEDIUM|HIGH"}}
 """.strip()
-    body = {"model": MODEL, "input": [{"role": "user", "content": [{"type": "input_text", "text": prompt}, {"type": "input_image", "image_url": data_url, "detail": "high"}]}]}
-    req = urllib.request.Request("https://api.openai.com/v1/responses", data=json.dumps(body).encode("utf-8"), headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, method="POST")
+
+    body = {
+        "contents": [{"parts": [
+            {"text": prompt},
+            {"inlineData": {"mimeType": content_type, "data": encoded}},
+        ]}],
+        "generationConfig": {"responseMimeType": "application/json"},
+    }
+    endpoint = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        + urllib.parse.quote(model, safe="")
+        + ":generateContent?key="
+        + urllib.parse.quote(api_key, safe="")
+    )
+    request_body = json.dumps(body).encode("utf-8")
+
+    last_error = ""
+    for attempt in range(len(RETRY_DELAYS) + 1):
+        req = urllib.request.Request(
+            endpoint,
+            data=request_body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=90) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:1200]
+            last_error = f"Gemini Vision API error ({exc.code}): {detail}"
+            if exc.code not in (429, 500, 502, 503, 504) or attempt >= len(RETRY_DELAYS):
+                if exc.code == 429:
+                    return {"ok": False, "error": "Gemini Free Tier-এর request limit সাময়িকভাবে পূর্ণ হয়েছে। একটু পরে আবার চেষ্টা করুন।"}
+                if exc.code == 503:
+                    return {"ok": False, "error": "Gemini এখন ব্যস্ত। কয়েকবার স্বয়ংক্রিয় retry করার পরও পাওয়া যায়নি—একটু পরে আবার চেষ্টা করুন।"}
+                return {"ok": False, "error": last_error}
+            time.sleep(RETRY_DELAYS[attempt])
+        except Exception as exc:
+            last_error = f"Gemini Chart Scanner connection error: {exc}"
+            if attempt >= len(RETRY_DELAYS):
+                return {"ok": False, "error": last_error}
+            time.sleep(RETRY_DELAYS[attempt])
+    else:
+        return {"ok": False, "error": last_error or "Gemini scanner failed."}
+
+    text = _extract_text(payload)
+    if not text:
+        return {"ok": False, "error": "Gemini কোনো chart-analysis response দেয়নি।"}
     try:
-        with urllib.request.urlopen(req, timeout=90) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:800]
-        return {"ok": False, "error": f"Vision API error ({exc.code}): {detail}"}
-    except Exception as exc:
-        return {"ok": False, "error": f"Chart Scanner connection error: {exc}"}
-    try:
-        result = json.loads(_extract_output_text(payload))
+        result = _parse_json(text)
     except Exception:
-        return {"ok": False, "error": "Vision model-এর response JSON format-এ পাওয়া যায়নি।"}
+        return {"ok": False, "error": "Gemini response JSON format-এ পাওয়া যায়নি।"}
+
     signal = str(result.get("signal", "AVOID")).upper()
     if signal not in {"BUY", "SELL", "AVOID"}:
         signal = "AVOID"
@@ -75,7 +129,21 @@ risk: LOW, MEDIUM, or HIGH
         confidence = max(0, min(100, int(result.get("confidence", 0))))
     except Exception:
         confidence = 0
-    return {"ok": True, "signal": signal, "signal_time_bd": str(result.get("signal_time_bd") or analysis_time_bd), "confidence": confidence, "trend": str(result.get("trend", "—")), "reason": str(result.get("reason", "—")), "risk": str(result.get("risk", "HIGH")).upper(), "model": MODEL, "independent": True}
+    risk = str(result.get("risk", "HIGH")).upper()
+    if risk not in {"LOW", "MEDIUM", "HIGH"}:
+        risk = "HIGH"
+    return {
+        "ok": True,
+        "signal": signal,
+        "signal_time_bd": str(result.get("signal_time_bd") or analysis_time_bd),
+        "confidence": confidence,
+        "trend": str(result.get("trend", "—")),
+        "reason": str(result.get("reason", "—")),
+        "risk": risk,
+        "model": model,
+        "provider": "gemini",
+        "independent": True,
+    }
 
 
 def init_chart_scanner_ui(app):
@@ -88,13 +156,14 @@ def init_chart_scanner_ui(app):
         if len(raw) > MAX_IMAGE_BYTES:
             return jsonify({"ok": False, "error": "Image size সর্বোচ্চ 8 MB হতে পারবে।"}), 413
         content_type = (upload.mimetype or "image/jpeg").lower()
-        if content_type not in {"image/jpeg", "image/jpg", "image/png", "image/webp"}:
+        if content_type == "image/jpg":
+            content_type = "image/jpeg"
+        if content_type not in {"image/jpeg", "image/png", "image/webp"}:
             return jsonify({"ok": False, "error": "শুধু JPG, PNG বা WebP chart image দিন।"}), 400
         mode = request.form.get("mode", "real").strip().lower()
         pair = request.form.get("pair", "").strip().upper()
         now_bd = datetime.now(ZoneInfo("Asia/Dhaka")).strftime("%Y-%m-%d %H:%M:%S BST")
-        data_url = f"data:{content_type};base64,{base64.b64encode(raw).decode('ascii')}"
-        result = _analyze_image(data_url, now_bd, pair)
+        result = _analyze_image(raw, content_type, now_bd, pair)
         result["market_mode"] = mode
         return jsonify(result)
 
@@ -125,12 +194,11 @@ def init_chart_scanner_ui(app):
 <label class="chart-source-btn">📷 ছবি তুলুন<input id="chart-scanner-camera" type="file" accept="image/*" capture="environment"></label>
 <label class="chart-source-btn gallery">🖼️ গ্যালারি<input id="chart-scanner-gallery" type="file" accept="image/*"></label>
 </div>
-<input id="chart-scanner-file" type="file" accept="image/*" style="display:none">
 <img id="chart-scanner-preview" alt="Chart preview"><button type="button" class="chart-scan-btn" id="chart-scanner-analyze">ANALYZE CHART</button></div>
-<div id="chart-scanner-result"></div><div class="chart-scanner-note">এটি independent visual scanner। এটি বর্তমান v2.1 tick strategy পরিবর্তন বা override করে না।</div>
+<div id="chart-scanner-result"></div><div class="chart-scanner-note">এটি independent Gemini visual scanner। এটি বর্তমান live tick strategy পরিবর্তন বা override করে না।</div>
 </div></div>
 <script>
-(()=>{const t=document.getElementById('chart-scanner-trigger');if(!t)return;const o=document.getElementById('chart-scanner-overlay'),c=document.getElementById('chart-scanner-close'),cam=document.getElementById('chart-scanner-camera'),gal=document.getElementById('chart-scanner-gallery'),f=document.getElementById('chart-scanner-file'),p=document.getElementById('chart-scanner-preview'),b=document.getElementById('chart-scanner-analyze'),r=document.getElementById('chart-scanner-result');let selected=null;const esc=v=>String(v??'—').replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));t.onclick=()=>o.classList.add('open');c.onclick=()=>o.classList.remove('open');o.onclick=e=>{if(e.target===o)o.classList.remove('open')};function choose(file){if(!file)return;selected=file;f.value='';p.src=URL.createObjectURL(file);p.style.display='block';r.innerHTML=''}cam.onchange=()=>choose(cam.files?.[0]);gal.onchange=()=>choose(gal.files?.[0]);b.onclick=async()=>{if(!selected){r.innerHTML='<div class="chart-scan-result">প্রথমে 📷 ছবি তুলুন অথবা 🖼️ গ্যালারি থেকে ছবি নিন।</div>';return}b.disabled=true;b.textContent='ANALYZING…';r.innerHTML='<div class="chart-scan-result">Chart বিশ্লেষণ করা হচ্ছে…</div>';try{const fd=new FormData();fd.append('chart',selected,selected.name||'chart.jpg');fd.append('mode',document.getElementById('mode')?.value||'real');fd.append('pair',document.getElementById('pair')?.value||'');const q=await fetch('/chart-scanner',{method:'POST',body:fd,credentials:'same-origin'}),d=await q.json();if(!q.ok||!d.ok)throw Error(d.error||'Scanner failed');r.innerHTML=`<div class="chart-scan-result"><div class="chart-scan-signal">${esc(d.signal)}</div><div class="chart-scan-meta"><div><b>Signal Time</b><br>${esc(d.signal_time_bd)}</div><div><b>Confidence</b><br>${esc(d.confidence)}%</div><div><b>Trend</b><br>${esc(d.trend)}</div><div><b>Risk</b><br>${esc(d.risk)}</div></div><p><b>Reason:</b> ${esc(d.reason)}</p></div>`}catch(e){r.innerHTML=`<div class="chart-scan-result">${esc(e.message)}</div>`}finally{b.disabled=false;b.textContent='ANALYZE CHART'}}})();
+(()=>{const t=document.getElementById('chart-scanner-trigger');if(!t)return;const o=document.getElementById('chart-scanner-overlay'),c=document.getElementById('chart-scanner-close'),cam=document.getElementById('chart-scanner-camera'),gal=document.getElementById('chart-scanner-gallery'),p=document.getElementById('chart-scanner-preview'),b=document.getElementById('chart-scanner-analyze'),r=document.getElementById('chart-scanner-result');let selected=null;const esc=v=>String(v??'—').replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));t.onclick=()=>o.classList.add('open');c.onclick=()=>o.classList.remove('open');o.onclick=e=>{if(e.target===o)o.classList.remove('open')};function choose(file){if(!file)return;selected=file;p.src=URL.createObjectURL(file);p.style.display='block';r.innerHTML=''}cam.onchange=()=>choose(cam.files?.[0]);gal.onchange=()=>choose(gal.files?.[0]);b.onclick=async()=>{if(!selected){r.innerHTML='<div class="chart-scan-result">প্রথমে 📷 ছবি তুলুন অথবা 🖼️ গ্যালারি থেকে ছবি নিন।</div>';return}b.disabled=true;b.textContent='ANALYZING…';r.innerHTML='<div class="chart-scan-result">Gemini দিয়ে Chart বিশ্লেষণ করা হচ্ছে…</div>';try{const fd=new FormData();fd.append('chart',selected,selected.name||'chart.jpg');fd.append('mode',document.getElementById('mode')?.value||'real');fd.append('pair',document.getElementById('pair')?.value||'');const q=await fetch('/chart-scanner',{method:'POST',body:fd,credentials:'same-origin'}),d=await q.json();if(!q.ok||!d.ok)throw Error(d.error||'Scanner failed');r.innerHTML=`<div class="chart-scan-result"><div class="chart-scan-signal">${esc(d.signal)}</div><div class="chart-scan-meta"><div><b>Signal Time</b><br>${esc(d.signal_time_bd)}</div><div><b>Confidence</b><br>${esc(d.confidence)}%</div><div><b>Trend</b><br>${esc(d.trend)}</div><div><b>Risk</b><br>${esc(d.risk)}</div></div><p><b>Reason:</b> ${esc(d.reason)}</p></div>`}catch(e){r.innerHTML=`<div class="chart-scan-result">${esc(e.message)}</div>`}finally{b.disabled=false;b.textContent='ANALYZE CHART'}}})();
 </script>
 """
         html = html.replace("</head>", css + "</head>", 1)
