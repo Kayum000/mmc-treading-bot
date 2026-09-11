@@ -6,7 +6,7 @@ import hmac
 import os
 import time
 
-from flask import jsonify, request, session
+from flask import current_app, jsonify, request, session
 
 from signals.get_signal import get_signal
 from performance import record_signal
@@ -132,6 +132,7 @@ def init_master_access(app) -> None:
             result = get_signal(pair, mode, automatic=True)
             record_signal(result)
         except Exception as exc:
+            current_app.logger.exception("Master signal failed mode=%s pair=%s", mode, pair)
             return jsonify({"ok": False, "error": str(exc)}), 502
         now = time.time()
         if store.enabled:
