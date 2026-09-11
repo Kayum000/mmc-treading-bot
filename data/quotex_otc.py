@@ -102,12 +102,6 @@ async def _fetch_once(asset: str, offset: int):
 
 def _child_fetch(asset: str, offset: int, conn) -> None:
     try:
-        try:
-            import ctypes
-            libc = ctypes.CDLL(None)
-            libc.prctl(1, 15, 0, 0, 0)  # PR_SET_PDEATHSIG / SIGTERM
-        except Exception:
-            pass
         payload = asyncio.run(_fetch_once(asset, offset))
         conn.send((True, payload))
     except BaseException as exc:
@@ -123,7 +117,9 @@ def _child_fetch(asset: str, offset: int, conn) -> None:
 
 
 def _isolated_fetch(asset: str, offset: int):
-    ctx = mp.get_context("fork")
+    # spawn is intentional: forking a live Gunicorn worker can inherit locks,
+    # threads, and event-loop state. A clean interpreter is safer for Chrome.
+    ctx = mp.get_context("spawn")
     parent_conn, child_conn = ctx.Pipe(duplex=False)
     process = ctx.Process(target=_child_fetch, args=(asset, offset), name="quotex-fetch")
     process.daemon = True
