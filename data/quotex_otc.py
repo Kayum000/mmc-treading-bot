@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import threading
 import time
@@ -18,6 +19,7 @@ _LOCK = threading.Lock()
 _CACHE: dict[tuple[str, int], tuple[float, pd.DataFrame]] = {}
 _BLOCK_UNTIL = 0.0
 _BLOCK_ERROR = ""
+_LOG = logging.getLogger(__name__)
 
 
 def _rss_mb() -> float:
@@ -139,6 +141,7 @@ def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> 
             _CACHE[key] = (time.monotonic(), df)
             return df.copy(deep=True)
         except Exception as exc:
+            _LOG.exception("Quotex OTC fetch failed for %s: %s", canonical, exc)
             text = str(exc).lower()
             if "403" in text or "forbidden" in text or "cloudflare" in text:
                 _BLOCK_ERROR = "Quotex returned an access/Cloudflare block from the server."
