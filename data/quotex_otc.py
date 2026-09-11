@@ -32,6 +32,10 @@ def _rss_mb() -> float:
 
 def _client():
     try:
+        # QuotexPy 1.40.7 still imports the removed stdlib distutils on some
+        # runtimes. Import setuptools first so its distutils compatibility shim
+        # is installed before QuotexPy is loaded.
+        import setuptools  # noqa: F401
         from quotexpy import Quotex
     except Exception as exc:
         raise RuntimeError(f"QuotexPy load failed: {type(exc).__name__}: {exc}") from exc
