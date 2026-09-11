@@ -23,7 +23,6 @@ _BLOCK_UNTIL = 0.0
 _BLOCK_ERROR = ""
 _LOG = logging.getLogger(__name__)
 
-# Keep one authenticated Quotex WebSocket session alive per Render worker.
 _LOOP: asyncio.AbstractEventLoop | None = None
 _LOOP_THREAD: threading.Thread | None = None
 _CLIENT = None
@@ -50,12 +49,22 @@ def _client():
     password = os.getenv("QUOTEX_PASSWORD", "")
     if not email or not password:
         raise RuntimeError("Quotex OTC চালাতে QUOTEX_EMAIL/QUOTEX_PASSWORD সেট করতে হবে।")
-    return Quotex(
-        email=email,
-        password=password,
-        lang=os.getenv("QUOTEX_LANG", "en"),
-        time_period=_PERIOD,
-    )
+
+    kwargs = {
+        "email": email,
+        "password": password,
+        "lang": os.getenv("QUOTEX_LANG", "en"),
+        "time_period": _PERIOD,
+    }
+    # Some QuotexPy builds require the browser-assisted login explicitly.
+    # Enable it only when this installed build exposes the option.
+    try:
+        params = inspect.signature(Quotex).parameters
+        if "browser" in params:
+            kwargs["browser"] = True
+    except (TypeError, ValueError):
+        pass
+    return Quotex(**kwargs)
 
 
 def _rows(payload):
@@ -99,7 +108,6 @@ async def _close_client_async(client) -> None:
 
 
 async def _persistent_get(asset: str, offset: int):
-    """Fetch candles from one reusable session, with bounded reconnects."""
     global _CLIENT
     last_exc = None
     for attempt in range(2):
@@ -107,11 +115,13 @@ async def _persistent_get(asset: str, offset: int):
         try:
             if client is None:
                 client = _client()
-                # connect() itself can hang when the broker WebSocket is
-                # unreachable, so bound it separately from get_candles().
                 connected = await asyncio.wait_for(client.connect(), timeout=20)
-                if not connected:
-                    raise RuntimeError("Quotex connection failed")
+                if isinstance(connected, tuple):
+                    ok, reason = (connected + ("", ""))[:2]
+                else:
+                    ok, reason = bool(connected), ""
+                if not ok:
+                    raise RuntimeError(f"Quotex connection failed: {reason or 'no reason returned'}")
                 _CLIENT = client
                 _LOG.info("Quotex OTC session connected")
             return await asyncio.wait_for(
@@ -159,7 +169,6 @@ def _ensure_loop() -> asyncio.AbstractEventLoop:
 def _run_persistent(asset: str, offset: int):
     loop = _ensure_loop()
     future = asyncio.run_coroutine_threadsafe(_persistent_get(asset, offset), loop)
-    # Two attempts can take at most ~20+25 + 0.5 + 20+25 seconds.
     return future.result(timeout=95)
 
 
