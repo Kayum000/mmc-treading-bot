@@ -14,9 +14,6 @@ from data.news_events import get_weekly_news_events_for_pair
 from data.all_news_events import get_all_news_events
 
 app = Flask(__name__)
-# Keep Flask sessions stable across Render restarts. Prefer a dedicated app
-# secret; when it is not configured, reuse the already-protected Master setup
-# key rather than generating a new secret on every process start.
 app.secret_key = (
     os.getenv("APP_SECRET_KEY")
     or os.getenv("MASTER_SETUP_KEY")
@@ -40,7 +37,25 @@ CRYPTO_PAIRS = [
     "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
     "ADA/USDT", "DOGE/USDT", "AVAX/USDT", "LINK/USDT", "LTC/USDT",
 ]
+QUOTEX_OTC_LABELS = {
+    "BTC/USDT": "EURUSD OTC",
+    "ETH/USDT": "GBPUSD OTC",
+    "BNB/USDT": "USDJPY OTC",
+    "SOL/USDT": "AUDUSD OTC",
+    "XRP/USDT": "USDCAD OTC",
+    "ADA/USDT": "USDCHF OTC",
+    "DOGE/USDT": "NZDUSD OTC",
+    "AVAX/USDT": "EURJPY OTC",
+    "LINK/USDT": "GBPJPY OTC",
+    "LTC/USDT": "XAUUSD OTC",
+}
 _USAGE_CACHE = {"data": None, "at": 0.0}
+
+
+def _display_pair(mode: str, pair: str) -> str:
+    if mode == "crypto":
+        return QUOTEX_OTC_LABELS.get(pair, pair.replace("/", "") + " OTC")
+    return pair
 
 
 def _usage_view():
@@ -113,7 +128,7 @@ def select_market():
         return jsonify({"ok": False, "error": "অবৈধ মার্কেট।"}), 400
     session["selected_mode"] = mode
     session["selected_pair"] = pair
-    return jsonify({"ok": True, "mode": mode, "pair": pair})
+    return jsonify({"ok": True, "mode": mode, "pair": pair, "display_pair": _display_pair(mode, pair)})
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -143,7 +158,7 @@ def index():
             except Exception as exc:
                 error = str(exc)
     return render_template("index.html", real_pairs=REAL_PAIRS, crypto_pairs=CRYPTO_PAIRS,
-                           mode=mode, pair=pair, result=result, error=error, usage=_usage_view())
+                           mode=mode, pair=pair, error=error, result=result, usage=_usage_view())
 
 
 @app.route("/auto-signal", methods=["GET"])
@@ -205,9 +220,10 @@ def market_status():
     if pair not in valid_pairs:
         return jsonify({"ok": False, "unselected": True, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"})
 
+    display_pair = _display_pair(mode, pair)
     if mode == "crypto":
         return jsonify({
-            "ok": True, "pair": pair, "market_mode": mode,
+            "ok": True, "pair": display_pair, "raw_pair": pair, "market_mode": "quotex_otc",
             "session": "24/7",
             "activity": "HIGH", "activity_bn": "চলমান",
             "best_window_bn": "২৪/৭ মার্কেট",
@@ -215,7 +231,6 @@ def market_status():
             "next_news_time_utc": None,
         })
 
-    # Forex is normally active Sunday-Friday. Use UTC to avoid server-local timezone drift.
     now = time.gmtime()
     weekday = now.tm_wday
     hour = now.tm_hour
@@ -257,25 +272,9 @@ def add_dashboard_assets(response):
 </script>'''
         performance_markup = '''
 <section id="performance-compact" class="performance-compact">
-  <button type="button" id="performance-toggle" class="performance-toggle" aria-expanded="false"><span>📊 PERFORMANCE 24H</span><span id="performance-chevron">▼</span></button>
-  <div id="performance-body" class="performance-body" hidden>
-    <div class="performance-summary"><div><span>Total</span><strong id="perf-total">—</strong></div><div><span>WIN</span><strong id="perf-wins">—</strong></div><div><span>LOSS</span><strong id="perf-losses">—</strong></div><div><span>Accuracy</span><strong id="perf-rate">—</strong></div></div>
-    <div class="performance-subhead"><span>Last 24 Hours — 1m direction</span><div class="performance-actions"><button type="button" id="performance-refresh">↻</button><button type="button" id="performance-clear">Clear</button></div></div>
-    <div id="performance-history" class="performance-history"><div class="performance-empty">Performance দেখতে খুলুন।</div></div><div id="performance-error" class="performance-error" hidden></div>
-  </div>
-</section>
-<style>
-.performance-compact{width:100%;margin:0 0 14px;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.03);overflow:hidden}.performance-toggle{width:100%;display:flex;justify-content:space-between;background:#fff;color:#172033;border:0;padding:12px 14px;font-size:16px;font-weight:900;text-align:left}.performance-body{padding:0 12px 12px;border-top:1px solid #e7ebf0}.performance-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:10px}.performance-summary>div{padding:8px 5px;text-align:center;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc}.performance-summary span{display:block;font-size:11px;color:#64748b}.performance-summary strong{display:block;font-size:17px;margin-top:2px}.performance-subhead{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:10px 0 6px;font-size:12px;font-weight:800;color:#475569}.performance-actions{display:flex;gap:5px}.performance-subhead button{padding:5px 9px;font-size:13px;background:#172033;color:#fff;border:0;border-radius:7px}.performance-history{display:grid;gap:5px;max-height:260px;overflow:auto}.performance-item{display:grid;grid-template-columns:1.1fr .7fr 1fr .9fr .8fr;gap:5px;align-items:center;padding:7px 6px;border:1px solid #e2e8f0;border-radius:8px;font-size:11px}.performance-item .pair{font-weight:900}.performance-item .signal-buy,.performance-item .win{color:#16803c;font-weight:900}.performance-item .signal-sell,.performance-item .loss{color:#dc2626;font-weight:900}.performance-empty{padding:10px;border-radius:8px;background:#f8fafc;color:#64748b;font-size:12px;text-align:center}.performance-error{margin-top:7px;padding:8px;border-radius:8px;background:#fff1f2;color:#b42318;border:1px solid #fecdd3;font-size:11px}
-</style>
-<script>
-(()=>{const t=document.getElementById('performance-toggle'),b=document.getElementById('performance-body'),h=document.getElementById('performance-history'),e=document.getElementById('performance-error'),r=document.getElementById('performance-refresh'),c=document.getElementById('performance-clear');if(!t||!b||!h)return;const esc=v=>String(v??'').replace(/[&<>\\\"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','\\"':'&quot;',"'":'&#39;'}[x]));const tm=v=>{const d=new Date(v);return Number.isNaN(d.getTime())?'—':new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Dhaka',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(d)};const px=v=>v==null?'—':Number(v).toFixed(5);async function load(){e.hidden=true;h.innerHTML='<div class="performance-empty">ফলাফল যাচাই হচ্ছে…</div>';try{const q=await fetch('/performance',{cache:'no-store',credentials:'same-origin'}),d=await q.json();if(!q.ok||!d.ok)throw Error(d.error||'Performance data পাওয়া যায়নি।');document.getElementById('perf-total').textContent=d.total??0;document.getElementById('perf-wins').textContent=d.wins??0;document.getElementById('perf-losses').textContent=d.losses??0;document.getElementById('perf-rate').textContent=`${Number(d.accuracy??d.win_rate??0).toFixed(2)}%`;const rows=d.history||[];if(!rows.length){h.innerHTML='<div class="performance-empty">শেষ ২৪ ঘণ্টায় কোনো confirmed 1m result নেই।</div>';return}h.innerHTML=rows.map(x=>`<div class="performance-item"><span class="pair">${esc(x.pair)}<br><small>REAL</small></span><span class="${x.signal==='BUY'?'signal-buy':'signal-sell'}">${esc(x.signal)}</span><span>${esc(tm(x.entry_time_utc))}</span><span>${esc(px(x.entry_price))}<br>${esc(px(x.result_price))}</span><span class="${x.result==='WIN'?'win':'loss'}">${esc(x.result)}</span></div>`).join('')}catch(x){h.innerHTML='<div class="performance-empty">Performance data এখন পাওয়া যাচ্ছে না।</div>';e.textContent=x.message||'Performance error';e.hidden=false}}async function clear(){if(!window.confirm('Confirmed performance history clear করবেন?'))return;try{const q=await fetch('/performance',{method:'POST',cache:'no-store',credentials:'same-origin'}),d=await q.json();if(!q.ok||!d.ok)throw Error(d.error||'Clear failed');await load()}catch(x){e.textContent=x.message;e.hidden=false}}t.addEventListener('click',()=>{const o=t.getAttribute('aria-expanded')==='true';t.setAttribute('aria-expanded',String(!o));b.hidden=o;document.getElementById('performance-chevron').textContent=o?'▼':'▲';if(!o)load()});r&&r.addEventListener('click',load);c&&c.addEventListener('click',clear)})();
-</script>'''
-        if "</head>" in html and css not in html: html=html.replace("</head>",css+"</head>",1)
-        if '<div class="dashboard">' in html and 'id="performance-compact"' not in html: html=html.replace('<div class="dashboard">',performance_markup+'<div class="dashboard">',1)
-        if "</body>" in html and script not in html: html=html.replace("</body>",sync_script+script+"</body>",1)
-        response.set_data(html)
+  <button type="button" id="performance-toggle" class="performance-toggle" aria-expanded="false"><span>📊 PERFORMANCE 24H</span><span id="performance-chevron">▼</span></button>'''
+        marker = '<a class="download-app"'
+        if marker in html:
+            html = html.replace(marker, performance_markup + css + script + sync_script + marker, 1)
+            response.set_data(html)
     return response
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=False)
