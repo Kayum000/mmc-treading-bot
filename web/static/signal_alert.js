@@ -67,14 +67,12 @@
       if (mode !== 'crypto') return;
       const raw = String(select.value).toUpperCase();
       const label = OTC_LABELS[raw] || OTC_LABELS[select.value] || String(select.options[select.selectedIndex]?.textContent || '').trim();
-      if (label) statusPair.textContent = label;
+      if (label && statusPair.textContent !== label) statusPair.textContent = label;
     };
     syncStatusPair();
-    setInterval(syncStatusPair, 250);
-    if (typeof MutationObserver !== 'undefined' && statusPair) {
-      new MutationObserver(syncStatusPair).observe(statusPair, {childList:true, characterData:true, subtree:true});
-    }
     select.addEventListener('change', syncStatusPair);
+    const modeInput = document.getElementById('mode');
+    if (modeInput) modeInput.addEventListener('change', syncStatusPair);
   }
   function syncSelectedMarket() {
     const mode = document.getElementById('mode')?.value || '';
