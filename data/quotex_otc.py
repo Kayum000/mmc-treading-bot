@@ -117,12 +117,13 @@ def _child_fetch(asset: str, offset: int, conn) -> None:
 
 
 def _isolated_fetch(asset: str, offset: int):
-    # spawn is intentional: forking a live Gunicorn worker can inherit locks,
-    # threads, and event-loop state. A clean interpreter is safer for Chrome.
+    # A clean spawned interpreter prevents Gunicorn state from leaking into
+    # browser/WebSocket code. The child must NOT be daemonized: Chromium and
+    # undetected-chromedriver may create their own subprocesses.
     ctx = mp.get_context("spawn")
     parent_conn, child_conn = ctx.Pipe(duplex=False)
     process = ctx.Process(target=_child_fetch, args=(asset, offset), name="quotex-fetch")
-    process.daemon = True
+    process.daemon = False
     process.start()
     child_conn.close()
     try:
