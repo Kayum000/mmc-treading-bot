@@ -20,14 +20,6 @@ _BLOCK_UNTIL = 0.0
 _BLOCK_ERROR = ""
 
 
-def _run(value, timeout: float):
-    if asyncio.iscoroutine(value) or isinstance(value, asyncio.Future):
-        async def wait_value():
-            return await asyncio.wait_for(value, timeout=timeout)
-        return asyncio.run(wait_value())
-    return value
-
-
 def _rss_mb() -> float:
     try:
         for line in Path("/proc/self/status").read_text(errors="ignore").splitlines():
@@ -83,6 +75,14 @@ def _rows(payload):
     return out
 
 
+async def _connect_and_get(client, asset: str, offset: int):
+    """Keep connect() and get_candles() on the same asyncio loop."""
+    connected = await client.connect()
+    if not connected:
+        raise RuntimeError("Quotex connection failed")
+    return await asyncio.wait_for(client.get_candles(asset, offset, _PERIOD), timeout=35)
+
+
 def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> pd.DataFrame:
     global _BLOCK_UNTIL, _BLOCK_ERROR
     asset = str(asset).strip()
@@ -109,11 +109,8 @@ def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> 
         client = None
         try:
             client = _client()
-            connected = _run(client.connect(), 35)
-            if not connected:
-                raise RuntimeError("Quotex connection failed")
             offset = _PERIOD * min(max(int(count) + 20, 180), 12000)
-            payload = _run(client.get_candles(canonical, offset, _PERIOD), 35)
+            payload = asyncio.run(_connect_and_get(client, canonical, offset))
             rows = _rows(payload)
             if not rows:
                 raise RuntimeError(f"Quotex returned no candle data for {canonical}.")
