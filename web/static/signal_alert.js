@@ -1,85 +1,20 @@
 (() => {
   let audioContext = null;
   let lastSignalKey = '';
-  const OTC_LABELS = {
-    'BTC/USDT': 'EURUSD OTC', 'ETH/USDT': 'GBPUSD OTC', 'BNB/USDT': 'USDJPY OTC',
-    'SOL/USDT': 'AUDUSD OTC', 'XRP/USDT': 'USDCAD OTC', 'ADA/USDT': 'USDCHF OTC',
-    'DOGE/USDT': 'NZDUSD OTC', 'AVAX/USDT': 'EURJPY OTC', 'LINK/USDT': 'GBPJPY OTC',
-    'LTC/USDT': 'XAUUSD OTC'
-  };
-
-  function ensureAudio() {
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtx) return null;
-    if (!audioContext) audioContext = new AudioCtx();
-    if (audioContext.state === 'suspended') audioContext.resume().catch(() => {});
-    return audioContext;
-  }
-  function tone(ctx, frequency, start, duration, volume) {
-    const osc = ctx.createOscillator(); const gain = ctx.createGain();
-    osc.type = 'sine'; osc.frequency.value = frequency;
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(volume, start + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
-    osc.connect(gain).connect(ctx.destination); osc.start(start); osc.stop(start + duration + 0.03);
-  }
-  function playSignalSound(signal) {
-    const ctx = ensureAudio(); if (!ctx) return; const now = ctx.currentTime + 0.03;
-    if (signal === 'BUY') { tone(ctx, 880, now, 0.16, 0.18); tone(ctx, 1175, now + 0.20, 0.20, 0.18); }
-    else if (signal === 'SELL') { tone(ctx, 740, now, 0.16, 0.18); tone(ctx, 587, now + 0.20, 0.20, 0.18); tone(ctx, 440, now + 0.40, 0.24, 0.16); }
-  }
-  function showBrowserNotification(signal, pair) {
-    if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    try { new Notification(`MMC ${signal}`, {body: `${pair || 'Market'} — ${signal} signal`}); } catch (_) {}
-  }
-  window.enableSignalAudio = function () {
-    ensureAudio();
-    if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
-  };
-  window.alertForSignal = function (result) {
-    if (!result || !result.signal) return;
-    const signal = String(result.signal).toUpperCase(); if (signal !== 'BUY' && signal !== 'SELL') return;
-    const key = `${result.pair || ''}|${signal}|${result.entry_time_utc || ''}`;
-    if (key === lastSignalKey) return; lastSignalKey = key;
-    playSignalSound(signal); showBrowserNotification(signal, result.pair);
-    if (window.AndroidSignalAlert && typeof window.AndroidSignalAlert.notifySignal === 'function') {
-      try { window.AndroidSignalAlert.notifySignal(signal, String(result.pair || 'MMC Live Signal')); } catch (_) {}
-    }
-  };
-  function configureDownloadApp() {
-    const link = document.querySelector('.download-app'); if (!link) return;
-    const ua = navigator.userAgent || '';
-    if (/Android/i.test(ua)) { link.href = 'https://github.com/Kayum000/mmc-treading-bot/releases/download/latest/app-debug.apk'; link.textContent = '📲 Download Android App'; }
-    else if (/Windows NT/i.test(ua)) { link.href = 'https://github.com/Kayum000/mmc-treading-bot/releases/download/latest-windows/MMC-Trading-Bot.exe'; link.textContent = '💻 Download Windows App'; }
-    else { link.href = 'https://github.com/Kayum000/mmc-treading-bot/releases/download/latest/app-debug.apk'; link.textContent = '📲 Download Android App'; }
-  }
-  function installQuotexLabels() {
-    const labels = ['EURUSD OTC','GBPUSD OTC','USDJPY OTC','AUDUSD OTC','USDCAD OTC','USDCHF OTC','NZDUSD OTC','EURJPY OTC','GBPJPY OTC','XAUUSD OTC'];
-    document.querySelectorAll('.mode-btn').forEach(btn => { if (btn.dataset.mode === 'crypto') btn.textContent = 'QUOTEX OTC'; });
-    const select = document.getElementById('pair'); if (!select) return;
-    const opts = Array.from(select.options).filter(o => o.dataset.market === 'crypto');
-    opts.forEach((o, i) => { if (labels[i]) o.textContent = labels[i]; });
-  }
-  function syncSelectedMarket() {
-    const mode = document.getElementById('mode')?.value || '';
-    const pair = document.getElementById('pair')?.value || '';
-    if (!mode || !pair) return;
-    const body = new URLSearchParams({mode, pair});
-    fetch('/select-market', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'}, body, credentials:'same-origin', cache:'no-store'}).catch(() => {});
-  }
-  function cleanUnwantedAutoStatus() {
-    const el = document.getElementById('auto-status'); if (!el) return;
-    const unwanted = 'পরের 1-minute candle শুরু হলে signal হবে।';
-    if (!el.textContent.includes(unwanted)) return;
-    const cleaned = el.textContent.replace(unwanted, '').replace(/\s*—\s*$/, '').trim();
-    el.textContent = cleaned || 'AUTO SIGNAL চালু';
-  }
-  document.addEventListener('DOMContentLoaded', () => {
-    configureDownloadApp(); installQuotexLabels(); cleanUnwantedAutoStatus();
-    const target = document.getElementById('auto-status');
-    if (target && typeof MutationObserver !== 'undefined') new MutationObserver(cleanUnwantedAutoStatus).observe(target, {childList:true,characterData:true,subtree:true});
-    setTimeout(syncSelectedMarket, 800);
-    setTimeout(syncSelectedMarket, 2000);
-  });
-  document.addEventListener('click', () => window.enableSignalAudio(), {once:true});
+  const OTC_LABELS = {'BTC/USDT':'EURUSD OTC','ETH/USDT':'GBPUSD OTC','BNB/USDT':'USDJPY OTC','SOL/USDT':'AUDUSD OTC','XRP/USDT':'USDCAD OTC','ADA/USDT':'USDCHF OTC','DOGE/USDT':'NZDUSD OTC','AVAX/USDT':'EURJPY OTC','LINK/USDT':'GBPJPY OTC','LTC/USDT':'XAUUSD OTC'};
+  function ensureAudio(){const A=window.AudioContext||window.webkitAudioContext;if(!A)return null;if(!audioContext)audioContext=new A();if(audioContext.state==='suspended')audioContext.resume().catch(()=>{});return audioContext}
+  function tone(c,f,s,d,v){const o=c.createOscillator(),g=c.createGain();o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(.0001,s);g.gain.exponentialRampToValueAtTime(v,s+.02);g.gain.exponentialRampToValueAtTime(.0001,s+d);o.connect(g).connect(c.destination);o.start(s);o.stop(s+d+.03)}
+  function playSignalSound(s){const c=ensureAudio();if(!c)return;const n=c.currentTime+.03;if(s==='BUY'){tone(c,880,n,.16,.18);tone(c,1175,n+.2,.2,.18)}else if(s==='SELL'){tone(c,740,n,.16,.18);tone(c,587,n+.2,.2,.18);tone(c,440,n+.4,.24,.16)}}
+  function showBrowserNotification(s,p){if(!('Notification'in window)||Notification.permission!=='granted')return;try{new Notification(`MMC ${s}`,{body:`${p||'Market'} — ${s} signal`})}catch(_){}}
+  window.enableSignalAudio=()=>{ensureAudio();if('Notification'in window&&Notification.permission==='default')Notification.requestPermission().catch(()=>{})};
+  window.alertForSignal=r=>{if(!r||!r.signal)return;const s=String(r.signal).toUpperCase();if(s!=='BUY'&&s!=='SELL')return;const k=`${r.pair||''}|${s}|${r.entry_time_utc||''}`;if(k===lastSignalKey)return;lastSignalKey=k;playSignalSound(s);showBrowserNotification(s,r.pair);if(window.AndroidSignalAlert&&typeof window.AndroidSignalAlert.notifySignal==='function'){try{window.AndroidSignalAlert.notifySignal(s,String(r.pair||'MMC Live Signal'))}catch(_){}}};
+  function configureDownloadApp(){const l=document.querySelector('.download-app');if(!l)return;const u=navigator.userAgent||'';if(/Android/i.test(u)){l.href='https://github.com/Kayum000/mmc-treading-bot/releases/download/latest/app-debug.apk';l.textContent='📲 Download Android App'}else if(/Windows NT/i.test(u)){l.href='https://github.com/Kayum000/mmc-treading-bot/releases/download/latest-windows/MMC-Trading-Bot.exe';l.textContent='💻 Download Windows App'}else{l.href='https://github.com/Kayum000/mmc-treading-bot/releases/download/latest/app-debug.apk';l.textContent='📲 Download Android App'}}
+  function installQuotexLabels(){const labels=['EURUSD OTC','GBPUSD OTC','USDJPY OTC','AUDUSD OTC','USDCAD OTC','USDCHF OTC','NZDUSD OTC','EURJPY OTC','GBPJPY OTC','XAUUSD OTC'];document.querySelectorAll('.mode-btn').forEach(b=>{if(b.dataset.mode==='crypto')b.textContent='QUOTEX OTC'});const s=document.getElementById('pair');if(!s)return;Array.from(s.options).filter(o=>o.dataset.market==='crypto').forEach((o,i)=>{if(labels[i])o.textContent=labels[i]})}
+  function syncSelectedMarket(){const m=document.getElementById('mode')?.value||'',p=document.getElementById('pair')?.value||'';if(!m||!p)return;fetch('/select-market',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'},body:new URLSearchParams({mode:m,pair:p}),credentials:'same-origin',cache:'no-store'}).catch(()=>{})}
+  function cleanUnwantedAutoStatus(){const e=document.getElementById('auto-status');if(!e)return;const x='পরের 1-minute candle শুরু হলে signal হবে।';if(e.textContent.includes(x))e.textContent=e.textContent.replace(x,'').replace(/\s*—\s*$/,'').trim()||'AUTO SIGNAL চালু'}
+  function addMarketStatus(){const d=document.querySelector('.dashboard'),r=document.getElementById('result-container');if(!d||!r||document.getElementById('mmc-market-status'))return;const p=document.createElement('aside');p.id='mmc-market-status';p.className='panel status-panel';p.style.cssText='display:block!important;visibility:visible!important';p.innerHTML='<h2 class="status-title">📊 Market Status</h2><div class="status-pair" id="mmc-status-pair">Select a market</div><div class="status-row"><div class="status-label">Current Session</div><div class="status-value" id="mmc-status-session">—</div></div><div class="status-row"><div class="status-label">Market Activity</div><div class="status-value" id="mmc-status-activity">—</div></div><div class="status-row"><div class="status-label">Best Trading Window</div><div class="status-value" id="mmc-status-window">—</div></div><div class="status-row"><div class="status-label">News Risk</div><div class="status-value" id="mmc-status-news">—</div></div><div class="status-row"><div class="status-label">Next News</div><div class="status-value" id="mmc-status-news-time">—</div></div><div class="status-note">This is guidance based on session and scheduled-news risk. It is not a BUY/SELL guarantee.</div>';d.insertBefore(p,r);const st=document.createElement('style');st.textContent='#mmc-market-status{display:block!important;visibility:visible!important}@media(max-width:900px){#mmc-market-status{order:0}}';document.head.appendChild(st);updateMarketStatus()}
+  function updateMarketStatus(){const m=document.getElementById('mode')?.value||'',p=document.getElementById('pair')?.value||'',q=OTC_LABELS[p]||p||'Select a market';const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v};set('mmc-status-pair',q);if(!p){['mmc-status-session','mmc-status-activity','mmc-status-window','mmc-status-news','mmc-status-news-time'].forEach(id=>set(id,'—'));return}if(m==='crypto'){set('mmc-status-session','24/7 OTC');set('mmc-status-activity','HIGH');set('mmc-status-window','24/7 OTC Market');set('mmc-status-news','LOW');set('mmc-status-news-time','No scheduled news');return}const d=new Date(),day=d.getUTCDay(),h=d.getUTCHours();let s='New York',a='MEDIUM',w='London session';if(day===0||day===6){s='Market Closed';a='LOW';w='Next Forex session'}else if(h<7){s='Asia';a='MEDIUM';w='London / New York overlap'}else if(h<12){s='London';a='HIGH';w='London / New York overlap'}else if(h<17){s='London / New York';a='HIGH';w='London / New York overlap'}set('mmc-status-session',s);set('mmc-status-activity',a);set('mmc-status-window',w);set('mmc-status-news','LOW');set('mmc-status-news-time','No scheduled news')}
+  document.addEventListener('DOMContentLoaded',()=>{configureDownloadApp();installQuotexLabels();cleanUnwantedAutoStatus();addMarketStatus();setTimeout(syncSelectedMarket,800);setTimeout(syncSelectedMarket,2000);setInterval(updateMarketStatus,60000);const a=document.getElementById('auto-status');if(a&&window.MutationObserver)new MutationObserver(cleanUnwantedAutoStatus).observe(a,{childList:true,characterData:true,subtree:true})});
+  document.addEventListener('change',e=>{if(e.target?.id==='pair'||e.target?.id==='mode')setTimeout(updateMarketStatus,50)});
+  document.addEventListener('click',()=>window.enableSignalAudio(),{once:true});
 })();
