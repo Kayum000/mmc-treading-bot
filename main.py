@@ -13,12 +13,10 @@ from master_recovery_ui import init_master_recovery_ui
 from master_trusted_devices import init_master_trusted_devices
 from market_scanner_ui import init_market_scanner_ui
 from chart_scanner_ui import init_chart_scanner_ui
-from gemini_chart_scanner import analyze_image as gemini_analyze_image
-
-# Keep the scanner UI unchanged while replacing only its vision backend with Gemini.
-chart_scanner_ui._analyze_image = gemini_analyze_image
 
 # Attach isolated UI layers without changing the active authentication or signal strategy.
+# chart_scanner_ui already contains the Gemini backend; do not monkey-patch it with the
+# legacy gemini_chart_scanner API, whose function signature is different.
 init_remember_me(app)
 init_master_access(app)
 init_master_selection_sync(app)
