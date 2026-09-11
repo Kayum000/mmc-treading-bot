@@ -1,6 +1,12 @@
 (() => {
   let audioContext = null;
   let lastSignalKey = '';
+  const OTC_LABELS = {
+    'BTC/USDT': 'EURUSD OTC', 'ETH/USDT': 'GBPUSD OTC', 'BNB/USDT': 'USDJPY OTC',
+    'SOL/USDT': 'AUDUSD OTC', 'XRP/USDT': 'USDCAD OTC', 'ADA/USDT': 'USDCHF OTC',
+    'DOGE/USDT': 'NZDUSD OTC', 'AVAX/USDT': 'EURJPY OTC', 'LINK/USDT': 'GBPJPY OTC',
+    'LTC/USDT': 'XAUUSD OTC'
+  };
 
   function ensureAudio() {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -53,15 +59,22 @@
     const select = document.getElementById('pair'); if (!select) return;
     const opts = Array.from(select.options).filter(o => o.dataset.market === 'crypto');
     opts.forEach((o, i) => { if (labels[i]) o.textContent = labels[i]; });
+
     const statusPair = document.getElementById('status-pair');
     const syncStatusPair = () => {
-      if (statusPair && select.dataset.marketMode !== 'real' && document.getElementById('mode')?.value === 'crypto' && select.value) {
-        const selected = Array.from(select.options).find(o => o.value === select.value);
-        if (selected) statusPair.textContent = selected.textContent;
-      }
+      if (!statusPair || !select.value) return;
+      const mode = document.getElementById('mode')?.value || '';
+      if (mode !== 'crypto') return;
+      const raw = String(select.value).toUpperCase();
+      const label = OTC_LABELS[raw] || OTC_LABELS[select.value] || String(select.options[select.selectedIndex]?.textContent || '').trim();
+      if (label) statusPair.textContent = label;
     };
     syncStatusPair();
-    setInterval(syncStatusPair, 500);
+    setInterval(syncStatusPair, 250);
+    if (typeof MutationObserver !== 'undefined' && statusPair) {
+      new MutationObserver(syncStatusPair).observe(statusPair, {childList:true, characterData:true, subtree:true});
+    }
+    select.addEventListener('change', syncStatusPair);
   }
   function syncSelectedMarket() {
     const mode = document.getElementById('mode')?.value || '';
