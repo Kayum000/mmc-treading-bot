@@ -3,6 +3,10 @@
 The deployed service is the on-demand signal UI. It does not place trades.
 The old CSV CLI remains available as a separate module if needed.
 """
+# Explicitly load the Market Status compatibility bootstrap before importing
+# web.app so Flask creates the legacy endpoint used by the current template.
+import sitecustomize  # noqa: F401
+
 from web.app import app
 from remember_me import init_remember_me
 from master_access import init_master_access
