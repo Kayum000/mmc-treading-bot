@@ -1,10 +1,11 @@
-"""Persistent 1-minute candle-color performance for the active tick-run strategy."""
+"""Persistent 1-minute signal performance for Real Forex and Quotex OTC."""
 from __future__ import annotations
 
 import os
 from datetime import datetime, timezone, timedelta
 
 from data.biquote_forex import fetch_forex_candles
+from data.quotex_otc import fetch_quotex_candles
 
 RETENTION = timedelta(hours=24)
 
@@ -33,6 +34,21 @@ def _utc(value: str | datetime) -> datetime:
 
 def _minute_start(value: str | datetime) -> datetime:
     return _utc(value).replace(second=0, microsecond=0)
+
+
+def _otc_asset(pair: str) -> str:
+    value = str(pair or "").strip().upper().replace("/", "")
+    if value.endswith(" OTC"):
+        value = value[:-4].strip()
+    if value.endswith("_OTC"):
+        value = value[:-4]
+    aliases = {
+        "BTCUSDT": "EURUSD_otc", "ETHUSDT": "GBPUSD_otc", "BNBUSDT": "USDJPY_otc",
+        "SOLUSDT": "AUDUSD_otc", "XRPUSDT": "USDCAD_otc", "ADAUSDT": "USDCHF_otc",
+        "DOGEUSDT": "NZDUSD_otc", "AVAXUSDT": "EURJPY_otc", "LINKUSDT": "GBPJPY_otc",
+        "LTCUSDT": "XAUUSD_otc",
+    }
+    return aliases.get(value, f"{value}_otc")
 
 
 def init_db() -> None:
@@ -67,7 +83,6 @@ def init_db() -> None:
 
 
 def record_signal(result: dict) -> None:
-    """Record one unique BUY/SELL decision for the SAME signal candle."""
     signal = str(result.get("signal", "")).upper()
     if signal not in {"BUY", "SELL"}:
         return
@@ -86,7 +101,7 @@ def record_signal(result: dict) -> None:
                 """, (
                     result.get("market_mode", "real"), result.get("pair", ""), signal,
                     signal_time, entry_time, result.get("entry_price"), result.get("reason"),
-                    None, None,
+                    result.get("mmc_level_type"), result.get("mmc_level_price"),
                 ))
             conn.commit()
     except Exception:
@@ -103,7 +118,6 @@ def _entry_candle(frame, entry_time: datetime):
 
 
 def _candle_color(candle) -> str | None:
-    """Return the candle's directional color from its OHLC values."""
     if candle is None:
         return None
     opening = float(candle["open"])
@@ -116,7 +130,6 @@ def _candle_color(candle) -> str | None:
 
 
 def _outcome(signal: str, candle) -> str | None:
-    """Evaluate strictly from the SAME 1-minute candle that generated the signal."""
     color = _candle_color(candle)
     if color is None:
         return None
@@ -130,7 +143,6 @@ def _outcome(signal: str, candle) -> str | None:
 
 
 def settle_pending() -> None:
-    """Resolve each signal after its signal candle has completed."""
     init_db()
     now = datetime.now(timezone.utc)
     frames = {}
@@ -146,12 +158,15 @@ def settle_pending() -> None:
             """, (now, now - RETENTION))
             rows = cur.fetchall()
             for row_id, mode, pair, signal, entry_time in rows:
-                if mode != "real":
-                    continue
                 key = (mode, pair)
                 if key not in frames:
                     try:
-                        frames[key] = fetch_forex_candles(pair, "1min", outputsize=200)
+                        if mode == "real":
+                            frames[key] = fetch_forex_candles(pair, "1min", outputsize=200)
+                        elif mode == "crypto":
+                            frames[key] = fetch_quotex_candles(_otc_asset(pair), "1m", 240)
+                        else:
+                            frames[key] = None
                     except Exception:
                         frames[key] = None
                 candle = _entry_candle(frames[key], entry_time)
@@ -177,7 +192,6 @@ def settle_pending() -> None:
 
 
 def clear_performance_history() -> dict:
-    """Clear confirmed result history only."""
     try:
         init_db()
         with _connect() as conn:
@@ -201,7 +215,6 @@ def get_performance() -> dict:
                            COUNT(*) FILTER (WHERE result='LOSS')
                     FROM mmc_signal_performance
                     WHERE signal_time_utc >= NOW() - INTERVAL '24 hours'
-                      AND market_mode='real'
                 """)
                 total, wins, losses = [int(x or 0) for x in cur.fetchone()]
                 accuracy = (wins / total * 100.0) if total else 0.0
@@ -210,7 +223,6 @@ def get_performance() -> dict:
                            entry_price_actual, result_price, result
                     FROM mmc_signal_performance
                     WHERE signal_time_utc >= NOW() - INTERVAL '24 hours'
-                      AND market_mode='real'
                       AND result IN ('WIN','LOSS')
                     ORDER BY signal_time_utc DESC LIMIT 50
                 """)
@@ -225,16 +237,11 @@ def get_performance() -> dict:
                         "result": row[8],
                     })
         return {
-            "ok": True,
-            "total": total,
-            "wins": wins,
-            "losses": losses,
-            "accuracy": round(accuracy, 2),
-            "win_rate": round(accuracy, 2),
-            "history": history,
-            "timeframe": "1m",
-            "evaluation": "signal candle (the current 1-minute candle in which the signal was generated)",
-            "strategy": "tick_run_pressure",
+            "ok": True, "total": total, "wins": wins, "losses": losses,
+            "accuracy": round(accuracy, 2), "win_rate": round(accuracy, 2),
+            "history": history, "timeframe": "1m",
+            "evaluation": "signal entry candle",
+            "strategy": "tick_run_pressure + Quotex OTC multi-timeframe",
         }
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
