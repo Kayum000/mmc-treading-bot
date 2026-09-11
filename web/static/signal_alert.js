@@ -63,6 +63,21 @@
     syncStatusPair();
     setInterval(syncStatusPair, 500);
   }
+  function ensureSignalPanelVisible() {
+    const panel = document.getElementById('result-container');
+    const status = document.getElementById('market-status-panel');
+    const news = document.getElementById('news-panel');
+    if (!panel || !status || !news) return;
+    if (window.innerWidth <= 850) {
+      panel.style.order = '1';
+      status.style.order = '2';
+      news.style.order = '3';
+    } else {
+      panel.style.order = '';
+      status.style.order = '';
+      news.style.order = '';
+    }
+  }
   function cleanUnwantedAutoStatus() {
     const el = document.getElementById('auto-status'); if (!el) return;
     const unwanted = 'পরের 1-minute candle শুরু হলে signal হবে।';
@@ -71,7 +86,8 @@
     el.textContent = cleaned || 'AUTO SIGNAL চালু';
   }
   document.addEventListener('DOMContentLoaded', () => {
-    configureDownloadApp(); installQuotexLabels(); cleanUnwantedAutoStatus();
+    configureDownloadApp(); installQuotexLabels(); ensureSignalPanelVisible(); cleanUnwantedAutoStatus();
+    window.addEventListener('resize', ensureSignalPanelVisible);
     const target = document.getElementById('auto-status');
     if (target && typeof MutationObserver !== 'undefined') new MutationObserver(cleanUnwantedAutoStatus).observe(target, {childList:true,characterData:true,subtree:true});
   });
