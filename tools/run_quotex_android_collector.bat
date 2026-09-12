@@ -39,6 +39,7 @@ exit /b 1
 :adb_ready
 rem --- Find a real Python executable; avoid the Microsoft Store alias ---
 set "PYTHON_EXE="
+set "PYTHON_KIND="
 where py >nul 2>&1
 if not errorlevel 1 (
   py -3 --version >nul 2>&1
@@ -108,7 +109,7 @@ echo   5. If ^"Allow USB debugging?^" appears, tap ALLOW.
 echo.
 echo Current ADB devices:
 "%ADB_EXE%" devices
- echo.
+echo.
 echo Press R to check again, or Q to quit.
 choice /c RQ /n /m "Choice: "
 if errorlevel 2 exit /b 1
@@ -158,10 +159,17 @@ set "QUOTEX_INGEST_SECRET=%SECRET%"
 set "QUOTEX_ANDROID_ASSET=%ASSET%"
 set "QUOTEX_SCREEN_FPS=2"
 
+rem --- Install only the packages used by the Android screen collector ---
+rem The old tools\requirements-android.txt reference was missing from the repo.
+rem Keep this self-contained so a fresh checkout works immediately.
+echo.
+echo Installing local Python packages for the screen collector...
 if defined PYTHON_KIND (
-  py -3 -m pip install -r tools\requirements-android.txt
+  py -3 -m pip install --upgrade pip
+  py -3 -m pip install --upgrade opencv-python-headless numpy requests
 ) else (
-  "%PYTHON_EXE%" -m pip install -r tools\requirements-android.txt
+  "%PYTHON_EXE%" -m pip install --upgrade pip
+  "%PYTHON_EXE%" -m pip install --upgrade opencv-python-headless numpy requests
 )
 if errorlevel 1 (
   echo Failed to install local Python dependencies.
