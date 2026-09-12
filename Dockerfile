@@ -24,7 +24,8 @@ RUN apt-get update \
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --upgrade pip \
-    && pip install -r requirements.txt
+    && pip install -r requirements.txt \
+    && python -m playwright install chromium
 
 COPY . .
 
@@ -40,7 +41,6 @@ RUN sed -i '/chart_tools\.js/d' web/templates/index.html
 RUN grep -q 'chart_mount.js' web/templates/index.html || sed -i 's#</body>#<script src="/static/chart_mount.js" defer></script>\n</body>#' web/templates/index.html
 RUN grep -q 'live_stream_chart.js' web/templates/index.html || sed -i 's#</body>#<script src="/static/live_stream_chart.js" defer></script>\n</body>#' web/templates/index.html
 
-# QuotexPy opens a real Chromium session. Render has no physical display, so
-# give Chromium a virtual X server. xauth is required by xvfb-run to create
-# the temporary Xauthority file. Software rendering also avoids GPU/GL crashes.
+# Quotex data now uses API-Quotex: Playwright only for login/SSID when needed,
+# then a pure WebSocket client for candles. Keep it isolated from Gunicorn.
 CMD ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1365x768x24 -nolisten tcp", "python", "main.py"]
