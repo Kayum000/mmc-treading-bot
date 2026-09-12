@@ -21,5 +21,8 @@ RUN find . -type f -name '*.py' -exec sed -i \
     -e 's/\"Twelve Data\"/\"BiQuote\"/g' \
     -e "s/'Twelve Data'/'BiQuote'/g" {} +
 
+# Hide/remove the obsolete crypto mode from the legacy template at build time.
+RUN grep -q 'forex_only.js' web/templates/index.html || sed -i 's#</body>#<script src="/static/forex_only.js" defer></script>\n</body>#' web/templates/index.html
+
 # Keep the Render image lightweight: no Chromium, Playwright, Xvfb, or Quotex.
 CMD ["python", "main.py"]
