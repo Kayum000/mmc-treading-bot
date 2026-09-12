@@ -1,3 +1,5 @@
-opencv-python>=4.10,<5
+# Local Android/ADB Quotex screen collector dependencies.
+# This file is for the Windows collector only; it is not installed by Render.
 numpy>=1.26,<3
+opencv-python-headless>=4.10,<5
 requests>=2.31,<3
