@@ -37,13 +37,25 @@ pause
 exit /b 1
 
 :adb_ready
-rem --- Find Python launcher ---
+rem --- Find a real Python executable (avoid the Microsoft Store alias) ---
+set "PYTHON_EXE="
 where py >nul 2>&1
-if not errorlevel 1 goto python_ready
-where python >nul 2>&1
-if not errorlevel 1 goto python_command
+if not errorlevel 1 (
+  py -3 --version >nul 2>&1
+  if not errorlevel 1 set "PYTHON_EXE=py -3"
+)
 
-echo Python is not installed. Trying to install Python 3.11 with winget...
+if not defined PYTHON_EXE if exist "%LocalAppData%\Programs\Python\Python311\python.exe" set "PYTHON_EXE=%LocalAppData%\Programs\Python\Python311\python.exe"
+if not defined PYTHON_EXE if exist "%LocalAppData%\Programs\Python\Python312\python.exe" set "PYTHON_EXE=%LocalAppData%\Programs\Python\Python312\python.exe"
+if not defined PYTHON_EXE if exist "%LocalAppData%\Programs\Python\Python313\python.exe" set "PYTHON_EXE=%LocalAppData%\Programs\Python\Python313\python.exe"
+if not defined PYTHON_EXE if exist "%ProgramFiles%\Python311\python.exe" set "PYTHON_EXE=%ProgramFiles%\Python311\python.exe"
+if not defined PYTHON_EXE if exist "%ProgramFiles%\Python312\python.exe" set "PYTHON_EXE=%ProgramFiles%\Python312\python.exe"
+if not defined PYTHON_EXE if exist "%ProgramFiles%\Python313\python.exe" set "PYTHON_EXE=%ProgramFiles%\Python313\python.exe"
+
+if defined PYTHON_EXE goto python_ready
+
+echo A real Python installation was not found.
+echo Trying to install Python 3.11 with Windows Package Manager...
 where winget >nul 2>&1
 if errorlevel 1 (
   echo Windows Package Manager (winget) is not available.
@@ -57,24 +69,18 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-where py >nul 2>&1
-if not errorlevel 1 goto python_ready
-where python >nul 2>&1
-if not errorlevel 1 goto python_command
 
-echo Python was installed, but Windows has not refreshed PATH yet.
-echo Close this window, open a new one, and run this file again.
-pause
-exit /b 1
+rem winget may not refresh PATH in this CMD, so check the standard install path directly.
+if exist "%LocalAppData%\Programs\Python\Python311\python.exe" set "PYTHON_EXE=%LocalAppData%\Programs\Python\Python311\python.exe"
+if not defined PYTHON_EXE if exist "%ProgramFiles%\Python311\python.exe" set "PYTHON_EXE=%ProgramFiles%\Python311\python.exe"
+if not defined PYTHON_EXE (
+  echo Python was installed, but its executable was not found yet.
+  echo Close this window, open a new one, and run this file again.
+  pause
+  exit /b 1
+)
 
 :python_ready
-set "PYTHON_CMD=py -3"
-goto deps
-
-:python_command
-set "PYTHON_CMD=python"
-
-:deps
 rem --- Check/authorize Android device ---
 "%ADB_EXE%" start-server >nul 2>&1
 "%ADB_EXE%" get-state 2>nul | findstr /r /c:"device" >nul
@@ -109,7 +115,7 @@ set "QUOTEX_INGEST_SECRET=%SECRET%"
 set "QUOTEX_ANDROID_ASSET=%ASSET%"
 set "QUOTEX_SCREEN_FPS=2"
 
-%PYTHON_CMD% -m pip install -r tools\requirements-android.txt
+%PYTHON_EXE% -m pip install -r tools\requirements-android.txt
 if errorlevel 1 (
   echo Failed to install local Python dependencies.
   pause
@@ -121,5 +127,5 @@ echo Starting MMC Quotex Android screen collector for %ASSET%...
 echo Keep Quotex visible on the 1-minute OTC chart.
 echo Press Ctrl+C to stop.
 echo.
-%PYTHON_CMD% tools\quotex_android_screen_collector.py
+%PYTHON_EXE% tools\quotex_android_screen_collector.py
 pause
