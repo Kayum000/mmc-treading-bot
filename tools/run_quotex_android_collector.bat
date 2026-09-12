@@ -4,6 +4,16 @@ cd /d "%~dp0.."
 
 set "ADB_DIR=%~dp0platform-tools"
 set "ADB_EXE=%ADB_DIR%\adb.exe"
+set "COLLECTOR_URL=https://raw.githubusercontent.com/Kayum000/mmc-treading-bot/main/tools/quotex_android_screen_collector.py"
+
+rem --- Always refresh the collector code before starting ---
+echo Syncing the latest Android collector from GitHub...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$u='%COLLECTOR_URL%'; $o='%~dp0quotex_android_screen_collector.py'; Invoke-WebRequest -UseBasicParsing -Uri $u -OutFile $o"
+if errorlevel 1 (
+  echo Could not download the latest collector code.
+  pause
+  exit /b 1
+)
 
 rem --- Find or install ADB automatically ---
 if exist "%ADB_EXE%" (
@@ -151,8 +161,8 @@ if "%SECRET%"=="" (
   pause
   exit /b 1
 )
-set /p "ASSET=Quotex OTC asset [USDARS_otc]: "
-if "%ASSET%"=="" set "ASSET=USDARS_otc"
+set /p "ASSET=Quotex OTC asset [AUDUSD_otc]: "
+if "%ASSET%"=="" set "ASSET=AUDUSD_otc"
 
 set "MMC_BOT_URL=https://mmc-treading-bot.onrender.com"
 set "QUOTEX_INGEST_SECRET=%SECRET%"
@@ -160,8 +170,6 @@ set "QUOTEX_ANDROID_ASSET=%ASSET%"
 set "QUOTEX_SCREEN_FPS=2"
 
 rem --- Install only the packages used by the Android screen collector ---
-rem The old tools\requirements-android.txt reference was missing from the repo.
-rem Keep this self-contained so a fresh checkout works immediately.
 echo.
 echo Installing local Python packages for the screen collector...
 if defined PYTHON_KIND (
