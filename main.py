@@ -1,9 +1,6 @@
-"""Application entry point for Render/web deployment.
-
-The deployed service is the on-demand signal UI. It does not place trades.
-The old CSV CLI remains available as a separate module if needed.
-"""
+"""Application entry point for Render/web deployment."""
 from web.app import app
+from market_status import init_market_status
 from quotex_browser_ingest import init_quotex_browser_ingest
 from remember_me import init_remember_me
 from master_access import init_master_access
@@ -12,6 +9,7 @@ from master_session_restore import init_master_session_restore
 from master_recovery_ui import init_master_recovery_ui
 from master_trusted_devices import init_master_trusted_devices
 
+init_market_status(app)
 init_remember_me(app)
 init_master_access(app)
 init_master_selection_sync(app)
