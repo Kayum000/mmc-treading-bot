@@ -9,20 +9,17 @@ from strategy.tick_run_pressure import generate_signal as generate_forex_signal
 from strategy.otc_candle_pressure import generate_signal as generate_otc_signal
 
 OTC_MAP = {
-    "BTC/USDT": "EURUSD_otc", "ETH/USDT": "GBPUSD_otc", "BNB/USDT": "USDJPY_otc",
-    "SOL/USDT": "AUDUSD_otc", "XRP/USDT": "USDCAD_otc", "ADA/USDT": "USDCHF_otc",
-    "DOGE/USDT": "NZDUSD_otc", "AVAX/USDT": "EURJPY_otc", "LINK/USDT": "GBPJPY_otc",
-    "LTC/USDT": "XAUUSD_otc",
-    "USD/ARS": "USDARS_otc", "USD/ARS (OTC)": "USDARS_otc", "USDARS_otc": "USDARS_otc",
+    "EURUSD OTC": "EURUSD_otc", "GBPUSD OTC": "GBPUSD_otc", "USDJPY OTC": "USDJPY_otc",
+    "AUDUSD OTC": "AUDUSD_otc", "USDCAD OTC": "USDCAD_otc", "USDCHF OTC": "USDCHF_otc",
+    "NZDUSD OTC": "NZDUSD_otc", "EURJPY OTC": "EURJPY_otc", "GBPJPY OTC": "GBPJPY_otc",
+    "XAUUSD OTC": "XAUUSD_otc", "USDARS OTC": "USDARS_otc",
 }
-
 
 def _bengali_reason(reason: str) -> str:
     text = str(reason or "").strip()
     for source, translated in (("BUY", "ক্রয়"), ("SELL", "বিক্রয়"), ("HOLD", "অপেক্ষা"), ("Bullish", "বুলিশ"), ("Bearish", "বিয়ারিশ")):
         text = text.replace(source, translated)
     return text
-
 
 def _real_signal(pair: str, automatic: bool) -> dict:
     signal_at_utc = datetime.now(timezone.utc)
@@ -56,9 +53,8 @@ def _real_signal(pair: str, automatic: bool) -> dict:
         "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
     }
 
-
-def _otc_signal(display_pair: str, automatic: bool) -> dict:
-    asset = OTC_MAP.get(display_pair)
+def _otc_signal(pair: str, automatic: bool) -> dict:
+    asset = OTC_MAP.get(pair)
     if not asset or asset not in OTC_PAIRS:
         raise ValueError("Unsupported Quotex OTC market")
     signal_at_utc = datetime.now(timezone.utc)
@@ -69,7 +65,7 @@ def _otc_signal(display_pair: str, automatic: bool) -> dict:
     is_entry = result.action in {"BUY", "SELL"}
     next_candle = (signal_at_utc + timedelta(minutes=1)).replace(second=0, microsecond=0)
     return {
-        "pair": display_pair, "requested_pair": display_pair, "market_mode": "crypto",
+        "pair": pair, "requested_pair": pair, "market_mode": "quotex_otc",
         "source": "Quotex OTC local Android screen collector", "signal": result.action, "market_bias": result.action,
         "entry_signal": result.action, "buy_score": 1 if result.action == "BUY" else 0,
         "sell_score": 1 if result.action == "SELL" else 0, "reason": _bengali_reason(result.reason),
@@ -86,12 +82,10 @@ def _otc_signal(display_pair: str, automatic: bool) -> dict:
         "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
     }
 
-
 def pd_timestamp_utc(value) -> str:
     stamp = value.to_pydatetime() if hasattr(value, "to_pydatetime") else value
     stamp = stamp.astimezone(timezone.utc)
     return stamp.isoformat(timespec="milliseconds")
-
 
 def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) -> dict:
     pair = pair.strip().upper()
@@ -100,6 +94,6 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         raise ValueError("No market selected")
     if mode == "real":
         return _real_signal(pair, automatic)
-    if mode == "crypto":
+    if mode == "quotex_otc":
         return _otc_signal(pair, automatic)
     raise ValueError("Unsupported market mode")
