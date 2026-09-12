@@ -13,13 +13,12 @@ confidently, no candle data is sent.
 Environment variables:
   MMC_BOT_URL            default https://mmc-treading-bot.onrender.com
   QUOTEX_INGEST_SECRET   same secret configured on Render
-  QUOTEX_ANDROID_ASSET   default USDARS_otc (the pair shown in the user's app)
+  QUOTEX_ANDROID_ASSET   default USDARS_otc
   QUOTEX_SCREEN_FPS      default 2 screenshots/sec
   QUOTEX_DEBUG_VERBOSE   1 for local detection diagnostics
 """
 from __future__ import annotations
 
-import io
 import os
 import subprocess
 import sys
@@ -42,21 +41,52 @@ def log(message: str) -> None:
     print(f"[MMC Quotex Android Collector] {message}", flush=True)
 
 
+def _decode_png(raw: bytes) -> np.ndarray | None:
+    if not raw:
+        return None
+    # Some adb/shell combinations can insert CRLF into binary PNG output.
+    # Normalize only when the PNG signature is present and the first decode
+    # attempt fails; never alter an otherwise valid PNG stream.
+    image = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is not None and image.size:
+        return image
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        fixed = raw.replace(b"\r\n", b"\n")
+        image = cv2.imdecode(np.frombuffer(fixed, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if image is not None and image.size:
+            return image
+    return None
+
+
 def adb_screenshot() -> np.ndarray:
-    proc = subprocess.run(
+    """Capture a complete PNG, retrying and falling back if one read is truncated."""
+    commands = [
         ["adb", "exec-out", "screencap", "-p"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=8,
-        check=False,
-    )
-    if proc.returncode != 0 or not proc.stdout:
-        err = proc.stderr.decode("utf-8", errors="ignore").strip()
-        raise RuntimeError(f"ADB screenshot failed: {err or 'device not available'}")
-    image = cv2.imdecode(np.frombuffer(proc.stdout, dtype=np.uint8), cv2.IMREAD_COLOR)
-    if image is None:
-        raise RuntimeError("ADB returned an invalid screenshot")
-    return image
+        ["adb", "shell", "screencap", "-p"],
+    ]
+    last_error = "unknown screenshot error"
+    for attempt in range(3):
+        for command in commands:
+            try:
+                proc = subprocess.run(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=10,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                last_error = str(exc)
+                continue
+            if proc.returncode != 0 or not proc.stdout:
+                last_error = proc.stderr.decode("utf-8", errors="ignore").strip() or "device returned no screenshot"
+                continue
+            image = _decode_png(proc.stdout)
+            if image is not None:
+                return image
+            last_error = f"PNG input buffer is incomplete (received {len(proc.stdout)} bytes)"
+        time.sleep(0.25 * (attempt + 1))
+    raise RuntimeError(last_error)
 
 
 def check_device() -> None:
@@ -83,9 +113,6 @@ def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
 
 def _detect_candles(image: np.ndarray) -> list[dict[str, Any]]:
     h, w = image.shape[:2]
-    # The Quotex portrait layout in the supplied recording places the chart in
-    # roughly the upper 60-70% of the screen. Percent-based bounds tolerate
-    # different phone resolutions while excluding the trade buttons/indicator.
     x0, x1 = 0, int(w * 0.64)
     y0, y1 = int(h * 0.10), int(h * 0.68)
     crop = image[y0:y1, x0:x1]
@@ -97,10 +124,7 @@ def _detect_candles(image: np.ndarray) -> list[dict[str, Any]]:
     for xa, xb in _runs(mask):
         band = mask[:, xa:xb + 1]
         ys, xs = np.where(band > 0)
-        if len(ys) < 35:
-            continue
-        # Require a meaningful vertical candle rather than a tiny UI artifact.
-        if int(ys.max() - ys.min() + 1) < 12:
+        if len(ys) < 35 or int(ys.max() - ys.min() + 1) < 12:
             continue
         body_counts = (band > 0).sum(axis=1)
         peak = int(body_counts.max())
@@ -113,8 +137,6 @@ def _detect_candles(image: np.ndarray) -> list[dict[str, Any]]:
         green_pixels = int(green[:, xa:xb + 1].sum() // 255)
         red_pixels = int(red[:, xa:xb + 1].sum() // 255)
         direction = "BUY" if green_pixels >= red_pixels else "SELL"
-        # Use screen Y as a monotonic price coordinate. Higher on screen means
-        # higher synthetic price; the strategy only uses relative candle shape.
         scale = 0.001
         high = -full_top * scale
         low = -full_bottom * scale
@@ -135,7 +157,6 @@ def _detect_candles(image: np.ndarray) -> list[dict[str, Any]]:
             "wick_height": max(1, full_bottom - full_top + 1),
         })
     candles.sort(key=lambda item: item["x"])
-    # Deduplicate neighboring detections caused by UI overlays.
     clean: list[dict[str, Any]] = []
     for candle in candles:
         if clean and candle["x"] - clean[-1]["x"] < 10:
@@ -147,7 +168,6 @@ def _detect_candles(image: np.ndarray) -> list[dict[str, Any]]:
 
 
 def _make_rows(candles: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    # Exclude the right-most candle: it is normally the currently forming one.
     closed = candles[:-1]
     if len(closed) < 8:
         return []
@@ -178,7 +198,6 @@ class Collector:
         if not rows or not INGEST_SECRET:
             return
         signature = "|".join(f"{r['timestamp']}:{r['close']}" for r in rows[-5:])
-        # Avoid repeatedly replacing the same screenshot-derived history.
         if signature == self.last_signature and time.monotonic() - self.last_send < 45:
             return
         response = self.session.post(
