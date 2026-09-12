@@ -8,6 +8,7 @@ The old CSV CLI remains available as a separate module if needed.
 import sitecustomize  # noqa: F401
 
 from web.app import app
+from quotex_browser_ingest import init_quotex_browser_ingest
 from remember_me import init_remember_me
 from master_access import init_master_access
 from master_selection_sync import init_master_selection_sync
@@ -23,6 +24,7 @@ init_master_selection_sync(app)
 init_master_session_restore(app)
 init_master_recovery_ui(app)
 init_master_trusted_devices(app)
+init_quotex_browser_ingest(app)
 
 
 if __name__ == "__main__":
