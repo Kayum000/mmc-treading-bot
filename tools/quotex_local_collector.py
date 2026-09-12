@@ -20,7 +20,6 @@ import json
 import os
 import sys
 import time
-from collections import defaultdict
 from typing import Any
 
 import requests
@@ -45,15 +44,9 @@ def _target() -> dict[str, Any]:
     response = requests.get(f"{CDP_URL}/json/list", timeout=5)
     response.raise_for_status()
     targets = response.json()
-    candidates = [
-        t for t in targets
-        if t.get("type") == "page" and "qxbroker.com" in str(t.get("url", "")).lower()
-    ]
+    candidates = [t for t in targets if t.get("type") == "page" and "qxbroker.com" in str(t.get("url", "")).lower()]
     if not candidates:
-        candidates = [
-            t for t in targets
-            if t.get("type") == "page" and "quotex" in (str(t.get("title", "")) + str(t.get("url", ""))).lower()
-        ]
+        candidates = [t for t in targets if t.get("type") == "page" and "quotex" in (str(t.get("title", "")) + str(t.get("url", ""))).lower()]
     if not candidates:
         raise RuntimeError("No Quotex browser tab found on Chrome CDP port 9222.")
     return candidates[0]
@@ -69,8 +62,6 @@ async def _cdp_command(ws, counter: list[int], method: str, params: dict[str, An
             if "error" in message:
                 raise RuntimeError(f"CDP {method} failed: {message['error']}")
             return message
-        # Commands are sent before the long-running event loop, so unexpected
-        # events here can safely be ignored.
 
 
 def _json_after_prefix(text: str) -> Any:
@@ -86,13 +77,12 @@ def _json_after_prefix(text: str) -> Any:
 
 
 def _decode_socket_message(payload: str, opcode: int) -> tuple[str | None, Any]:
-    """Decode Socket.IO text or binary payloads without logging their contents."""
+    """Decode Socket.IO text/binary payloads without logging their contents."""
     if opcode == 1:
         if payload.startswith("42"):
             packet = _json_after_prefix(payload[2:])
             if isinstance(packet, list) and packet:
                 return str(packet[0]), packet[1] if len(packet) > 1 else None
-        # Socket.IO binary event placeholder, e.g. 451-["candle", {"_placeholder":true}]
         if payload.startswith("45") and "_placeholder" in payload:
             packet = _json_after_prefix(payload[4:])
             if isinstance(packet, list) and packet:
@@ -102,6 +92,11 @@ def _decode_socket_message(payload: str, opcode: int) -> tuple[str | None, Any]:
         raw = base64.b64decode(payload)
         decoded = raw.decode("utf-8", errors="ignore")
         data = _json_after_prefix(decoded)
+        if isinstance(data, list) and data and isinstance(data[0], (int, float)):
+            if len(data) >= 3:
+                return None, data[2]
+            if len(data) == 2:
+                return None, data[1]
         if isinstance(data, list) and len(data) >= 2 and isinstance(data[0], str):
             return data[0], data[1]
         return None, data
@@ -161,9 +156,7 @@ def _price_from_payload(payload: Any) -> tuple[str | None, float | None, float |
 
 class Collector:
     def __init__(self) -> None:
-        self.counter = [0]
         self.partial: dict[str, dict[str, Any]] = {}
-        self.last_send: dict[str, float] = defaultdict(float)
         self.session = requests.Session()
 
     def _send(self, rows: list[dict[str, Any]]) -> None:
@@ -171,10 +164,9 @@ class Collector:
             return
         if not INGEST_SECRET:
             raise RuntimeError("QUOTEX_INGEST_SECRET is missing. Set the same secret on Render and locally.")
-        payload = {"sent_at": time.time(), "candles": rows}
         response = self.session.post(
             f"{BOT_URL}/quotex/ingest",
-            json=payload,
+            json={"sent_at": time.time(), "candles": rows},
             headers={"X-MMC-Quotex-Key": INGEST_SECRET},
             timeout=10,
         )
@@ -189,8 +181,9 @@ class Collector:
         state = self.partial.get(asset)
         if not state or state["bucket"] != bucket:
             if state:
-                self._send([state.copy()])
-            state = {"asset": asset, "period": PERIOD, "timestamp": float(bucket), "open": price, "high": price, "low": price, "close": price, "_closed": False}
+                row = {k: v for k, v in state.items() if k != "bucket"}
+                self._send([row])
+            state = {"bucket": bucket, "asset": asset, "period": PERIOD, "timestamp": float(bucket), "open": price, "high": price, "low": price, "close": price}
             self.partial[asset] = state
         else:
             state["high"] = max(state["high"], price)
@@ -242,9 +235,8 @@ async def run() -> None:
             payload = response.get("payloadData", "")
             opcode = int(response.get("opcode", 1))
             event_name, data = _decode_socket_message(payload, opcode)
-            if opcode != 1 and pending_event:
-                if data is not None and isinstance(data, (dict, list)):
-                    event_name = pending_event
+            if opcode != 1 and pending_event and data is not None:
+                event_name = pending_event
                 pending_event = None
             if event_name and isinstance(data, dict) and data.get("_placeholder"):
                 pending_event = event_name
