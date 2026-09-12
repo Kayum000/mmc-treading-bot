@@ -13,12 +13,19 @@ from flask import jsonify, request, session
 from data.quotex_otc import ingest_local_candles, local_stream_status
 
 
+def _collector_secret_valid() -> bool:
+    expected = (os.getenv("QUOTEX_INGEST_SECRET") or "").strip()
+    supplied = (request.headers.get("X-MMC-Quotex-Key") or request.args.get("key") or "").strip()
+    return bool(expected and supplied and hmac.compare_digest(supplied, expected))
+
+
 def init_quotex_browser_ingest(app):
     # The web app has a global browser-login guard registered before this
-    # module. This machine-to-machine endpoint authenticates with its own
-    # secret, so mark only this request as authenticated before that guard runs.
+    # module. This endpoint authenticates with its own secret, so a valid
+    # collector request is marked authenticated before the web guard runs.
+    # Invalid/missing secrets never receive this bypass.
     def allow_collector_endpoint():
-        if request.endpoint == "quotex_ingest":
+        if request.endpoint == "quotex_ingest" and _collector_secret_valid():
             session["authenticated"] = True
         return None
 
