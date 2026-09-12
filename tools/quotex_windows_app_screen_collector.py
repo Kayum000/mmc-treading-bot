@@ -7,18 +7,10 @@ to the existing MMC Render ingest endpoint.
 
 It does NOT log in, read passwords/SSIDs, click buttons, place orders, or
 control the Quotex application.
-
-Environment variables:
-  MMC_BOT_URL             default https://mmc-treading-bot.onrender.com
-  QUOTEX_INGEST_SECRET    same secret configured on Render
-  QUOTEX_WINDOWS_ASSET    default AUDUSD_otc
-  QUOTEX_WINDOWS_FPS      default 2 screenshots/sec
-  QUOTEX_DEBUG_VERBOSE    1 for local detection diagnostics
 """
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 import time
 from typing import Any
@@ -26,7 +18,6 @@ from typing import Any
 import cv2
 import numpy as np
 import requests
-import win32con
 import win32gui
 import win32ui
 from PIL import ImageGrab
@@ -52,14 +43,11 @@ def _window_list() -> list[tuple[int, str]]:
     windows: list[tuple[int, str]] = []
 
     def callback(hwnd: int, _extra: Any) -> None:
-        if not win32gui.IsWindowVisible(hwnd):
+        if not win32gui.IsWindowVisible(hwnd) or win32gui.IsIconic(hwnd):
             return
         title = win32gui.GetWindowText(hwnd).strip()
-        if not title:
-            return
-        if win32gui.IsIconic(hwnd):
-            return
-        windows.append((hwnd, title))
+        if title:
+            windows.append((hwnd, title))
 
     win32gui.EnumWindows(callback, None)
     return windows
@@ -69,7 +57,6 @@ def _select_window() -> int:
     windows = _window_list()
     preferred = [item for item in windows if "quotex" in item[1].lower()]
     ordered = preferred + [item for item in windows if item not in preferred]
-
     if not ordered:
         raise RuntimeError("No visible Windows application window was found.")
 
@@ -95,18 +82,30 @@ def _select_window() -> int:
         print("That number is not in the list.")
 
 
-def _client_bbox(hwnd: int) -> tuple[int, int, int, int]:
-    left, top, right, bottom = win32gui.GetClientRect(hwnd)
-    if right <= left or bottom <= top:
+def _client_geometry(hwnd: int) -> tuple[int, int, int, int, int, int, int, int]:
+    client_left, client_top, client_right, client_bottom = win32gui.GetClientRect(hwnd)
+    if client_right <= client_left or client_bottom <= client_top:
         raise RuntimeError("The selected Quotex window has no usable client area.")
-    screen_left, screen_top = win32gui.ClientToScreen(hwnd, (left, top))
-    screen_right, screen_bottom = win32gui.ClientToScreen(hwnd, (right, bottom))
-    return screen_left, screen_top, screen_right, screen_bottom
+    window_left, window_top, window_right, window_bottom = win32gui.GetWindowRect(hwnd)
+    client_screen_left, client_screen_top = win32gui.ClientToScreen(hwnd, (0, 0))
+    offset_x = client_screen_left - window_left
+    offset_y = client_screen_top - window_top
+    client_width = client_right - client_left
+    client_height = client_bottom - client_top
+    return (
+        window_left, window_top, window_right, window_bottom,
+        offset_x, offset_y, client_width, client_height,
+    )
 
 
 def _capture_with_printwindow(hwnd: int) -> np.ndarray | None:
-    left, top, right, bottom = _client_bbox(hwnd)
-    width, height = right - left, bottom - top
+    (
+        window_left, window_top, window_right, window_bottom,
+        offset_x, offset_y, client_width, client_height,
+    ) = _client_geometry(hwnd)
+    width, height = window_right - window_left, window_bottom - window_top
+    if width <= 0 or height <= 0:
+        return None
 
     hwnd_dc = win32gui.GetWindowDC(hwnd)
     if not hwnd_dc:
@@ -118,13 +117,18 @@ def _capture_with_printwindow(hwnd: int) -> np.ndarray | None:
     mem_dc.SelectObject(bitmap)
 
     try:
+        # 2 = PW_RENDERFULLCONTENT; useful for Chromium/Electron-style windows.
         result = win32gui.PrintWindow(hwnd, mem_dc.GetSafeHdc(), 2)
         if result != 1:
             return None
         bits = bitmap.GetBitmapBits(True)
-        image = np.frombuffer(bits, dtype=np.uint8)
-        image = image.reshape((height, width, 4))
+        image = np.frombuffer(bits, dtype=np.uint8).reshape((height, width, 4))
         bgr = image[:, :, :3].copy()
+        right = min(width, offset_x + client_width)
+        bottom = min(height, offset_y + client_height)
+        if right <= offset_x or bottom <= offset_y:
+            return None
+        bgr = bgr[offset_y:bottom, offset_x:right]
         if not bgr.size or float(bgr.std()) < 1.0:
             return None
         return bgr
@@ -136,9 +140,13 @@ def _capture_with_printwindow(hwnd: int) -> np.ndarray | None:
 
 
 def _capture_visible(hwnd: int) -> np.ndarray | None:
-    left, top, right, bottom = _client_bbox(hwnd)
+    _wl, _wt, _wr, _wb, _ox, _oy, client_width, client_height = _client_geometry(hwnd)
+    client_left, client_top = win32gui.ClientToScreen(hwnd, (0, 0))
     try:
-        grabbed = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
+        grabbed = ImageGrab.grab(
+            bbox=(client_left, client_top, client_left + client_width, client_top + client_height),
+            all_screens=True,
+        )
     except Exception:
         return None
     image = np.asarray(grabbed.convert("RGB"))
@@ -181,9 +189,6 @@ def _detect_candles(image: np.ndarray) -> list[dict[str, Any]]:
     if w < 300 or h < 220:
         return []
 
-    # Quotex desktop layouts put the main chart in the central/left portion.
-    # Keeping the ROI away from the top toolbar and right trading controls
-    # substantially reduces false candle detections.
     x0, x1 = int(w * 0.02), int(w * 0.72)
     y0, y1 = int(h * 0.10), int(h * 0.82)
     crop = image[y0:y1, x0:x1]
@@ -221,9 +226,6 @@ def _detect_candles(image: np.ndarray) -> list[dict[str, Any]]:
         red_pixels = int(red[:, xa:xb + 1].sum() // 255)
         direction = "BUY" if green_pixels >= red_pixels else "SELL"
 
-        # Absolute pixel-to-price scale is intentionally normalized. The
-        # existing OTC strategy uses candle direction/body pressure, not the
-        # synthetic absolute price level.
         scale = 0.001
         high = -full_top * scale
         low = -full_bottom * scale
@@ -257,7 +259,6 @@ def _detect_candles(image: np.ndarray) -> list[dict[str, Any]]:
 
 
 def _make_rows(candles: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    # The right-most candle is normally still forming, so never use it.
     closed = candles[:-1]
     if len(closed) < 8:
         return []
