@@ -5,4 +5,11 @@ Flask>=3.0,<4
 psycopg2-binary>=2.9,<3
 gunicorn>=23,<24
 setuptools>=70,<81
-quotexpy==1.40.7
+api_quotex @ git+https://github.com/A11ksa/API-Quotex.git@main
+playwright>=1.40,<2
+websockets>=12,<16
+pydantic>=2,<3
+requests>=2.31,<3
+cloudscraper>=1.2,<2
+beautifulsoup4>=4.12,<5
+loguru>=0.7,<1
