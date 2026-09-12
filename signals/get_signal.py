@@ -57,28 +57,32 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
     asset = OTC_MAP.get(pair)
     if not asset or asset not in OTC_PAIRS:
         raise ValueError("Unsupported Quotex OTC market")
+
+    # Keep the existing OTC candle-pressure strategy unchanged.
+    # Timing follows the Real Market setup: the signal targets the current
+    # 1-minute candle, not the next candle.
     signal_at_utc = datetime.now(timezone.utc)
     candles = fetch_quotex_candles(asset, count=240)
     result = generate_otc_signal(candles)
     last = candles.iloc[-1]
     signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
     is_entry = result.action in {"BUY", "SELL"}
-    next_candle = (signal_at_utc + timedelta(minutes=1)).replace(second=0, microsecond=0)
+    signal_candle = signal_at_utc.replace(second=0, microsecond=0)
     return {
         "pair": pair, "requested_pair": pair, "market_mode": "quotex_otc",
         "source": "Quotex OTC local Android screen collector", "signal": result.action, "market_bias": result.action,
         "entry_signal": result.action, "buy_score": 1 if result.action == "BUY" else 0,
         "sell_score": 1 if result.action == "SELL" else 0, "reason": _bengali_reason(result.reason),
         "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
-        "candle_time": next_candle.isoformat(timespec="seconds") if is_entry else None,
+        "candle_time": signal_candle.isoformat(timespec="seconds") if is_entry else None,
         "analysis_candle_time_utc": pd_timestamp_utc(last["timestamp"]),
         "entry_price": float(last["close"]), "entry_price_type": "latest_closed_otc_candle_reference",
-        "entry_time_utc": next_candle.isoformat(timespec="seconds") if is_entry else None,
-        "entry_time_bd": next_candle.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
-        "entry_candle_time_utc": next_candle.isoformat(timespec="seconds") if is_entry else None,
-        "entry_candle_time_bd": next_candle.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
-        "entry_delay_seconds": max(0, int((next_candle - signal_at_utc).total_seconds())) if is_entry else None,
-        "timeframe": "1-minute OTC candle pressure", "entry_timeframe": "next 1-minute candle",
+        "entry_time_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None,
+        "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
+        "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
+        "entry_candle_time_bd": signal_candle.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
+        "entry_delay_seconds": 0 if is_entry else None,
+        "timeframe": "1-minute OTC candle pressure", "entry_timeframe": "signal candle (current 1-minute candle)",
         "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
     }
 
