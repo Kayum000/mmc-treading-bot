@@ -44,9 +44,6 @@ def log(message: str) -> None:
 def _decode_png(raw: bytes) -> np.ndarray | None:
     if not raw:
         return None
-    # Some adb/shell combinations can insert CRLF into binary PNG output.
-    # Normalize only when the PNG signature is present and the first decode
-    # attempt fails; never alter an otherwise valid PNG stream.
     image = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
     if image is not None and image.size:
         return image
@@ -193,6 +190,7 @@ class Collector:
         self.session = requests.Session()
         self.last_signature = ""
         self.last_send = 0.0
+        self.last_http_error = ""
 
     def send(self, rows: list[dict[str, Any]]) -> None:
         if not rows or not INGEST_SECRET:
@@ -200,14 +198,56 @@ class Collector:
         signature = "|".join(f"{r['timestamp']}:{r['close']}" for r in rows[-5:])
         if signature == self.last_signature and time.monotonic() - self.last_send < 45:
             return
-        response = self.session.post(
-            f"{BOT_URL}/quotex/ingest",
-            json={"sent_at": time.time(), "candles": rows},
-            headers={"X-MMC-Quotex-Key": INGEST_SECRET},
-            timeout=10,
-        )
-        response.raise_for_status()
-        data = response.json()
+
+        try:
+            response = self.session.post(
+                f"{BOT_URL}/quotex/ingest",
+                json={"sent_at": time.time(), "candles": rows},
+                headers={"X-MMC-Quotex-Key": INGEST_SECRET},
+                timeout=10,
+                allow_redirects=False,
+            )
+        except requests.RequestException as exc:
+            message = f"Render connection failed: {exc}"
+            if message != self.last_http_error:
+                log(f"ERROR: {message}")
+                self.last_http_error = message
+            return
+
+        if response.status_code in (301, 302, 303, 307, 308):
+            location = response.headers.get("Location", "")
+            message = f"Render returned HTTP {response.status_code} redirect{(' to ' + location) if location else ''}. Wait for the latest deployment and retry."
+            if message != self.last_http_error:
+                log(f"ERROR: {message}")
+                self.last_http_error = message
+            return
+
+        if not 200 <= response.status_code < 300:
+            body = response.text.strip().replace("\r", " ").replace("\n", " ")[:240]
+            message = f"Render ingest HTTP {response.status_code}: {body or 'empty response'}"
+            if message != self.last_http_error:
+                log(f"ERROR: {message}")
+                self.last_http_error = message
+            return
+
+        try:
+            data = response.json()
+        except ValueError:
+            body = response.text.strip().replace("\r", " ").replace("\n", " ")[:240]
+            message = f"Render returned non-JSON success response: {body or 'empty response'}"
+            if message != self.last_http_error:
+                log(f"ERROR: {message}")
+                self.last_http_error = message
+            return
+
+        if not data.get("ok"):
+            message = f"Render rejected candles: {data.get('error', 'unknown error')}"
+            if message != self.last_http_error:
+                log(f"ERROR: {message}")
+                self.last_http_error = message
+            return
+
+        self.last_http_error = ""
         self.last_signature = signature
         self.last_send = time.monotonic()
         log(f"sent {data.get('accepted', len(rows))} screen candles for {ASSET}")
