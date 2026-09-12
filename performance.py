@@ -51,6 +51,20 @@ def _otc_asset(pair: str) -> str:
     return aliases.get(value, f"{value}_otc")
 
 
+def _display_pair(mode: str, pair: str) -> str:
+    """Return the user-facing market label instead of the legacy internal alias."""
+    if str(mode or "").strip().lower() == "crypto":
+        labels = {
+            "BTC/USDT": "EURUSD OTC", "ETH/USDT": "GBPUSD OTC", "BNB/USDT": "USDJPY OTC",
+            "SOL/USDT": "AUDUSD OTC", "XRP/USDT": "USDCAD OTC", "ADA/USDT": "USDCHF OTC",
+            "DOGE/USDT": "NZDUSD OTC", "AVAX/USDT": "EURJPY OTC", "LINK/USDT": "GBPJPY OTC",
+            "LTC/USDT": "XAUUSD OTC",
+        }
+        normalized = str(pair or "").strip().upper()
+        return labels.get(normalized, normalized.replace("/", "") + " OTC")
+    return str(pair or "")
+
+
 def init_db() -> None:
     with _connect() as conn:
         with conn.cursor() as cur:
@@ -229,7 +243,7 @@ def get_performance() -> dict:
                 history = []
                 for row in cur.fetchall():
                     history.append({
-                        "id": int(row[0]), "market_mode": row[1], "pair": row[2],
+                        "id": int(row[0]), "market_mode": row[1], "pair": _display_pair(row[1], row[2]),
                         "signal": row[3], "signal_time_utc": row[4].isoformat(),
                         "entry_time_utc": row[5].isoformat(),
                         "entry_price": float(row[6]) if row[6] is not None else None,
