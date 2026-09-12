@@ -14,6 +14,16 @@ from data.quotex_otc import ingest_local_candles, local_stream_status
 
 
 def init_quotex_browser_ingest(app):
+    # The main web app has a global login guard registered before this module is
+    # initialized. The collector is a machine-to-machine endpoint, so it must
+    # reach its own secret check without a browser login/session cookie.
+    def allow_collector_endpoint():
+        if request.endpoint == "quotex_ingest":
+            return None
+        return None
+
+    app.before_request_funcs.setdefault(None, []).insert(0, allow_collector_endpoint)
+
     @app.route("/quotex/ingest", methods=["POST"])
     def quotex_ingest():
         expected = (os.getenv("QUOTEX_INGEST_SECRET") or "").strip()
