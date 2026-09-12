@@ -9,3 +9,4 @@ requests>=2.31,<3
 cloudscraper>=1.2,<2
 beautifulsoup4>=4.12,<5
 loguru>=0.7,<1
+websockets>=12,<16
