@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 import multiprocessing as mp
 import os
@@ -16,7 +15,7 @@ OTC_PAIRS = (
     "USDCHF_otc", "NZDUSD_otc", "EURJPY_otc", "GBPJPY_otc", "XAUUSD_otc",
 )
 _PERIOD = 60
-_FETCH_TIMEOUT = 45
+_FETCH_TIMEOUT = 90
 _CACHE_TTL = 15
 _LOCK = mp.RLock()
 _CACHE: dict[tuple[str, int], tuple[float, pd.DataFrame]] = {}
@@ -35,65 +34,67 @@ def _rss_mb() -> float:
     return 0.0
 
 
-def _client():
-    try:
-        from quotexpy import Quotex
-    except Exception as exc:
-        raise RuntimeError(f"QuotexPy load failed: {type(exc).__name__}: {exc}") from exc
+async def _fetch_once(asset: str, count: int):
+    """Login/reuse SSID, fetch candles over WebSocket, then close cleanly."""
     email = os.getenv("QUOTEX_EMAIL", "").strip()
     password = os.getenv("QUOTEX_PASSWORD", "")
     if not email or not password:
         raise RuntimeError("Quotex OTC চালাতে QUOTEX_EMAIL/QUOTEX_PASSWORD সেট করতে হবে।")
 
-    # QuotexPy 1.40.7 does not use a `browser=` constructor flag. Its login
-    # helper defaults to headless=True, which is a bad fit for Cloudflare and
-    # has been unstable with the Debian Chromium runtime on Render. Force a
-    # visible browser and let Docker's Xvfb provide the virtual display.
-    kwargs = {
-        "email": email,
-        "password": password,
-        "lang": os.getenv("QUOTEX_LANG", "en"),
-        "time_period": _PERIOD,
-        "headless": False,
-    }
-    return Quotex(**kwargs)
-
-
-async def _close_client(client) -> None:
-    if client is None:
-        return
     try:
-        result = client.close()
-        if inspect.isawaitable(result):
-            await result
-    except Exception:
-        _LOG.debug("Quotex client close failed", exc_info=True)
+        from api_quotex import AsyncQuotexClient, get_ssid
+    except Exception as exc:
+        raise RuntimeError(f"API-Quotex load failed: {type(exc).__name__}: {exc}") from exc
 
+    # Preserve the previous QuotexPy default account behavior: DEMO/OTC data.
+    # The API-Quotex login helper first validates its saved SSID, then uses a
+    # lightweight Cloudscraper login and only falls back to Playwright when
+    # needed. This removes the unstable undetected-chromedriver path entirely.
+    is_demo = os.getenv("QUOTEX_DEMO", "1").strip().lower() not in {"0", "false", "no"}
+    ok, session = await asyncio.wait_for(
+        get_ssid(
+            email=email,
+            password=password,
+            lang=os.getenv("QUOTEX_LANG", "en"),
+            is_demo=is_demo,
+        ),
+        timeout=70,
+    )
+    if not ok or not isinstance(session, dict):
+        raise RuntimeError("Quotex login/SSID retrieval failed.")
+    ssid = str(session.get("ssid") or "").strip()
+    if not ssid:
+        raise RuntimeError("Quotex login succeeded but no SSID was returned.")
 
-async def _fetch_once(asset: str, offset: int):
-    client = None
+    client = AsyncQuotexClient(
+        ssid=ssid,
+        is_demo=is_demo,
+        persistent_connection=False,
+        auto_reconnect=False,
+        enable_logging=False,
+    )
     try:
-        client = _client()
-        connected = await asyncio.wait_for(client.connect(), timeout=20)
-        if isinstance(connected, tuple):
-            ok = bool(connected[0])
-            reason = connected[1] if len(connected) > 1 else ""
-        else:
-            ok, reason = bool(connected), ""
-        if not ok:
-            raise RuntimeError(f"Quotex connection failed: {reason or 'no reason returned'}")
-        params = inspect.signature(client.get_candles).parameters
-        kwargs = {"asset": asset, "offset": offset, "period": _PERIOD}
-        if "end_from_time" in params:
-            kwargs["end_from_time"] = int(time.time())
-        return await asyncio.wait_for(client.get_candles(**kwargs), timeout=20)
+        connected = await asyncio.wait_for(client.connect(), timeout=25)
+        if not connected:
+            raise RuntimeError("Quotex WebSocket connection failed.")
+        df = await asyncio.wait_for(
+            client.get_candles_dataframe(asset, _PERIOD, count=int(count)),
+            timeout=25,
+        )
+        if df is None or df.empty:
+            raise RuntimeError(f"Quotex returned no candle data for {asset}.")
+        return df.reset_index().to_dict(orient="records")
     finally:
-        await _close_client(client)
+        try:
+            await asyncio.wait_for(client.disconnect(), timeout=5)
+        except Exception:
+            pass
 
 
-def _child_fetch(asset: str, offset: int, conn) -> None:
+def _child_fetch(asset: str, count: int, conn) -> None:
+    """Run the whole browser/WS stack outside the Gunicorn worker."""
     try:
-        payload = asyncio.run(_fetch_once(asset, offset))
+        payload = asyncio.run(_fetch_once(asset, count))
         conn.send((True, payload))
     except BaseException as exc:
         try:
@@ -103,18 +104,16 @@ def _child_fetch(asset: str, offset: int, conn) -> None:
     finally:
         try:
             conn.close()
-        except Exception:
+        except BaseException:
             pass
 
 
-def _isolated_fetch(asset: str, offset: int):
+def _isolated_fetch(asset: str, count: int):
     ctx = mp.get_context("spawn")
     parent_conn, child_conn = ctx.Pipe(duplex=False)
-    # Pass the writable pipe endpoint into the spawned child. Without it,
-    # the child exits before it can report Quotex connection/fetch errors.
     process = ctx.Process(
         target=_child_fetch,
-        args=(asset, offset, child_conn),
+        args=(asset, count, child_conn),
         name="quotex-fetch",
     )
     process.daemon = False
@@ -128,7 +127,9 @@ def _isolated_fetch(asset: str, offset: int):
                     ok, value = parent_conn.recv()
                 except EOFError as exc:
                     process.join(timeout=0.5)
-                    raise RuntimeError(f"Quotex child exited before returning data (exit={process.exitcode}).") from exc
+                    raise RuntimeError(
+                        f"Quotex child exited before returning data (exit={process.exitcode})."
+                    ) from exc
                 if not ok:
                     process.join(timeout=0.5)
                     raise RuntimeError(f"Quotex fetch failed: {value}")
@@ -136,12 +137,12 @@ def _isolated_fetch(asset: str, offset: int):
             if not process.is_alive():
                 process.join(timeout=0.5)
                 raise RuntimeError(f"Quotex child exited without data (exit={process.exitcode}).")
-        raise RuntimeError("Quotex request timed out; isolated browser process was terminated.")
+        raise RuntimeError("Quotex request timed out; isolated process was terminated safely.")
     finally:
         parent_conn.close()
         if process.is_alive():
             process.terminate()
-        process.join(timeout=2)
+        process.join(timeout=3)
         if process.is_alive():
             process.kill()
             process.join(timeout=1)
@@ -157,18 +158,26 @@ def _rows(payload):
     out = []
     for item in payload:
         if isinstance(item, dict):
-            ts = item.get("time", item.get("timestamp", item.get("from")))
-            op, hi, lo, cl = item.get("open"), item.get("high"), item.get("low"), item.get("close")
+            ts = item.get("timestamp", item.get("time", item.get("from")))
+            op = item.get("open")
+            hi = item.get("high")
+            lo = item.get("low")
+            cl = item.get("close")
         elif isinstance(item, (list, tuple)) and len(item) >= 5:
             ts, op, cl, hi, lo = item[:5]
         else:
             continue
         try:
-            ts = float(ts)
-            if ts > 10_000_000_000:
-                ts /= 1000.0
+            if isinstance(ts, pd.Timestamp):
+                stamp = ts
+            else:
+                stamp = pd.Timestamp(ts)
+                if stamp.tzinfo is None:
+                    stamp = stamp.tz_localize("UTC")
+                else:
+                    stamp = stamp.tz_convert("UTC")
             out.append({
-                "timestamp": pd.Timestamp.fromtimestamp(ts, tz="UTC"),
+                "timestamp": stamp,
                 "open": float(op), "high": float(hi), "low": float(lo), "close": float(cl),
             })
         except (TypeError, ValueError, OSError):
@@ -202,8 +211,7 @@ def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> 
         if _rss_mb() >= max_rss:
             raise RuntimeError("Quotex OTC temporarily paused by memory guard.")
         try:
-            offset = _PERIOD * min(max(int(count) + 20, 180), 12000)
-            payload = _isolated_fetch(canonical, offset)
+            payload = _isolated_fetch(canonical, int(count))
             rows = _rows(payload)
             if not rows:
                 raise RuntimeError(f"Quotex returned no candle data for {canonical}.")
