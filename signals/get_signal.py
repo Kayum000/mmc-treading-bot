@@ -13,6 +13,7 @@ OTC_MAP = {
     "SOL/USDT": "AUDUSD_otc", "XRP/USDT": "USDCAD_otc", "ADA/USDT": "USDCHF_otc",
     "DOGE/USDT": "NZDUSD_otc", "AVAX/USDT": "EURJPY_otc", "LINK/USDT": "GBPJPY_otc",
     "LTC/USDT": "XAUUSD_otc",
+    "USD/ARS": "USDARS_otc", "USD/ARS (OTC)": "USDARS_otc", "USDARS_otc": "USDARS_otc",
 }
 
 
@@ -69,13 +70,13 @@ def _otc_signal(display_pair: str, automatic: bool) -> dict:
     next_candle = (signal_at_utc + timedelta(minutes=1)).replace(second=0, microsecond=0)
     return {
         "pair": display_pair, "requested_pair": display_pair, "market_mode": "crypto",
-        "source": "Quotex OTC WebSocket", "signal": result.action, "market_bias": result.action,
+        "source": "Quotex OTC local Android screen collector", "signal": result.action, "market_bias": result.action,
         "entry_signal": result.action, "buy_score": 1 if result.action == "BUY" else 0,
         "sell_score": 1 if result.action == "SELL" else 0, "reason": _bengali_reason(result.reason),
         "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
         "candle_time": next_candle.isoformat(timespec="seconds") if is_entry else None,
         "analysis_candle_time_utc": pd_timestamp_utc(last["timestamp"]),
-        "entry_price": float(last["close"]), "entry_price_type": "latest_closed_otc_candle_close",
+        "entry_price": float(last["close"]), "entry_price_type": "latest_closed_otc_candle_reference",
         "entry_time_utc": next_candle.isoformat(timespec="seconds") if is_entry else None,
         "entry_time_bd": next_candle.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_candle_time_utc": next_candle.isoformat(timespec="seconds") if is_entry else None,
