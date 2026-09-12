@@ -1,102 +1,24 @@
-"""Live signal generation for Real Forex v2.1 and Quotex OTC."""
+"""Live signal generation for the active Real Forex strategy."""
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 
 from data.biquote_forex import fetch_tick_history
-from data.quotex_otc import OTC_PAIRS, fetch_quotex_candles
 from strategy.tick_run_pressure import generate_signal as generate_forex_signal
-from strategy.signal import generate_signal as generate_otc_signal
 
 
 def _bengali_reason(reason: str) -> str:
     text = str(reason or "").strip()
     replacements = (
-        ("BUY", "ক্রয়"), ("SELL", "বিক্রয়"), ("NO_TRADE", "ট্রেড নয়"),
-        ("Bullish", "বুলিশ"), ("Bearish", "বিয়ারিশ"),
-        ("multi-timeframe", "multi-timeframe"),
-        ("Insufficient or conflicting confirmation", "পর্যাপ্ত বা একইমুখী confirmation পাওয়া যায়নি"),
+        ("BUY", "ক্রয়"),
+        ("SELL", "বিক্রয়"),
+        ("NO_TRADE", "ট্রেড নয়"),
+        ("Bullish", "বুলিশ"),
+        ("Bearish", "বিয়ারিশ"),
     )
     for source, translated in replacements:
         text = text.replace(source, translated)
     return text
-
-
-def _next_candle_boundary_utc(now_utc: datetime) -> datetime:
-    epoch = int(now_utc.timestamp())
-    return datetime.fromtimestamp(((epoch // 60) + 1) * 60, tz=timezone.utc)
-
-
-def _resample(df, minutes: int):
-    out = df.copy()
-    out["timestamp"] = __import__("pandas").to_datetime(out["timestamp"], utc=True)
-    out = out.set_index("timestamp")
-    out = out.resample(f"{minutes}min", label="left", closed="left").agg({
-        "open": "first", "high": "max", "low": "min", "close": "last"
-    }).dropna().reset_index()
-    return out
-
-
-def _quotex_alias(pair: str) -> str:
-    aliases = {
-        "BTC/USDT": "EURUSD_otc", "ETH/USDT": "GBPUSD_otc", "BNB/USDT": "USDJPY_otc",
-        "SOL/USDT": "AUDUSD_otc", "XRP/USDT": "USDCAD_otc", "ADA/USDT": "USDCHF_otc",
-        "DOGE/USDT": "NZDUSD_otc", "AVAX/USDT": "EURJPY_otc", "LINK/USDT": "GBPJPY_otc",
-        "LTC/USDT": "XAUUSD_otc",
-    }
-    if pair in OTC_PAIRS:
-        return pair
-    return aliases.get(pair, pair)
-
-
-def _get_quotex_signal(pair: str, automatic: bool) -> dict:
-    asset = _quotex_alias(pair)
-    if asset not in OTC_PAIRS:
-        raise ValueError("Unsupported Quotex OTC market")
-    requested_at = datetime.now(timezone.utc)
-    next_candle = _next_candle_boundary_utc(requested_at)
-    df = fetch_quotex_candles(asset, "1m", 240)
-    frames = {
-        "15m": _resample(df, 15).tail(120).reset_index(drop=True),
-        "5m": _resample(df, 5).tail(180).reset_index(drop=True),
-        "1m": df.tail(200).reset_index(drop=True),
-    }
-    result = generate_otc_signal(frames)
-    last = frames["1m"].iloc[-1]
-    signal_at = datetime.now(timezone.utc)
-    signal_bd = signal_at.astimezone(timezone(timedelta(hours=6)))
-    entry_bd = next_candle.astimezone(timezone(timedelta(hours=6)))
-    is_entry = result.action in {"BUY", "SELL"}
-    display_pair = asset.replace("_otc", " OTC")
-    return {
-        "pair": display_pair,
-        "requested_pair": pair,
-        "market_mode": "crypto",
-        "source": "Quotex OTC",
-        "signal": result.action,
-        "market_bias": result.action,
-        "entry_signal": result.action,
-        "buy_score": result.buy_score,
-        "sell_score": result.sell_score,
-        "reason": _bengali_reason(result.reason),
-        "signal_time_utc": signal_at.isoformat(timespec="seconds"),
-        "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
-        "candle_time": str(last["timestamp"]),
-        "analysis_candle_time_utc": __import__("pandas").Timestamp(last["timestamp"]).isoformat(),
-        "entry_price": float(last["close"]),
-        "entry_price_type": "latest_closed_1m_otc_candle",
-        "entry_time_utc": next_candle.isoformat(timespec="seconds") if is_entry else None,
-        "entry_time_bd": entry_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
-        "entry_candle_time_utc": next_candle.isoformat(timespec="seconds") if is_entry else None,
-        "entry_candle_time_bd": entry_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
-        "entry_delay_seconds": None,
-        "timeframe": "1m entry / 5m + 15m confirmation",
-        "entry_timeframe": "next 1-minute candle",
-        "automatic": automatic,
-        "confidence": None,
-        "mmc_level_type": None,
-        "mmc_level_price": None,
-    }
 
 
 def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) -> dict:
@@ -104,14 +26,19 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     market_mode = market_mode.strip().lower()
     if not pair:
         raise ValueError("No market selected")
-    if market_mode == "crypto":
-        return _get_quotex_signal(pair, automatic)
     if market_mode != "real":
-        raise ValueError("Unsupported market mode")
+        raise ValueError("Only the Real Forex market is supported")
 
     signal_at_utc = datetime.now(timezone.utc)
     ticks = fetch_tick_history(pair, count=1000)
-    result = generate_forex_signal(ticks, run_length=3, microprice_threshold=0.40)
+    if ticks is None or ticks.empty:
+        raise RuntimeError("No live tick data was returned")
+
+    result = generate_forex_signal(
+        ticks,
+        run_length=3,
+        microprice_threshold=0.40,
+    )
     last = ticks.iloc[-1]
     signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
     tick_time = last["timestamp"]
@@ -121,10 +48,15 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
     is_entry = result.action in {"BUY", "SELL"}
     signal_candle_utc = signal_at_utc.replace(second=0, microsecond=0)
     signal_candle_bd = signal_candle_utc.astimezone(timezone(timedelta(hours=6)))
+
     return {
-        "pair": pair, "requested_pair": pair, "market_mode": market_mode,
-        "source": "BiQuote tick history", "signal": result.action,
-        "market_bias": result.action, "entry_signal": result.action,
+        "pair": pair,
+        "requested_pair": pair,
+        "market_mode": "real",
+        "source": "BiQuote tick history",
+        "signal": result.action,
+        "market_bias": result.action,
+        "entry_signal": result.action,
         "buy_score": 1 if result.action == "BUY" else 0,
         "sell_score": 1 if result.action == "SELL" else 0,
         "reason": _bengali_reason(result.reason),
@@ -139,7 +71,10 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) ->
         "entry_candle_time_utc": signal_candle_utc.isoformat(timespec="seconds") if is_entry else None,
         "entry_candle_time_bd": signal_candle_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_delay_seconds": 0 if is_entry else None,
-        "timeframe": "tick-run v2.1", "entry_timeframe": "signal candle (current 1-minute candle)",
-        "automatic": automatic, "confidence": result.confidence,
-        "mmc_level_type": None, "mmc_level_price": None,
+        "timeframe": "tick-run v2.1",
+        "entry_timeframe": "signal candle (current 1-minute candle)",
+        "automatic": automatic,
+        "confidence": result.confidence,
+        "mmc_level_type": None,
+        "mmc_level_price": None,
     }
