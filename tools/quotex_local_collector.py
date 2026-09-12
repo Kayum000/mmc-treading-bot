@@ -1,10 +1,9 @@
-"""Read Quotex's own browser WebSocket traffic through Chrome DevTools Protocol.
+"""Local laptop collector for a user-opened Quotex browser tab.
 
-This is a LOCAL, signal-data-only collector. It does not log in, does not ask
-for a Quotex password/SSID, and does not place orders. It attaches to a Chrome
-tab that the user has explicitly launched with remote debugging enabled, reads
-WebSocket candle/price messages, builds 1-minute OHLC when necessary, and sends
-only supported OTC candle data to the MMC Render ingest endpoint.
+Signal-data-only: it does not log in, collect passwords/SSIDs, or place orders.
+It attaches to Chrome DevTools Protocol (CDP), reads the browser's WebSocket
+frames, normalizes supported OTC candles/quotes, builds 1-minute OHLC when
+needed, and sends only candle data to the MMC Render ingest endpoint.
 
 Environment variables:
   MMC_BOT_URL            e.g. https://mmc-treading-bot.onrender.com
@@ -29,6 +28,7 @@ PERIOD = 60
 OTC_PAIRS = {
     "EURUSD_otc", "GBPUSD_otc", "USDJPY_otc", "AUDUSD_otc", "USDCAD_otc",
     "USDCHF_otc", "NZDUSD_otc", "EURJPY_otc", "GBPJPY_otc", "XAUUSD_otc",
+    "USDARS_otc",
 }
 CDP_URL = os.getenv("CHROME_CDP_URL", "http://127.0.0.1:9222").rstrip("/")
 BOT_URL = os.getenv("MMC_BOT_URL", "https://mmc-treading-bot.onrender.com").rstrip("/")
@@ -37,18 +37,30 @@ VERBOSE = os.getenv("QUOTEX_DEBUG_VERBOSE", "0").strip() == "1"
 
 
 def log(message: str) -> None:
-    print(f"[MMC Quotex Collector] {message}", flush=True)
+    print(f"[MMC Quotex Laptop Collector] {message}", flush=True)
 
 
 def _target() -> dict[str, Any]:
     response = requests.get(f"{CDP_URL}/json/list", timeout=5)
     response.raise_for_status()
     targets = response.json()
-    candidates = [t for t in targets if t.get("type") == "page" and "qxbroker.com" in str(t.get("url", "")).lower()]
+    allowed_hosts = ("qxbroker.com", "market-qx.trade")
+    candidates = [
+        t for t in targets
+        if t.get("type") == "page"
+        and any(host in str(t.get("url", "")).lower() for host in allowed_hosts)
+    ]
     if not candidates:
-        candidates = [t for t in targets if t.get("type") == "page" and "quotex" in (str(t.get("title", "")) + str(t.get("url", ""))).lower()]
+        candidates = [
+            t for t in targets
+            if t.get("type") == "page"
+            and "quotex" in (str(t.get("title", "")) + str(t.get("url", ""))).lower()
+        ]
     if not candidates:
-        raise RuntimeError("No Quotex browser tab found on Chrome CDP port 9222.")
+        raise RuntimeError(
+            "No Quotex browser tab found. Start the isolated Chrome launcher, log in, "
+            "and leave the OTC chart open."
+        )
     return candidates[0]
 
 
@@ -77,7 +89,6 @@ def _json_after_prefix(text: str) -> Any:
 
 
 def _decode_socket_message(payload: str, opcode: int) -> tuple[str | None, Any]:
-    """Decode Socket.IO text/binary payloads without logging their contents."""
     if opcode == 1:
         if payload.startswith("42"):
             packet = _json_after_prefix(payload[2:])
@@ -136,7 +147,10 @@ def _normalise_candle(payload: Any, fallback_asset: str | None = None) -> list[d
             ts = float(ts)
             if ts > 10_000_000_000:
                 ts /= 1000
-            result.append({"asset": str(item_asset), "period": PERIOD, "timestamp": ts, "open": float(op), "high": float(hi), "low": float(lo), "close": float(cl)})
+            result.append({
+                "asset": str(item_asset), "period": PERIOD, "timestamp": ts,
+                "open": float(op), "high": float(hi), "low": float(lo), "close": float(cl),
+            })
         except (TypeError, ValueError, OverflowError):
             continue
     return result
@@ -158,20 +172,36 @@ class Collector:
     def __init__(self) -> None:
         self.partial: dict[str, dict[str, Any]] = {}
         self.session = requests.Session()
+        self.last_signature = ""
+        self.last_send = 0.0
 
     def _send(self, rows: list[dict[str, Any]]) -> None:
         if not rows:
             return
         if not INGEST_SECRET:
             raise RuntimeError("QUOTEX_INGEST_SECRET is missing. Set the same secret on Render and locally.")
+        signature = "|".join(f"{r['asset']}:{r['timestamp']}:{r['close']}" for r in rows[-5:])
+        if signature == self.last_signature and time.monotonic() - self.last_send < 45:
+            return
         response = self.session.post(
             f"{BOT_URL}/quotex/ingest",
             json={"sent_at": time.time(), "candles": rows},
             headers={"X-MMC-Quotex-Key": INGEST_SECRET},
             timeout=10,
+            allow_redirects=False,
         )
-        response.raise_for_status()
-        data = response.json()
+        if not 200 <= response.status_code < 300:
+            body = response.text.strip().replace("\r", " ").replace("\n", " ")[:240]
+            raise RuntimeError(f"Render ingest HTTP {response.status_code}: {body or 'empty response'}")
+        try:
+            data = response.json()
+        except ValueError:
+            body = response.text.strip().replace("\r", " ").replace("\n", " ")[:240]
+            raise RuntimeError(f"Render returned non-JSON response: {body or 'empty response'}")
+        if not data.get("ok"):
+            raise RuntimeError(f"Render rejected candles: {data.get('error', 'unknown error')}")
+        self.last_signature = signature
+        self.last_send = time.monotonic()
         log(f"sent {data.get('accepted', len(rows))} candle rows to MMC")
 
     def _add_price(self, asset: str, price: float, ts: float) -> None:
@@ -183,7 +213,11 @@ class Collector:
             if state:
                 row = {k: v for k, v in state.items() if k != "bucket"}
                 self._send([row])
-            state = {"bucket": bucket, "asset": asset, "period": PERIOD, "timestamp": float(bucket), "open": price, "high": price, "low": price, "close": price}
+            state = {
+                "bucket": bucket, "asset": asset, "period": PERIOD,
+                "timestamp": float(bucket), "open": price, "high": price,
+                "low": price, "close": price,
+            }
             self.partial[asset] = state
         else:
             state["high"] = max(state["high"], price)
@@ -220,11 +254,13 @@ async def run() -> None:
     ws_url = target.get("webSocketDebuggerUrl")
     if not ws_url:
         raise RuntimeError("Chrome target has no webSocketDebuggerUrl. Start Chrome with remote debugging enabled.")
-
     async with websockets.connect(ws_url, open_timeout=10, close_timeout=5, max_size=16 * 1024 * 1024) as ws:
         counter = [0]
-        await _cdp_command(ws, counter, "Network.enable", {"maxTotalBufferSize": 50 * 1024 * 1024, "maxResourceBufferSize": 5 * 1024 * 1024})
-        log("CDP Network capture enabled. Keep the Quotex chart open.")
+        await _cdp_command(
+            ws, counter, "Network.enable",
+            {"maxTotalBufferSize": 50 * 1024 * 1024, "maxResourceBufferSize": 5 * 1024 * 1024},
+        )
+        log("CDP Network capture enabled. Keep the Quotex OTC chart open.")
         collector = Collector()
         pending_event: str | None = None
         while True:
