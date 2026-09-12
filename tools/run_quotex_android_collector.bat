@@ -6,7 +6,10 @@ set "ADB_DIR=%~dp0platform-tools"
 set "ADB_EXE=%ADB_DIR%\adb.exe"
 
 rem --- Find or install ADB automatically ---
-if exist "%ADB_EXE%" goto adb_ready
+if exist "%ADB_EXE%" (
+  set "PATH=%ADB_DIR%;%PATH%"
+  goto adb_ready
+)
 where adb >nul 2>&1
 if not errorlevel 1 (
   set "ADB_EXE=adb"
@@ -24,11 +27,14 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist "%ADB_EXE%" (
-  echo ADB was not found after the download.
-  pause
-  exit /b 1
+if exist "%ADB_EXE%" (
+  set "PATH=%ADB_DIR%;%PATH%"
+  goto adb_ready
 )
+
+echo ADB was not found after the download.
+pause
+exit /b 1
 
 :adb_ready
 rem --- Find Python launcher ---
