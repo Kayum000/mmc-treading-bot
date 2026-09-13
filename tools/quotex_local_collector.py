@@ -24,12 +24,9 @@ from typing import Any
 import requests
 import websockets
 
+from data.otc_markets import OTC_PAIRS
+
 PERIOD = 60
-OTC_PAIRS = {
-    "EURUSD_otc", "GBPUSD_otc", "USDJPY_otc", "AUDUSD_otc", "USDCAD_otc",
-    "USDCHF_otc", "NZDUSD_otc", "EURJPY_otc", "GBPJPY_otc", "XAUUSD_otc",
-    "USDARS_otc",
-}
 CDP_URL = os.getenv("CHROME_CDP_URL", "http://127.0.0.1:9222").rstrip("/")
 BOT_URL = os.getenv("MMC_BOT_URL", "https://mmc-treading-bot.onrender.com").rstrip("/")
 INGEST_SECRET = os.getenv("QUOTEX_INGEST_SECRET", "").strip()
