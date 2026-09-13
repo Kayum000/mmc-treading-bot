@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timezone, timedelta
 from data.biquote_forex import fetch_forex_candles
 from data.quotex_otc import fetch_quotex_candles
+from data.otc_markets import asset_for_display
 
 RETENTION=timedelta(hours=24)
 
@@ -23,9 +24,7 @@ def _utc(value):
 
 def _minute_start(value): return _utc(value).replace(second=0,microsecond=0)
 
-def _otc_asset(pair):
-    aliases={'EURUSD OTC':'EURUSD_otc','GBPUSD OTC':'GBPUSD_otc','USDJPY OTC':'USDJPY_otc','AUDUSD OTC':'AUDUSD_otc','USDCAD OTC':'USDCAD_otc','USDCHF OTC':'USDCHF_otc','NZDUSD OTC':'NZDUSD_otc','EURJPY OTC':'EURJPY_otc','GBPJPY OTC':'GBPJPY_otc','XAUUSD OTC':'XAUUSD_otc','USDARS OTC':'USDARS_otc'}
-    return aliases.get(str(pair).strip().upper())
+def _otc_asset(pair): return asset_for_display(pair)
 
 def init_db():
     with _connect() as conn:
@@ -82,7 +81,12 @@ def settle_pending():
             for row_id,mode,pair,signal,entry_time in rows:
                 key=(mode,pair)
                 if key not in frames:
-                    try: frames[key]=fetch_forex_candles(pair,'1min',outputsize=200) if mode=='real' else fetch_quotex_candles(_otc_asset(pair),'1m',240)
+                    try:
+                        if mode=='real':
+                            frames[key]=fetch_forex_candles(pair,'1min',outputsize=200)
+                        else:
+                            asset=_otc_asset(pair)
+                            frames[key]=fetch_quotex_candles(asset,'1m',240) if asset else None
                     except Exception: frames[key]=None
                 candle=_entry_candle(frames[key],entry_time); outcome=_outcome(signal,candle)
                 if outcome is None: continue
