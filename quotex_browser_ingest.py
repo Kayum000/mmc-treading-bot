@@ -10,7 +10,8 @@ import os
 import time
 from flask import jsonify, request, session
 
-from data.quotex_otc import ingest_local_candles, local_stream_status
+from data.quotex_otc import ingest_local_candles, local_stream_status, local_active_asset
+from data.otc_markets import display_for_asset
 
 
 def _collector_secret_valid() -> bool:
@@ -20,10 +21,6 @@ def _collector_secret_valid() -> bool:
 
 
 def init_quotex_browser_ingest(app):
-    # The web app has a global browser-login guard registered before this
-    # module. This endpoint authenticates with its own secret, so a valid
-    # collector request is marked authenticated before the web guard runs.
-    # Invalid/missing secrets never receive this bypass.
     def allow_collector_endpoint():
         if request.endpoint == "quotex_ingest" and _collector_secret_valid():
             session["authenticated"] = True
@@ -56,5 +53,16 @@ def init_quotex_browser_ingest(app):
     @app.route("/quotex/stream-status", methods=["GET"])
     def quotex_stream_status():
         return jsonify(local_stream_status())
+
+    @app.route("/quotex/current-market", methods=["GET"])
+    def quotex_current_market():
+        asset = local_active_asset()
+        return jsonify({
+            "ok": bool(asset),
+            "market_mode": "quotex_otc",
+            "asset": asset,
+            "pair": display_for_asset(asset) if asset else None,
+            "source": "Quotex local screen collector",
+        })
 
     return app
