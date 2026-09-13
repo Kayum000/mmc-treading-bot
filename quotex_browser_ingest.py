@@ -11,7 +11,7 @@ import time
 from flask import jsonify, request, session
 
 from data.quotex_otc import ingest_local_candles, local_stream_status, local_active_asset
-from data.otc_markets import display_for_asset, OTC_DISPLAY_PAIRS, asset_for_display
+from data.otc_markets import display_for_asset, OTC_DISPLAY_PAIRS
 from signals.get_signal import get_signal
 from performance import record_signal
 
@@ -67,9 +67,6 @@ def init_quotex_browser_ingest(app):
             "source": "Quotex local screen collector",
         })
 
-    # Keep the existing web app untouched while allowing the OTC collector to
-    # drive the selected market dynamically. Flask resolves requests through
-    # the endpoint's current view function, so these wrappers are additive.
     original_select_market = app.view_functions.get("select_market")
     original_auto_signal = app.view_functions.get("auto_signal")
 
@@ -83,6 +80,9 @@ def init_quotex_browser_ingest(app):
                 pair = detected_pair
             if pair not in OTC_DISPLAY_PAIRS:
                 return jsonify({"ok": False, "error": "বর্তমান OTC মার্কেট এখনো শনাক্ত হয়নি।"}), 409
+            session["selected_mode"] = "quotex_otc"
+            session["selected_pair"] = pair
+            return jsonify({"ok": True, "mode": "quotex_otc", "pair": pair, "automatic": True})
         if original_select_market is not None:
             return original_select_market()
         return jsonify({"ok": False, "error": "Market selector unavailable."}), 500
