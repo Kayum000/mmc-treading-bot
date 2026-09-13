@@ -12,6 +12,7 @@ from data.biquote_forex import fetch_api_usage, get_credit_usage
 from data.news_direction import get_news_direction_for_pair
 from data.news_events import get_weekly_news_events_for_pair
 from data.all_news_events import get_all_news_events
+from data.otc_markets import OTC_DISPLAY_PAIRS
 
 app = Flask(__name__)
 app.secret_key = os.getenv("APP_SECRET_KEY") or os.getenv("MASTER_SETUP_KEY") or os.urandom(32)
@@ -25,10 +26,9 @@ REAL_PAIRS = [
     "AUD/JPY", "CAD/JPY", "CHF/JPY", "NZD/JPY", "EUR/AUD", "GBP/AUD",
     "AUD/CAD", "NZD/CAD",
 ]
-QUOTEX_OTC_PAIRS = [
-    "EURUSD OTC", "GBPUSD OTC", "USDJPY OTC", "AUDUSD OTC", "USDCAD OTC",
-    "USDCHF OTC", "NZDUSD OTC", "EURJPY OTC", "GBPJPY OTC", "XAUUSD OTC", "USDARS OTC",
-]
+# Keep the dashboard, validation endpoint, signal layer and collectors on the
+# same canonical OTC registry. Do not maintain a second hard-coded OTC list here.
+QUOTEX_OTC_PAIRS = list(OTC_DISPLAY_PAIRS)
 _USAGE_CACHE = {"data": None, "at": 0.0}
 
 
