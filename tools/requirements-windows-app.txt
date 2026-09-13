@@ -3,3 +3,4 @@ numpy
 requests
 pywin32
 pillow
+pywinauto==0.6.9
