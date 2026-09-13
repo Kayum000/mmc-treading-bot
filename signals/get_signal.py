@@ -4,22 +4,18 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 
 from data.biquote_forex import fetch_tick_history
-from data.quotex_otc import fetch_quotex_candles, OTC_PAIRS
+from data.quotex_otc import fetch_quotex_candles, OTC_PAIRS, local_active_asset
+from data.otc_markets import display_for_asset, asset_for_display
 from strategy.tick_run_pressure import generate_signal as generate_forex_signal
 from strategy.otc_candle_pressure import generate_signal as generate_otc_signal
 
-OTC_MAP = {
-    "EURUSD OTC": "EURUSD_otc", "GBPUSD OTC": "GBPUSD_otc", "USDJPY OTC": "USDJPY_otc",
-    "AUDUSD OTC": "AUDUSD_otc", "USDCAD OTC": "USDCAD_otc", "USDCHF OTC": "USDCHF_otc",
-    "NZDUSD OTC": "NZDUSD_otc", "EURJPY OTC": "EURJPY_otc", "GBPJPY OTC": "GBPJPY_otc",
-    "XAUUSD OTC": "XAUUSD_otc", "USDARS OTC": "USDARS_otc",
-}
 
 def _bengali_reason(reason: str) -> str:
     text = str(reason or "").strip()
     for source, translated in (("BUY", "ক্রয়"), ("SELL", "বিক্রয়"), ("HOLD", "অপেক্ষা"), ("Bullish", "বুলিশ"), ("Bearish", "বিয়ারিশ")):
         text = text.replace(source, translated)
     return text
+
 
 def _real_signal(pair: str, automatic: bool) -> dict:
     signal_at_utc = datetime.now(timezone.utc)
@@ -53,14 +49,20 @@ def _real_signal(pair: str, automatic: bool) -> dict:
         "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
     }
 
+
 def _otc_signal(pair: str, automatic: bool) -> dict:
-    asset = OTC_MAP.get(pair)
+    requested_pair = str(pair or "").strip().upper()
+    detected_asset = local_active_asset()
+    if detected_asset:
+        pair = display_for_asset(detected_asset) or requested_pair
+    else:
+        pair = requested_pair
+    asset = asset_for_display(pair)
     if not asset or asset not in OTC_PAIRS:
-        raise ValueError("Unsupported Quotex OTC market")
+        raise RuntimeError("বর্তমান Quotex OTC মার্কেট শনাক্ত করা যায়নি। Quotex-এ একটি 1-minute OTC chart খোলা রাখুন।")
 
     # Keep the existing OTC candle-pressure strategy unchanged.
-    # Timing follows the Real Market setup: the signal targets the current
-    # 1-minute candle, not the next candle.
+    # Only the data source/market selection is now dynamic.
     signal_at_utc = datetime.now(timezone.utc)
     candles = fetch_quotex_candles(asset, count=240)
     result = generate_otc_signal(candles)
@@ -69,8 +71,8 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
     is_entry = result.action in {"BUY", "SELL"}
     signal_candle = signal_at_utc.replace(second=0, microsecond=0)
     return {
-        "pair": pair, "requested_pair": pair, "market_mode": "quotex_otc",
-        "source": "Quotex OTC local Android screen collector", "signal": result.action, "market_bias": result.action,
+        "pair": pair, "requested_pair": requested_pair, "detected_asset": asset, "market_mode": "quotex_otc",
+        "source": "Quotex OTC local Windows/Android screen collector", "signal": result.action, "market_bias": result.action,
         "entry_signal": result.action, "buy_score": 1 if result.action == "BUY" else 0,
         "sell_score": 1 if result.action == "SELL" else 0, "reason": _bengali_reason(result.reason),
         "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
@@ -86,17 +88,19 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
         "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
     }
 
+
 def pd_timestamp_utc(value) -> str:
     stamp = value.to_pydatetime() if hasattr(value, "to_pydatetime") else value
     stamp = stamp.astimezone(timezone.utc)
     return stamp.isoformat(timespec="milliseconds")
 
+
 def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) -> dict:
-    pair = pair.strip().upper()
+    pair = (pair or "").strip().upper()
     mode = market_mode.strip().lower()
-    if not pair:
-        raise ValueError("No market selected")
     if mode == "real":
+        if not pair:
+            raise ValueError("No real market selected")
         return _real_signal(pair, automatic)
     if mode == "quotex_otc":
         return _otc_signal(pair, automatic)
