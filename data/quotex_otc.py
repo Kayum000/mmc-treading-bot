@@ -22,17 +22,15 @@ from typing import Any
 import pandas as pd
 import websockets
 
-OTC_PAIRS = (
-    "EURUSD_otc", "GBPUSD_otc", "USDJPY_otc", "AUDUSD_otc", "USDCAD_otc",
-    "USDCHF_otc", "NZDUSD_otc", "EURJPY_otc", "GBPJPY_otc", "XAUUSD_otc",
-    "USDARS_otc",
-)
+from data.otc_markets import OTC_PAIRS
+
 PERIOD = 60
 CACHE_TTL = 8
 FETCH_TIMEOUT = 18
 _LOCAL_TTL = 15
 _CACHE: dict[tuple[str, int], tuple[float, pd.DataFrame]] = {}
 _LOCAL_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}
+_LOCAL_ACTIVE_ASSET: tuple[float, str] | None = None
 _LOCAL_LOCK = threading.Lock()
 
 
@@ -99,6 +97,7 @@ def _normalise_rows(payload: Any, default_asset: str):
 
 def ingest_local_candles(payload: Any) -> int:
     """Store candle data received from a local Quotex collector."""
+    global _LOCAL_ACTIVE_ASSET
     rows = _normalise_rows(payload, str(payload.get("asset") if isinstance(payload, dict) else ""))
     if not rows:
         return 0
@@ -107,6 +106,7 @@ def ingest_local_candles(payload: Any) -> int:
         asset = str(row["asset"])
         if asset in OTC_PAIRS:
             grouped.setdefault(asset, []).append(row)
+    active_asset = str(payload.get("active_asset") or "").strip() if isinstance(payload, dict) else ""
     with _LOCAL_LOCK:
         for asset, asset_rows in grouped.items():
             frame = pd.DataFrame(asset_rows).drop_duplicates("timestamp").sort_values("timestamp")
@@ -114,7 +114,23 @@ def ingest_local_candles(payload: Any) -> int:
             if old and time.monotonic() - old[0] < 3600:
                 frame = pd.concat([old[1], frame], ignore_index=True).drop_duplicates("timestamp").sort_values("timestamp")
             _LOCAL_CACHE[asset] = (time.monotonic(), frame.tail(500).reset_index(drop=True))
+        if active_asset in OTC_PAIRS:
+            _LOCAL_ACTIVE_ASSET = (time.monotonic(), active_asset)
+        elif grouped:
+            newest = max(grouped, key=lambda name: max(row["timestamp"] for row in grouped[name]))
+            _LOCAL_ACTIVE_ASSET = (time.monotonic(), newest)
     return sum(len(v) for v in grouped.values())
+
+
+def local_active_asset() -> str | None:
+    """Return the fresh market detected by the local Quotex collector."""
+    with _LOCAL_LOCK:
+        if not _LOCAL_ACTIVE_ASSET:
+            return None
+        stamp, asset = _LOCAL_ACTIVE_ASSET
+        if time.monotonic() - stamp > _LOCAL_TTL:
+            return None
+        return asset
 
 
 def local_stream_status(asset: str | None = None) -> dict:
@@ -128,7 +144,8 @@ def local_stream_status(asset: str | None = None) -> dict:
                 continue
             age = max(0.0, now - cached[0])
             rows.append({"asset": name, "fresh": age <= _LOCAL_TTL, "age_seconds": round(age, 1), "candles": len(cached[1])})
-    return {"ok": bool(rows) and all(x["fresh"] for x in rows), "source": "Quotex local screen/browser collector", "assets": rows}
+        active = _LOCAL_ACTIVE_ASSET[1] if _LOCAL_ACTIVE_ASSET and now - _LOCAL_ACTIVE_ASSET[0] <= _LOCAL_TTL else None
+    return {"ok": bool(rows) and all(x["fresh"] for x in rows), "source": "Quotex local screen/browser collector", "active_asset": active, "assets": rows}
 
 
 def _local_candles(asset: str, count: int) -> pd.DataFrame | None:
@@ -147,7 +164,7 @@ def _local_candles(asset: str, count: int) -> pd.DataFrame | None:
 async def _fetch(asset: str, count: int) -> list[dict[str, Any]]:
     ssid = _ssid()
     if not ssid:
-        raise RuntimeError("Quotex local collector is not connected. Run the Android screen collector on the PC where the Quotex app is displayed, or set QUOTEX_SSID as a Render Secret.")
+        raise RuntimeError("Quotex local collector is not connected. Run the Windows/Android screen collector on the PC where the Quotex app is displayed, or set QUOTEX_SSID as a Render Secret.")
     origin = os.getenv("QUOTEX_ORIGIN", "https://qxbroker.com").strip()
     ws_url = os.getenv("QUOTEX_WS_URL", "wss://ws2.qxbroker.com/socket.io/?EIO=3&transport=websocket").strip()
     headers = {"Origin": origin, "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36", "Accept-Language": "en-US,en;q=0.9"}

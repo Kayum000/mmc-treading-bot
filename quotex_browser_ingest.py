@@ -10,7 +10,10 @@ import os
 import time
 from flask import jsonify, request, session
 
-from data.quotex_otc import ingest_local_candles, local_stream_status
+from data.quotex_otc import ingest_local_candles, local_stream_status, local_active_asset
+from data.otc_markets import display_for_asset, OTC_DISPLAY_PAIRS
+from signals.get_signal import get_signal
+from performance import record_signal
 
 
 def _collector_secret_valid() -> bool:
@@ -20,10 +23,6 @@ def _collector_secret_valid() -> bool:
 
 
 def init_quotex_browser_ingest(app):
-    # The web app has a global browser-login guard registered before this
-    # module. This endpoint authenticates with its own secret, so a valid
-    # collector request is marked authenticated before the web guard runs.
-    # Invalid/missing secrets never receive this bypass.
     def allow_collector_endpoint():
         if request.endpoint == "quotex_ingest" and _collector_secret_valid():
             session["authenticated"] = True
@@ -56,5 +55,74 @@ def init_quotex_browser_ingest(app):
     @app.route("/quotex/stream-status", methods=["GET"])
     def quotex_stream_status():
         return jsonify(local_stream_status())
+
+    @app.route("/quotex/current-market", methods=["GET"])
+    def quotex_current_market():
+        asset = local_active_asset()
+        return jsonify({
+            "ok": bool(asset),
+            "market_mode": "quotex_otc",
+            "asset": asset,
+            "pair": display_for_asset(asset) if asset else None,
+            "source": "Quotex local screen collector",
+        })
+
+    original_select_market = app.view_functions.get("select_market")
+    original_auto_signal = app.view_functions.get("auto_signal")
+
+    def select_market_dynamic():
+        mode = request.form.get("mode", "").strip().lower()
+        pair = request.form.get("pair", "").strip().upper()
+        if mode == "quotex_otc":
+            detected = local_active_asset()
+            detected_pair = display_for_asset(detected) if detected else None
+            if detected_pair:
+                pair = detected_pair
+            if pair not in OTC_DISPLAY_PAIRS:
+                return jsonify({"ok": False, "error": "বর্তমান OTC মার্কেট এখনো শনাক্ত হয়নি।"}), 409
+            session["selected_mode"] = "quotex_otc"
+            session["selected_pair"] = pair
+            return jsonify({"ok": True, "mode": "quotex_otc", "pair": pair, "automatic": True})
+        if original_select_market is not None:
+            return original_select_market()
+        return jsonify({"ok": False, "error": "Market selector unavailable."}), 500
+
+    def auto_signal_dynamic():
+        mode = session.get("selected_mode", "").strip().lower()
+        if mode == "quotex_otc":
+            asset = local_active_asset()
+            pair = display_for_asset(asset) if asset else None
+            if not pair:
+                return jsonify({"ok": False, "error": "বর্তমান Quotex OTC মার্কেট শনাক্ত হয়নি।"}), 409
+            session["selected_mode"] = "quotex_otc"
+            session["selected_pair"] = pair
+            try:
+                result = get_signal(pair, "quotex_otc", automatic=True)
+                record_signal(result)
+                return jsonify({"ok": True, "result": result})
+            except Exception as exc:
+                return jsonify({"ok": False, "error": str(exc)}), 502
+        if original_auto_signal is not None:
+            return original_auto_signal()
+        return jsonify({"ok": False, "error": "Auto signal unavailable."}), 500
+
+    if original_select_market is not None:
+        app.view_functions["select_market"] = select_market_dynamic
+    if original_auto_signal is not None:
+        app.view_functions["auto_signal"] = auto_signal_dynamic
+
+    @app.after_request
+    def inject_otc_market_sync(response):
+        if not (response.content_type or "").startswith("text/html"):
+            return response
+        html = response.get_data(as_text=True)
+        if "id=\"pair\"" not in html or "QUOTEX_AUTO_MARKET_SYNC" in html:
+            return response
+        script = '''<script id="QUOTEX_AUTO_MARKET_SYNC">(()=>{const mode=document.getElementById('mode'),pair=document.getElementById('pair'),button=document.getElementById('signal-button');if(!mode||!pair)return;let busy=false;async function sync(){if(busy||mode.value!=='quotex_otc')return;busy=true;try{const r=await fetch('/quotex/current-market',{cache:'no-store',credentials:'same-origin'}),d=await r.json();if(d.ok&&d.pair){let o=Array.from(pair.options).find(x=>x.value===d.pair);if(!o){o=document.createElement('option');o.value=d.pair;o.textContent=d.pair;o.dataset.market='quotex_otc';pair.appendChild(o)}Array.from(pair.options).forEach(x=>x.hidden=x.dataset.market&&x.dataset.market!==mode.value);pair.value=d.pair;pair.dispatchEvent(new Event('change',{bubbles:true}));if(button)button.disabled=false;await fetch('/select-market',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},credentials:'same-origin',body:new URLSearchParams({mode:'quotex_otc',pair:d.pair})})}}catch(_){ }finally{busy=false}}document.querySelectorAll('.mode-btn').forEach(b=>b.addEventListener('click',()=>setTimeout(sync,150)));sync();setInterval(sync,1500)})();</script>'''
+        marker = '</body>'
+        if marker in html:
+            html = html.replace(marker, script + marker, 1)
+            response.set_data(html)
+        return response
 
     return app

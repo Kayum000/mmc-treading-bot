@@ -2,17 +2,8 @@
 setlocal EnableExtensions
 cd /d "%~dp0.."
 
-set "COLLECTOR_URL=https://raw.githubusercontent.com/Kayum000/mmc-treading-bot/main/tools/quotex_windows_app_screen_collector.py"
+rem Use the local collector file. Do NOT overwrite it from GitHub at startup.
 set "COLLECTOR_FILE=%~dp0quotex_windows_app_screen_collector.py"
-
-rem Always refresh the collector code from the current main branch.
-echo Syncing the latest Windows App collector from GitHub...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$u='%COLLECTOR_URL%'; $o='%COLLECTOR_FILE%'; Invoke-WebRequest -UseBasicParsing -Uri $u -OutFile $o"
-if errorlevel 1 (
-  echo Could not download the latest Windows App collector code.
-  pause
-  exit /b 1
-)
 
 rem Find a real Python installation; avoid the Microsoft Store alias.
 set "PYTHON_EXE="
@@ -75,10 +66,10 @@ echo.
 echo Installing local Python packages for the Windows App collector...
 if defined PYTHON_KIND (
   py -3 -m pip install --upgrade pip
-  py -3 -m pip install --upgrade opencv-python-headless numpy requests pywin32 pillow
+  py -3 -m pip install --upgrade -r "%~dp0requirements-windows-app.txt"
 ) else (
   "%PYTHON_EXE%" -m pip install --upgrade pip
-  "%PYTHON_EXE%" -m pip install --upgrade opencv-python-headless numpy requests pywin32 pillow
+  "%PYTHON_EXE%" -m pip install --upgrade -r "%~dp0requirements-windows-app.txt"
 )
 if errorlevel 1 (
   echo Failed to install local Python dependencies.
@@ -89,7 +80,9 @@ if errorlevel 1 (
 echo.
 echo Starting MMC Quotex Windows App screen collector...
 echo Keep the Quotex App open on the 1-minute OTC chart.
-echo No orders are automated. Press Ctrl+C to stop.
+echo The OTC market will be detected automatically from the open chart.
+echo No market name input is required. No orders are automated.
+echo Press Ctrl+C to stop.
 echo.
 if defined PYTHON_KIND (
   py -3 "%COLLECTOR_FILE%"
