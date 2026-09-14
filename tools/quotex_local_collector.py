@@ -97,8 +97,7 @@ def _decode_socket_message(payload: str, opcode: int) -> tuple[str | None, Any]:
                 return str(packet[0]), packet[1] if len(packet) > 1 else None
         return None, None
     try:
-        # Chrome CDP can expose binary WebSocket payloadData as a raw string
-        # (including the leading 0x04) rather than base64. Handle both forms.
+        # Chrome CDP may expose binary payloadData as raw text rather than base64.
         if "[" in payload or "{" in payload:
             decoded = payload
         else:
@@ -288,7 +287,8 @@ async def run() -> None:
             opcode = int(response.get("opcode", 1))
             event_name, data = _decode_socket_message(payload, opcode)
             if opcode != 1 and pending_event and data is not None:
-                event_name = pending_event
+                if event_name is None:
+                    event_name = pending_event
                 pending_event = None
             if event_name and isinstance(data, dict) and data.get("_placeholder"):
                 pending_event = event_name
