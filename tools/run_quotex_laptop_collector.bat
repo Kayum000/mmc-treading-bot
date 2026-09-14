@@ -2,6 +2,9 @@
 setlocal EnableExtensions
 cd /d "%~dp0.."
 
+rem Ensure project packages such as data.* are importable when collector runs from tools.
+set "PYTHONPATH=%CD%;%PYTHONPATH%"
+
 set "COLLECTOR_URL=https://raw.githubusercontent.com/Kayum000/mmc-treading-bot/main/tools/quotex_local_collector.py"
 set "COLLECTOR=%~dp0quotex_local_collector.py"
 
