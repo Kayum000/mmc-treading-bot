@@ -1,5 +1,6 @@
 (() => {
   'use strict';
+  // Non-invasive UI layer: score rendering, Bengali reason fallback, and nav state only.
 
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
