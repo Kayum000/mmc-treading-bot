@@ -23,7 +23,7 @@ jobs:
           src = Path('performance.py').read_text()
           tree = ast.parse(src)
           names = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
-          required = {'record_signal', '_entry_candle', '_candle_color', '_outcome', 'settle_pending'}
+          required = {'record_signal', '_reject_entry', '_entry_candle', '_candle_color', '_outcome', 'settle_pending'}
           assert not (required - names)
           ns = {}
           exec(compile(tree, 'performance.py', 'exec'), ns)
@@ -32,6 +32,11 @@ jobs:
           assert ns['_outcome']('SELL', {'open': 2, 'close': 1}) == 'WIN'
           assert ns['_outcome']('SELL', {'open': 1, 'close': 2}) == 'LOSS'
           assert ns['_outcome']('BUY', {'open': 1, 'close': 1}) == 'VOID'
+          sample = {'signal': 'BUY', 'entry_time_utc': '2026-09-14T14:00:00Z', 'entry_price': 1.2, 'reason': 'test'}
+          assert ns['_reject_entry'](sample, 'blocked') is False
+          assert sample['signal'] == 'NO_TRADE' and sample['is_entry'] is False
+          assert sample['entry_time_utc'] is None and sample['entry_price'] is None
+          assert 'blocked' in sample['reason']
           assert "target=_minute_start(entry_time)" in src
           assert "entry_time_utc + INTERVAL '1 minute' > NOW()" in src
           assert 'Signal candle color:' in src
