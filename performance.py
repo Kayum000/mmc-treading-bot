@@ -41,6 +41,16 @@ def init_db():
             cur.execute("DELETE FROM mmc_signal_performance WHERE signal_time_utc < NOW() - INTERVAL '24 hours'")
         conn.commit()
 
+def _reject_entry(result, reason):
+    """Turn a rejected generated entry into an explicit NO_TRADE result for callers."""
+    if isinstance(result,dict):
+        result['signal']='NO_TRADE'
+        result['is_entry']=False
+        result['entry_time_utc']=None
+        result['entry_price']=None
+        result['reason']=((str(result.get('reason') or '').strip()+' ' + reason).strip())
+    return False
+
 def record_signal(result):
     """Store at most one entry per pair/mode/candle and reject overlapping entries."""
     signal=str(result.get('signal','')).upper(); mode=str(result.get('market_mode','real')).lower()
@@ -48,31 +58,19 @@ def record_signal(result):
     try:
         init_db(); signal_time=_utc(result['signal_time_utc']); entry_time=_minute_start(result.get('entry_time_utc') or signal_time)
         pair=str(result.get('pair','')).strip().upper()
-        if not pair: return False
+        if not pair: return _reject_entry(result,'Entry rejected: invalid pair.')
         with _connect() as conn:
             with conn.cursor() as cur:
-                # Serialize entries for this pair so two simultaneous requests cannot
-                # create overlapping/current-candle entries.
                 cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"mmc-entry:{mode}:{pair}",))
-                cur.execute("""SELECT 1 FROM mmc_signal_performance
-                    WHERE market_mode=%s AND pair=%s AND entry_time_utc=%s
-                    LIMIT 1""", (mode,pair,entry_time))
+                cur.execute("""SELECT 1 FROM mmc_signal_performance WHERE market_mode=%s AND pair=%s AND entry_time_utc=%s LIMIT 1""", (mode,pair,entry_time))
                 if cur.fetchone() is not None:
                     conn.rollback()
-                    return False
-                # Do not allow a new candle entry while the previous entry candle
-                # is still pending. Once it is settled, the next candle is allowed.
-                cur.execute("""SELECT 1 FROM mmc_signal_performance
-                    WHERE market_mode=%s AND pair=%s AND result='PENDING'
-                      AND entry_time_utc + INTERVAL '1 minute' > NOW()
-                    LIMIT 1""", (mode,pair))
+                    return _reject_entry(result,'Entry rejected: this candle already has an entry.')
+                cur.execute("""SELECT 1 FROM mmc_signal_performance WHERE market_mode=%s AND pair=%s AND result='PENDING' AND entry_time_utc + INTERVAL '1 minute' > NOW() LIMIT 1""", (mode,pair))
                 if cur.fetchone() is not None:
                     conn.rollback()
-                    return False
-                cur.execute("""INSERT INTO mmc_signal_performance
-                    (market_mode,pair,signal,signal_time_utc,entry_time_utc,entry_price_reference,reason,mmc_level_type,mmc_level_price)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                    (mode,pair,signal,signal_time,entry_time,result.get('entry_price'),result.get('reason'),result.get('mmc_level_type'),result.get('mmc_level_price')))
+                    return _reject_entry(result,'Entry rejected: previous candle entry is still active.')
+                cur.execute("""INSERT INTO mmc_signal_performance (market_mode,pair,signal,signal_time_utc,entry_time_utc,entry_price_reference,reason,mmc_level_type,mmc_level_price) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""", (mode,pair,signal,signal_time,entry_time,result.get('entry_price'),result.get('reason'),result.get('mmc_level_type'),result.get('mmc_level_price')))
             conn.commit()
         return True
     except Exception:
@@ -98,8 +96,7 @@ def settle_pending():
     init_db(); now=datetime.now(timezone.utc); frames={}
     with _connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("""SELECT id,market_mode,pair,signal,entry_time_utc FROM mmc_signal_performance
-                WHERE result='PENDING' AND entry_time_utc + INTERVAL '1 minute' <= %s AND signal_time_utc >= %s ORDER BY entry_time_utc ASC""",(now,now-RETENTION))
+            cur.execute("""SELECT id,market_mode,pair,signal,entry_time_utc FROM mmc_signal_performance WHERE result='PENDING' AND entry_time_utc + INTERVAL '1 minute' <= %s AND signal_time_utc >= %s ORDER BY entry_time_utc ASC""",(now,now-RETENTION))
             rows=cur.fetchall()
             for row_id,mode,pair,signal,entry_time in rows:
                 key=(mode,pair)
@@ -113,9 +110,7 @@ def settle_pending():
                 candle=_entry_candle(frames[key],entry_time); outcome=_outcome(signal,candle)
                 if outcome is None: continue
                 color=_candle_color(candle)
-                cur.execute("""UPDATE mmc_signal_performance SET entry_price_actual=%s,result_price=%s,result=%s,
-                    reason=COALESCE(reason,'')||%s,resolved_at=%s WHERE id=%s AND result='PENDING'""",
-                    (float(candle['open']),float(candle['close']),outcome,f" Signal candle color: {color}.",now,row_id))
+                cur.execute("""UPDATE mmc_signal_performance SET entry_price_actual=%s,result_price=%s,result=%s,reason=COALESCE(reason,'')||%s,resolved_at=%s WHERE id=%s AND result='PENDING'""", (float(candle['open']),float(candle['close']),outcome,f" Signal candle color: {color}.",now,row_id))
             cur.execute("DELETE FROM mmc_signal_performance WHERE signal_time_utc < NOW() - INTERVAL '24 hours'")
         conn.commit()
 
@@ -134,12 +129,9 @@ def get_performance():
         settle_pending()
         with _connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("""SELECT COUNT(*) FILTER (WHERE result IN ('WIN','LOSS')),COUNT(*) FILTER (WHERE result='WIN'),COUNT(*) FILTER (WHERE result='LOSS')
-                    FROM mmc_signal_performance WHERE market_mode IN ('real','quotex_otc') AND signal_time_utc >= NOW()-INTERVAL '24 hours'""")
+                cur.execute("""SELECT COUNT(*) FILTER (WHERE result IN ('WIN','LOSS')),COUNT(*) FILTER (WHERE result='WIN'),COUNT(*) FILTER (WHERE result='LOSS') FROM mmc_signal_performance WHERE market_mode IN ('real','quotex_otc') AND signal_time_utc >= NOW()-INTERVAL '24 hours'""")
                 total,wins,losses=[int(x or 0) for x in cur.fetchone()]; accuracy=wins/total*100.0 if total else 0.0
-                cur.execute("""SELECT id,market_mode,pair,signal,signal_time_utc,entry_time_utc,entry_price_actual,result_price,result
-                    FROM mmc_signal_performance WHERE market_mode IN ('real','quotex_otc') AND signal_time_utc >= NOW()-INTERVAL '24 hours'
-                    AND result IN ('WIN','LOSS') ORDER BY signal_time_utc DESC LIMIT 50""")
+                cur.execute("""SELECT id,market_mode,pair,signal,signal_time_utc,entry_time_utc,entry_price_actual,result_price,result FROM mmc_signal_performance WHERE market_mode IN ('real','quotex_otc') AND signal_time_utc >= NOW()-INTERVAL '24 hours' AND result IN ('WIN','LOSS') ORDER BY signal_time_utc DESC LIMIT 50""")
                 history=[{'id':int(r[0]),'market_mode':r[1],'pair':r[2],'signal':r[3],'signal_time_utc':r[4].isoformat(),'entry_time_utc':r[5].isoformat(),'entry_price':float(r[6]) if r[6] is not None else None,'result_price':float(r[7]) if r[7] is not None else None,'result':r[8]} for r in cur.fetchall()]
         return {'ok':True,'total':total,'wins':wins,'losses':losses,'accuracy':round(accuracy,2),'win_rate':round(accuracy,2),'history':history,'timeframe':'1m','evaluation':'signal entry candle','strategy':'tick_run_pressure + Quotex OTC candle pressure'}
     except Exception as exc:return {'ok':False,'error':str(exc)}
