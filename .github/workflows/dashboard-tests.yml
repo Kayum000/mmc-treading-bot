@@ -1,0 +1,24 @@
+name: Dashboard Contract Tests
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dashboard-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run dashboard contract tests
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Compile changed Python modules
+        run: python -m py_compile signals/get_signal.py web/app.py
