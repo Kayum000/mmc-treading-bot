@@ -97,8 +97,13 @@ def _decode_socket_message(payload: str, opcode: int) -> tuple[str | None, Any]:
                 return str(packet[0]), packet[1] if len(packet) > 1 else None
         return None, None
     try:
-        raw = base64.b64decode(payload)
-        decoded = raw.decode("utf-8", errors="ignore")
+        # Chrome CDP can expose binary WebSocket payloadData as a raw string
+        # (including the leading 0x04) rather than base64. Handle both forms.
+        if "[" in payload or "{" in payload:
+            decoded = payload
+        else:
+            raw = base64.b64decode(payload)
+            decoded = raw.decode("utf-8", errors="ignore")
         data = _json_after_prefix(decoded)
         if isinstance(data, list) and data and isinstance(data[0], (int, float)):
             if len(data) >= 3:
@@ -106,9 +111,6 @@ def _decode_socket_message(payload: str, opcode: int) -> tuple[str | None, Any]:
             if len(data) == 2:
                 return None, data[1]
         if isinstance(data, list) and data and isinstance(data[0], list):
-            # Quotex quotes/stream binary packets are rows such as:
-            # [[asset, unix_timestamp, price, ...]]. Pass them through as
-            # the quotes/stream event so Collector can build 1-minute OHLC.
             return "quotes/stream", data
         if isinstance(data, list) and len(data) >= 2 and isinstance(data[0], str):
             return data[0], data[1]
@@ -167,13 +169,11 @@ def _price_from_payload(payload: Any) -> tuple[str | None, float | None, float |
             return str(asset) if asset else None, float(value), float(ts) if ts is not None else time.time()
         except (TypeError, ValueError):
             return None, None, None
-    if isinstance(payload, list):
-        # Accept a single Quotex stream row: [asset, timestamp, price, ...].
-        if len(payload) >= 3 and isinstance(payload[0], str):
-            try:
-                return str(payload[0]), float(payload[2]), float(payload[1])
-            except (TypeError, ValueError):
-                return None, None, None
+    if isinstance(payload, list) and len(payload) >= 3 and isinstance(payload[0], str):
+        try:
+            return str(payload[0]), float(payload[2]), float(payload[1])
+        except (TypeError, ValueError):
+            return None, None, None
     return None, None, None
 
 
