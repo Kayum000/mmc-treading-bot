@@ -237,7 +237,7 @@ def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> 
     df = pd.DataFrame(rows).drop_duplicates("timestamp").sort_values("timestamp")
     boundary = pd.Timestamp((int(time.time()) // PERIOD) * PERIOD, unit="s", tz="UTC")
     df = df.loc[df["timestamp"] < boundary].tail(count).reset_index(drop=True)
-    if len(df) < 30:
+    if len(df) < 8:
         raise RuntimeError(f"Quotex returned only {len(df)} closed 1m candles for {canonical}.")
     _CACHE[key] = (time.monotonic(), df)
     return df.copy(deep=True)
