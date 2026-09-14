@@ -158,7 +158,7 @@ def _local_candles(asset: str, count: int) -> pd.DataFrame | None:
         return None
     boundary = pd.Timestamp((int(time.time()) // PERIOD) * PERIOD, unit="s", tz="UTC")
     df = df.loc[df["timestamp"] < boundary].tail(count).reset_index(drop=True)
-    return df if len(df) >= 30 else None
+    return df if len(df) >= 8 else None
 
 
 async def _fetch(asset: str, count: int) -> list[dict[str, Any]]:
