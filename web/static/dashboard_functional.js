@@ -26,15 +26,14 @@
     const body = container.querySelector('.card-body');
     if (!body) return;
 
-    let box = body.querySelector('#signal-score-box');
-    if (!box) {
-      box = document.createElement('div');
-      box.id = 'signal-score-box';
-      body.appendChild(box);
-    }
-
     const score = scoreFromResult(result);
+    const current = body.querySelector('#signal-score-box');
+    if (current && Number(current.dataset.score) === score) return;
+
     const [bucket, bucketBn] = scoreBucket(score);
+    const box = current || document.createElement('div');
+    box.id = 'signal-score-box';
+    box.dataset.score = String(score);
     box.innerHTML = `
       <div class="score-title"><span>📊 SIGNAL SCORE</span><b>${score}/100</b></div>
       <div class="score-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${score}">
@@ -42,6 +41,7 @@
       </div>
       <div class="score-meta"><span>${esc(bucket)}</span><strong>${esc(bucketBn)}</strong></div>
     `;
+    if (!current) body.appendChild(box);
   }
 
   function translateVisibleReason() {
@@ -116,8 +116,10 @@
     };
     const observer = new MutationObserver(() => apply());
     observer.observe(container, {childList: true, subtree: true, characterData: true});
-    const original = window.renderResult;
-    if (typeof original === 'function' && !original.__mmcWrapped) {
+
+    const tryWrap = () => {
+      const original = window.renderResult;
+      if (typeof original !== 'function' || original.__mmcWrapped) return Boolean(original);
       const wrapped = function(result) {
         window.__mmcLastResult = result;
         const value = original.apply(this, arguments);
@@ -127,6 +129,11 @@
       };
       wrapped.__mmcWrapped = true;
       window.renderResult = wrapped;
+      return true;
+    };
+    if (!tryWrap()) {
+      const timer = setInterval(() => { if (tryWrap()) clearInterval(timer); }, 50);
+      setTimeout(() => clearInterval(timer), 10000);
     }
     apply();
   }
