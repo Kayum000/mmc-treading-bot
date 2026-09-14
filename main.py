@@ -1,5 +1,6 @@
 """Application entry point for Render/web deployment."""
 from web.app import app
+from flask import request, session
 from market_status import init_market_status
 from quotex_browser_ingest import init_quotex_browser_ingest
 from remember_me import init_remember_me
@@ -31,7 +32,6 @@ def allow_quotex_ingest_route():
 
 if __name__ == "__main__":
     import os
-    from flask import request, session
     port = int(os.getenv("PORT", "5000"))
     if os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"):
         import os as _os
