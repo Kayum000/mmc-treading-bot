@@ -11,10 +11,56 @@ from strategy.otc_candle_pressure import generate_signal as generate_otc_signal
 
 
 def _bengali_reason(reason: str) -> str:
+    """Return a user-facing Bengali explanation without changing strategy logic."""
     text = str(reason or "").strip()
-    for source, translated in (("BUY", "ক্রয়"), ("SELL", "বিক্রয়"), ("HOLD", "অপেক্ষা"), ("Bullish", "বুলিশ"), ("Bearish", "বিয়ারিশ")):
+    exact = {
+        "Bullish multi-timeframe MMC confirmation": "বুলিশ মাল্টি-টাইমফ্রেম MMC কনফার্মেশন পাওয়া গেছে।",
+        "Bearish multi-timeframe MMC confirmation": "বিয়ারিশ মাল্টি-টাইমফ্রেম MMC কনফার্মেশন পাওয়া গেছে।",
+        "Insufficient or conflicting confirmation": "যথেষ্ট কনফার্মেশন পাওয়া যায়নি অথবা কনফার্মেশনগুলোর মধ্যে অসামঞ্জস্য রয়েছে।",
+        "insufficient tick history": "যথেষ্ট টিক ডাটা পাওয়া যায়নি।",
+        "run confirmation absent": "প্রয়োজনীয় প্রাইস-রান কনফার্মেশন পাওয়া যায়নি।",
+        "quote pressure unavailable": "কোট-প্রেশার ডাটা পাওয়া যাচ্ছে না।",
+        "run and pressure are not aligned": "প্রাইস-রান ও প্রেশার একই দিকে কনফার্ম করছে না।",
+    }
+    if text in exact:
+        return exact[text]
+    replacements = (
+        ("spread too wide", "স্প্রেড বেশি"),
+        ("upward run", "উর্ধ্বমুখী প্রাইস-রান"),
+        ("downward run", "নিম্নমুখী প্রাইস-রান"),
+        ("pressure", "প্রেশার"),
+        ("quote-pressure fallback", "কোট-প্রেশার বিকল্প ডাটা"),
+        ("volume-weighted microprice", "ভলিউম-ওয়েটেড মাইক্রোপ্রাইস"),
+        ("fast tick confirmation", "দ্রুত টিক কনফার্মেশন"),
+        ("BUY", "ক্রয়"),
+        ("SELL", "বিক্রয়"),
+        ("HOLD", "অপেক্ষা"),
+        ("Bullish", "বুলিশ"),
+        ("Bearish", "বিয়ারিশ"),
+        ("run", "প্রাইস-রান"),
+        ("tick", "টিক"),
+    )
+    for source, translated in replacements:
         text = text.replace(source, translated)
     return text
+
+
+def _score_view(confidence) -> tuple[int, str]:
+    """Expose a stable 0-100 score for the UI while preserving raw confidence."""
+    try:
+        score = int(round(float(confidence) * 100.0))
+    except (TypeError, ValueError):
+        score = 0
+    score = max(0, min(100, score))
+    if score >= 80:
+        bucket = "STRONG"
+    elif score >= 65:
+        bucket = "GOOD"
+    elif score > 0:
+        bucket = "WEAK"
+    else:
+        bucket = "NO_SCORE"
+    return score, bucket
 
 
 def _real_signal(pair: str, automatic: bool) -> dict:
@@ -31,10 +77,12 @@ def _real_signal(pair: str, automatic: bool) -> dict:
     tick_time = tick_time.astimezone(timezone.utc)
     is_entry = result.action in {"BUY", "SELL"}
     candle = signal_at_utc.replace(second=0, microsecond=0)
+    signal_score, score_bucket = _score_view(result.confidence)
     return {
         "pair": pair, "requested_pair": pair, "market_mode": "real", "source": "BiQuote tick history",
         "signal": result.action, "market_bias": result.action, "entry_signal": result.action,
         "buy_score": 1 if result.action == "BUY" else 0, "sell_score": 1 if result.action == "SELL" else 0,
+        "signal_score": signal_score, "score": signal_score, "score_bucket": score_bucket,
         "reason": _bengali_reason(result.reason), "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
         "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
         "candle_time": candle.isoformat(timespec="seconds") if is_entry else None,
@@ -62,7 +110,7 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
         raise RuntimeError("বর্তমান Quotex OTC মার্কেট শনাক্ত করা যায়নি। Quotex-এ একটি 1-minute OTC chart খোলা রাখুন।")
 
     # Keep the existing OTC candle-pressure strategy unchanged.
-    # Only the data source/market selection is now dynamic.
+    # Only the data source/market selection is dynamic.
     signal_at_utc = datetime.now(timezone.utc)
     candles = fetch_quotex_candles(asset, count=240)
     result = generate_otc_signal(candles)
@@ -70,11 +118,14 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
     signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
     is_entry = result.action in {"BUY", "SELL"}
     signal_candle = signal_at_utc.replace(second=0, microsecond=0)
+    signal_score, score_bucket = _score_view(result.confidence)
     return {
         "pair": pair, "requested_pair": requested_pair, "detected_asset": asset, "market_mode": "quotex_otc",
         "source": "Quotex OTC local Windows/Android screen collector", "signal": result.action, "market_bias": result.action,
         "entry_signal": result.action, "buy_score": 1 if result.action == "BUY" else 0,
-        "sell_score": 1 if result.action == "SELL" else 0, "reason": _bengali_reason(result.reason),
+        "sell_score": 1 if result.action == "SELL" else 0,
+        "signal_score": signal_score, "score": signal_score, "score_bucket": score_bucket,
+        "reason": _bengali_reason(result.reason),
         "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
         "candle_time": signal_candle.isoformat(timespec="seconds") if is_entry else None,
         "analysis_candle_time_utc": pd_timestamp_utc(last["timestamp"]),
