@@ -105,6 +105,11 @@ def _decode_socket_message(payload: str, opcode: int) -> tuple[str | None, Any]:
                 return None, data[2]
             if len(data) == 2:
                 return None, data[1]
+        if isinstance(data, list) and data and isinstance(data[0], list):
+            # Quotex quotes/stream binary packets are rows such as:
+            # [[asset, unix_timestamp, price, ...]]. Pass them through as
+            # the quotes/stream event so Collector can build 1-minute OHLC.
+            return "quotes/stream", data
         if isinstance(data, list) and len(data) >= 2 and isinstance(data[0], str):
             return data[0], data[1]
         return None, data
@@ -154,15 +159,22 @@ def _normalise_candle(payload: Any, fallback_asset: str | None = None) -> list[d
 
 
 def _price_from_payload(payload: Any) -> tuple[str | None, float | None, float | None]:
-    if not isinstance(payload, dict):
-        return None, None, None
-    asset = payload.get("asset") or payload.get("symbol")
-    value = payload.get("price", payload.get("close"))
-    ts = payload.get("timestamp", payload.get("time"))
-    try:
-        return str(asset) if asset else None, float(value), float(ts) if ts is not None else time.time()
-    except (TypeError, ValueError):
-        return None, None, None
+    if isinstance(payload, dict):
+        asset = payload.get("asset") or payload.get("symbol")
+        value = payload.get("price", payload.get("close"))
+        ts = payload.get("timestamp", payload.get("time"))
+        try:
+            return str(asset) if asset else None, float(value), float(ts) if ts is not None else time.time()
+        except (TypeError, ValueError):
+            return None, None, None
+    if isinstance(payload, list):
+        # Accept a single Quotex stream row: [asset, timestamp, price, ...].
+        if len(payload) >= 3 and isinstance(payload[0], str):
+            try:
+                return str(payload[0]), float(payload[2]), float(payload[1])
+            except (TypeError, ValueError):
+                return None, None, None
+    return None, None, None
 
 
 class Collector:
@@ -231,6 +243,13 @@ class Collector:
             rows = _normalise_candle(payload)
             if rows:
                 self._send(rows)
+            return
+        if name == "quotes/stream":
+            rows = payload if isinstance(payload, list) else [payload]
+            for row in rows:
+                asset, price, ts = _price_from_payload(row)
+                if asset and price is not None and ts is not None:
+                    self._add_price(asset, price, ts)
             return
         if name in {"candle-generated", "quote", "quotes", "price", "tick", "instrument/price"}:
             rows = _normalise_candle(payload)
