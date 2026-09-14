@@ -1,5 +1,73 @@
-/* Dashboard skin is implemented with real HTML controls in index.html. Keep this hook display-only and non-invasive. */
-.logo{content:url('/static/sk_bot_logo_user.svg')!important}
-.main.dashboard .card{box-shadow:inset 0 1px 0 rgba(255,255,255,.025),0 10px 24px rgba(0,0,0,.18)}
-.main.dashboard #live-market-chart{width:100%!important;max-width:none!important}
-@media(max-width:700px){.main.dashboard{width:100%!important}.main.dashboard #live-market-chart{width:100%!important}}
+/* Reference-matched dashboard skin.
+   DISPLAY/LAYOUT ONLY: existing forms, endpoints, signal engine, Master/Viewer and Trusted Device code are untouched. */
+:root{--ref-bg:#061225;--ref-panel:#071a31;--ref-line:#103d69;--ref-blue:#176cf5;--ref-green:#16d9a1}
+html{scroll-behavior:smooth}
+body{background:radial-gradient(900px 620px at 62% -10%,#082d55 0%,#06152b 48%,#03101f 100%)!important;padding:0!important}
+.shell{width:100%!important;max-width:1536px!important;border:0!important;border-radius:0!important;background:#041225!important;box-shadow:none!important}
+/* Screenshot geometry: sidebar occupies the full left rail; topbar starts beside it. */
+.topbar{height:70px!important;margin-left:242px!important;padding:0 18px!important;background:#061426!important;border-bottom:1px solid #0e3155!important;position:relative!important;z-index:20!important}
+.brand{position:absolute!important;left:-242px!important;top:0!important;width:242px!important;height:70px!important;min-width:242px!important;padding:0 20px!important;gap:10px!important;background:#061426!important;border-right:1px solid #0e3155!important}
+.logo{width:45px!important;height:45px!important;flex:0 0 45px!important;content:url('/static/sk_bot_logo_user.svg')!important;box-shadow:0 0 0 1px rgba(42,132,255,.5),0 0 18px rgba(30,118,246,.18)!important}
+.brand-name{font-size:23px!important;line-height:1!important;letter-spacing:.01em!important}
+.brand-tag{font-size:10px!important;color:#148eff!important;letter-spacing:.04em!important;font-weight:800!important}
+.online{font-size:13px!important;line-height:1.2!important;margin-left:0!important;color:#11d79b!important}
+.online i{width:9px!important;height:9px!important}
+.top-actions{margin-left:auto!important;gap:10px!important}
+.top-chip{display:none!important}
+.top-actions:before{content:'♧  3';display:flex;align-items:center;justify-content:center;height:34px;min-width:38px;padding:0 7px;border-left:1px solid #103457;color:#a8bdd2;font-size:13px}
+.top-actions:after{content:'AK   Abdul Kayum  ·  Master  ⌄';display:flex;align-items:center;height:70px;padding:0 18px;border-left:1px solid #103457;color:#eaf3ff;font-size:11px;font-weight:800;white-space:nowrap}
+.logout{padding:8px 10px!important;font-size:9px!important;border-radius:7px!important}
+.body{display:grid!important;grid-template-columns:242px minmax(0,1fr)!important;min-height:calc(100vh - 70px)!important}
+.sidebar{position:relative!important;margin-top:-70px!important;padding:82px 12px 18px!important;min-height:100vh!important;border-right:1px solid #0e3155!important;background:linear-gradient(180deg,#061528 0%,#041225 100%)!important;z-index:10!important}
+.side-title{font-size:9px!important;color:#526e8c!important;padding:8px 10px 12px!important}
+.side-nav{gap:5px!important}
+.side-nav a{min-height:42px!important;padding:10px 12px!important;border-radius:8px!important;font-size:12px!important;color:#a7bad0!important}
+.side-nav a:hover,.side-nav a.active{background:linear-gradient(90deg,#0759c9,#1268d9)!important;border-color:#1377ee!important;color:#fff!important}
+.side-nav a.active{box-shadow:none!important}
+.side-nav .ico{width:18px!important;color:#9bb8d7!important;font-size:14px!important}
+.market-box{margin-top:auto!important;padding:14px 5px 0!important}
+.side-note{font-size:9px!important;color:#55718d!important}
+.main.dashboard{padding:8px 20px 18px!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:14px!important;align-content:start!important;background:radial-gradient(900px 520px at 52% 0,rgba(22,107,210,.11),transparent 70%)!important}
+.hero-card{padding:14px!important;min-height:104px!important;border:1px solid #0c4b85!important;border-radius:11px!important;background:linear-gradient(105deg,#06284b,#06213d 58%,#061b33)!important;box-shadow:none!important}
+.hero-top{align-items:center!important}
+.hero-title{font-size:20px!important}
+.hero-sub{font-size:10px!important;margin-top:4px!important}
+.hero-controls{gap:10px!important;align-items:end!important}
+.control{min-width:145px!important}
+.control label{font-size:9px!important;color:#6ea6d0!important}
+.field{height:40px!important;padding:0 12px!important;border-radius:8px!important;background:#071a30!important;border-color:#16436c!important}
+.hero-mode{display:none!important}
+.get{height:40px!important;min-width:160px!important;border-radius:8px!important;background:linear-gradient(90deg,#0fbf9d,#12bda2)!important;box-shadow:none!important;font-size:12px!important}
+.auto-wrap{height:40px!important;min-width:160px!important;justify-content:center!important;border:0!important;background:linear-gradient(90deg,#175ff1,#1f68ef)!important;color:#fff!important;font-size:12px!important;font-weight:900!important}
+.auto-wrap input{display:none!important}
+.auto-status{display:none!important}
+.card{border:1px solid #0d4779!important;border-radius:10px!important;background:linear-gradient(180deg,#061c35,#05172b)!important;box-shadow:none!important}
+.card-head{min-height:58px!important;padding:10px 15px!important;background:transparent!important;border-bottom:1px solid #0b3155!important;font-size:12px!important}
+.card-body{padding:12px 14px!important}
+#performance-card{grid-column:1/-1!important;grid-row:auto!important}
+#performance-card .card-head{font-size:14px!important;min-height:58px!important}
+#performance-card .card-head:after{content:'Your trading performance at a glance';display:block;color:#67a6d3;font-size:9px;font-weight:500;margin-left:-180px;margin-top:27px;position:absolute}
+.perf-grid{grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:14px!important}
+.perf-stat{min-height:92px!important;padding:13px!important;text-align:left!important;border:1px solid #0c345a!important;border-radius:9px!important;background:linear-gradient(135deg,#07213d,#061a31)!important}
+.perf-stat span{font-size:10px!important;color:#72a0c5!important}
+.perf-stat b{font-size:18px!important;margin-top:8px!important}
+.perf-history{max-height:120px!important}
+#market-status-panel{grid-column:1!important;grid-row:auto!important;min-height:292px!important}
+#result-container{grid-column:2!important;grid-row:auto!important;min-height:292px!important}
+.news-card{grid-column:3!important;grid-row:auto!important;min-height:292px!important}
+.status-row{padding:9px 0!important}
+.status-row .k{font-size:10px!important}
+.status-row .v{font-size:10px!important}
+.signal-pair{font-size:16px!important}
+.entry-box{padding:12px!important}
+.entry-box .val{font-size:23px!important}
+.reason{font-size:10px!important}
+.news-item{margin:7px 0!important;padding:9px!important;border-radius:8px!important}
+.news-meta{font-size:8px!important}
+#live-market-chart{grid-column:1/-1!important;grid-row:auto!important;width:100%!important;height:294px!important;max-width:none!important;margin:0!important;border:1px solid #0d4779!important;border-radius:10px!important;background:#04172c!important}
+#live-market-chart .chart-bar{height:58px!important;min-height:58px!important;padding:0 15px!important;background:transparent!important;border-bottom:1px solid #0b3155!important}
+#live-market-chart .chart-title{font-size:14px!important}
+#live-market-chart .chart-canvas-wrap{background:#031326!important}
+.foot{display:none!important}
+@media(max-width:1100px){.topbar{margin-left:210px!important}.brand{left:-210px!important;width:210px!important;min-width:210px!important}.body{grid-template-columns:210px minmax(0,1fr)!important}.sidebar{margin-top:-70px!important}.main.dashboard{grid-template-columns:repeat(2,minmax(0,1fr))!important}.news-card{grid-column:1/-1!important}}
+@media(max-width:700px){.topbar{margin-left:0!important;height:60px!important;padding:0 10px!important}.brand{position:static!important;width:auto!important;min-width:0!important;height:60px!important;padding:0!important;background:transparent!important;border:0!important}.logo{width:38px!important;height:38px!important;flex-basis:38px!important}.brand-name{font-size:14px!important}.brand-tag{display:none!important}.online{font-size:9px!important;margin-left:auto!important}.top-actions:before,.top-actions:after{display:none!important}.logout{font-size:8px!important;padding:7px 8px!important}.body{display:block!important;min-height:0!important}.sidebar{margin-top:0!important;min-height:0!important;padding:8px 9px!important;border-right:0!important;border-bottom:1px solid #0e3155!important}.side-title{display:none!important}.side-nav{display:flex!important;overflow-x:auto!important;padding-bottom:2px!important}.side-nav a{min-height:36px!important;padding:8px 9px!important;font-size:9px!important}.market-box{margin-top:8px!important}.main.dashboard{display:flex!important;flex-direction:column!important;padding:10px!important;gap:10px!important}.hero-card,#performance-card,#market-status-panel,#result-container,.news-card,#live-market-chart{width:100%!important;min-height:0!important}.hero-top{align-items:flex-start!important;flex-direction:column!important}.hero-controls{width:100%!important;display:grid!important;grid-template-columns:1fr 1fr!important}.control.market{grid-column:1/-1!important}.get,.auto-wrap{width:100%!important;min-width:0!important}.perf-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}#live-market-chart{height:310px!important}}
