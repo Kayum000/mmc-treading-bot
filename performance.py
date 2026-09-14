@@ -42,18 +42,41 @@ def init_db():
         conn.commit()
 
 def record_signal(result):
+    """Store at most one entry per pair/mode/candle and reject overlapping entries."""
     signal=str(result.get('signal','')).upper(); mode=str(result.get('market_mode','real')).lower()
-    if signal not in {'BUY','SELL'} or mode not in {'real','quotex_otc'}: return
+    if signal not in {'BUY','SELL'} or mode not in {'real','quotex_otc'}: return False
     try:
         init_db(); signal_time=_utc(result['signal_time_utc']); entry_time=_minute_start(result.get('entry_time_utc') or signal_time)
+        pair=str(result.get('pair','')).strip().upper()
+        if not pair: return False
         with _connect() as conn:
             with conn.cursor() as cur:
+                # Serialize entries for this pair so two simultaneous requests cannot
+                # create overlapping/current-candle entries.
+                cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"mmc-entry:{mode}:{pair}",))
+                cur.execute("""SELECT 1 FROM mmc_signal_performance
+                    WHERE market_mode=%s AND pair=%s AND entry_time_utc=%s
+                    LIMIT 1""", (mode,pair,entry_time))
+                if cur.fetchone() is not None:
+                    conn.rollback()
+                    return False
+                # Do not allow a new candle entry while the previous entry candle
+                # is still pending. Once it is settled, the next candle is allowed.
+                cur.execute("""SELECT 1 FROM mmc_signal_performance
+                    WHERE market_mode=%s AND pair=%s AND result='PENDING'
+                      AND entry_time_utc + INTERVAL '1 minute' > NOW()
+                    LIMIT 1""", (mode,pair))
+                if cur.fetchone() is not None:
+                    conn.rollback()
+                    return False
                 cur.execute("""INSERT INTO mmc_signal_performance
                     (market_mode,pair,signal,signal_time_utc,entry_time_utc,entry_price_reference,reason,mmc_level_type,mmc_level_price)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (market_mode,pair,signal,entry_time_utc) DO NOTHING""",
-                    (mode,result.get('pair',''),signal,signal_time,entry_time,result.get('entry_price'),result.get('reason'),result.get('mmc_level_type'),result.get('mmc_level_price')))
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (mode,pair,signal,signal_time,entry_time,result.get('entry_price'),result.get('reason'),result.get('mmc_level_type'),result.get('mmc_level_price')))
             conn.commit()
-    except Exception: return
+        return True
+    except Exception:
+        return False
 
 def _entry_candle(frame,entry_time):
     if frame is None or frame.empty:return None
@@ -82,8 +105,7 @@ def settle_pending():
                 key=(mode,pair)
                 if key not in frames:
                     try:
-                        if mode=='real':
-                            frames[key]=fetch_forex_candles(pair,'1min',outputsize=200)
+                        if mode=='real': frames[key]=fetch_forex_candles(pair,'1min',outputsize=200)
                         else:
                             asset=_otc_asset(pair)
                             frames[key]=fetch_quotex_candles(asset,'1m',240) if asset else None
