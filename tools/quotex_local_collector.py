@@ -97,7 +97,6 @@ def _decode_socket_message(payload: str, opcode: int) -> tuple[str | None, Any]:
                 return str(packet[0]), packet[1] if len(packet) > 1 else None
         return None, None
     try:
-        # Chrome CDP may expose binary payloadData as raw text rather than base64.
         if "[" in payload or "{" in payload:
             decoded = payload
         else:
@@ -157,6 +156,37 @@ def _normalise_candle(payload: Any, fallback_asset: str | None = None) -> list[d
         except (TypeError, ValueError, OverflowError):
             continue
     return result
+
+
+def _normalise_history(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    asset = payload.get("asset") or payload.get("symbol")
+    history = payload.get("history") or []
+    if not asset or not isinstance(history, list):
+        return []
+    buckets: dict[int, dict[str, Any]] = {}
+    for item in history:
+        if not isinstance(item, (list, tuple)) or len(item) < 2:
+            continue
+        try:
+            ts, price = float(item[0]), float(item[1])
+        except (TypeError, ValueError):
+            continue
+        bucket = int(ts // PERIOD) * PERIOD
+        state = buckets.get(bucket)
+        if state is None:
+            buckets[bucket] = {
+                "bucket": bucket, "asset": str(asset), "period": PERIOD,
+                "timestamp": float(bucket), "open": price, "high": price,
+                "low": price, "close": price,
+            }
+        else:
+            state["high"] = max(state["high"], price)
+            state["low"] = min(state["low"], price)
+            state["close"] = price
+    boundary = int(time.time() // PERIOD) * PERIOD
+    return [v for k, v in sorted(buckets.items()) if k < boundary]
 
 
 def _price_from_payload(payload: Any) -> tuple[str | None, float | None, float | None]:
@@ -238,6 +268,11 @@ class Collector:
         name = event_name.lower()
         if VERBOSE:
             log(f"event: {event_name}")
+        if name == "history/list/v2":
+            rows = _normalise_history(payload)
+            if rows:
+                self._send(rows)
+            return
         if name in {"candle", "candles", "history/list", "history/load", "chart_notification/get"}:
             rows = _normalise_candle(payload)
             if rows:
