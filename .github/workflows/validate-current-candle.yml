@@ -1,0 +1,39 @@
+name: Validate current-candle fix
+
+on:
+  push:
+    branches:
+      - fix/current-candle-entry-lock
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile Python sources
+        run: python -m compileall -q .
+      - name: Validate current-candle behavior
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          src = Path('performance.py').read_text()
+          tree = ast.parse(src)
+          names = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+          required = {'record_signal', '_entry_candle', '_candle_color', '_outcome', 'settle_pending'}
+          assert not (required - names)
+          ns = {}
+          exec(compile(tree, 'performance.py', 'exec'), ns)
+          assert ns['_outcome']('BUY', {'open': 1, 'close': 2}) == 'WIN'
+          assert ns['_outcome']('BUY', {'open': 2, 'close': 1}) == 'LOSS'
+          assert ns['_outcome']('SELL', {'open': 2, 'close': 1}) == 'WIN'
+          assert ns['_outcome']('SELL', {'open': 1, 'close': 2}) == 'LOSS'
+          assert ns['_outcome']('BUY', {'open': 1, 'close': 1}) == 'VOID'
+          assert "target=_minute_start(entry_time)" in src
+          assert "entry_time_utc + INTERVAL '1 minute' > NOW()" in src
+          assert 'Signal candle color:' in src
+          print('Current-candle validation: PASS')
+          PY
