@@ -164,16 +164,10 @@ def news_direction():
 
 @app.after_request
 def add_dashboard_assets(response):
-    """Remove obsolete scanner/status UI and inject legacy Performance only for the old dashboard."""
+    """Remove obsolete scanner/status UI and inject the compact Performance panel."""
     if not (response.content_type or "").startswith("text/html"):
         return response
     html = response.get_data(as_text=True)
-    # The new SK dashboard owns its complete UI/JS. The old after_request
-    # injector would otherwise add a second Performance panel with duplicate
-    # DOM ids and legacy styling. Keep the injector only for the old template.
-    if 'id="performance-card"' in html:
-        response.set_data(html)
-        return response
     start = html.find('<aside class="panel status-panel" id="market-status-panel">')
     if start >= 0:
         end = html.find('</aside>', start)
