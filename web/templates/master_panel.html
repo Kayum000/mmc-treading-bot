@@ -1,0 +1,38 @@
+{% if session.get('master') %}
+<section id="master-control-panel" class="master-panel-card">
+  <div class="master-panel-head">
+    <span>MASTER CONTROL</span>
+    <span id="master-role-badge">MASTER / MAIN PANEL</span>
+  </div>
+  <div class="master-panel-actions">
+    <button type="button" onclick="openTrustedDevices()">TRUSTED DEVICES</button>
+    <button type="button" onclick="createTrustedInvite()">ADD TRUSTED DEVICE</button>
+  </div>
+  <div id="trusted-devices-list">Loading trusted devices…</div>
+</section>
+<script>
+async function trustedJson(url, options={}) {
+  const r = await fetch(url, Object.assign({credentials:'same-origin',cache:'no-store'}, options));
+  return await r.json();
+}
+async function openTrustedDevices(){
+  const box=document.getElementById('trusted-devices-list');
+  if(!box) return;
+  const x=await trustedJson('/master/trusted/list');
+  box.innerHTML=(x.devices||[]).length ? x.devices.map(d=>`<div class="trusted-device"><span>${d.name}</span><code>${d.device_hash}</code><button type="button" onclick="removeTrustedDevice('${d.device_hash}')">REMOVE</button></div>`).join('') : 'No trusted devices';
+}
+async function createTrustedInvite(){
+  const x=await trustedJson('/master/trusted/invite',{method:'POST'});
+  if(x.code) prompt('Give this one-time code to the device. It expires in 10 minutes.',x.code);
+  else alert(x.error||'Could not create invite');
+  openTrustedDevices();
+}
+async function removeTrustedDevice(hash){
+  if(!confirm('Remove this trusted device?')) return;
+  const x=await trustedJson('/master/trusted/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_hash:hash})});
+  if(!x.ok) alert(x.error||x.message||'Could not remove device');
+  openTrustedDevices();
+}
+openTrustedDevices();
+</script>
+{% endif %}
