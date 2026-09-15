@@ -63,7 +63,7 @@ def _store_real_market(payload: dict) -> int:
                 continue
             if not asset or not all(map(lambda v: v == v and abs(v) != float("inf"), (ts, o, h, l, c))):
                 continue
-            state = _REAL_MARKET.setdefault(asset, {"bars": [], "quote": None})
+            state = _REAL_MARKET.setdefault(asset, {"bars": [], "quote": None, "quote_history": []})
             bars = state["bars"]
             bucket = int(ts // 60) * 60
             item = {"timestamp": float(bucket), "open": o, "high": h, "low": l, "close": c}
@@ -85,11 +85,41 @@ def _store_real_market(payload: dict) -> int:
                 continue
             if not asset or not price == price or abs(price) == float("inf"):
                 continue
-            state = _REAL_MARKET.setdefault(asset, {"bars": [], "quote": None})
+            state = _REAL_MARKET.setdefault(asset, {"bars": [], "quote": None, "quote_history": []})
             state["quote"] = {"price": price, "timestamp": ts}
+            history = state.setdefault("quote_history", [])
+            history.append({"price": price, "timestamp": ts})
+            state["quote_history"] = history[-1000:]
             state["updated_at"] = now
             accepted += 1
     return accepted
+
+
+def real_market_ticks(asset: str, count: int = 1000):
+    """Return recent Quotex browser quote history as strategy-compatible ticks."""
+    import pandas as pd
+
+    clean = _real_asset(asset)
+    limit = max(1, min(int(count), 1000))
+    with _REAL_MARKET_LOCK:
+        state = _REAL_MARKET.get(clean) or {}
+        rows = list(state.get("quote_history") or [])[-limit:]
+    if not rows:
+        return pd.DataFrame(columns=["timestamp", "askPrice", "bidPrice"])
+    out = []
+    for row in rows:
+        try:
+            price = float(row["price"])
+            ts = pd.to_datetime(float(row["timestamp"]), unit="s", utc=True)
+            # Quotex browser stream supplies the authoritative market price, not
+            # separate bid/ask. Keep a minimal synthetic spread so the existing
+            # tick strategy can evaluate directional pressure without inventing
+            # a second market price.
+            spread = max(abs(price) * 0.00001, 0.00001)
+            out.append({"timestamp": ts, "askPrice": price + spread / 2.0, "bidPrice": price - spread / 2.0})
+        except (TypeError, ValueError, KeyError):
+            continue
+    return pd.DataFrame(out).drop_duplicates("timestamp").sort_values("timestamp").reset_index(drop=True)
 
 
 def init_quotex_browser_ingest(app):
