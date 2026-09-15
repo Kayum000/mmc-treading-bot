@@ -8,7 +8,6 @@
     green:{a:'#15803d',b:'#22c55e',c:'#86efac'},
     orange:{a:'#c2410c',b:'#f97316',c:'#fdba74'}
   };
-  const esc=v=>String(v??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
   function applyTheme(name){
     const t=themes[name]||themes.blue;
     let s=document.getElementById('mmc-theme-style');
@@ -29,29 +28,25 @@
       o.connect(g);g.connect(audio.destination);o.start(now);o.stop(now+.23);
     }catch(_){ }
   }
+  function attachSettings(){
+    const t=document.getElementById('modal-title'),x=document.getElementById('modal-extra');
+    if(!t||!x||t.textContent.trim()!=='Settings'||x.dataset.mmcUiEnhanced==='1')return;
+    x.dataset.mmcUiEnhanced='1';
+    const theme=localStorage.getItem(KEY)||'blue',sound=soundEnabled();
+    x.insertAdjacentHTML('beforeend',`<label class="setting-row">Theme Color <select id="mmc-theme-color" style="background:#0a2440;color:#eaf4ff;border:1px solid #20486e;border-radius:6px;padding:6px 8px"><option value="blue">Blue</option><option value="cyan">Cyan</option><option value="purple">Purple</option><option value="green">Green</option><option value="orange">Orange</option></select></label><label class="setting-row">Signal Sound <input type="checkbox" id="mmc-signal-sound" ${sound?'checked':''}></label>`);
+    const sel=document.getElementById('mmc-theme-color');
+    if(sel){sel.value=theme;sel.onchange=()=>applyTheme(sel.value)}
+    document.getElementById('mmc-signal-sound')?.addEventListener('change',e=>localStorage.setItem(SOUND_KEY,e.target.checked?'on':'off'));
+  }
   applyTheme(localStorage.getItem(KEY)||'blue');
   const result=document.getElementById('result-container');
   if(result){
     let last='';
     new MutationObserver(()=>{
-      const text=result.textContent.replace(/\\s+/g,' ').trim();
-      if(text&&text!==last&&/\\b(BUY|SELL)\\b/.test(text)){last=text;playSignalSound()}
+      const text=result.textContent.replace(/\s+/g,' ').trim();
+      if(text&&text!==last&&/\b(BUY|SELL)\b/.test(text)){last=text;playSignalSound()}
     }).observe(result,{childList:true,subtree:true,characterData:true});
   }
-  const oldOpen=window.modalOpen;
-  if(typeof oldOpen==='function'){
-    window.modalOpen=function(title,...args){
-      const r=oldOpen.apply(this,[title,...args]);
-      if(title==='Settings')setTimeout(()=>{
-        const x=document.getElementById('modal-extra'); if(!x||x.dataset.mmcUiEnhanced==='1')return;
-        x.dataset.mmcUiEnhanced='1';
-        const theme=localStorage.getItem(KEY)||'blue';
-        const sound=soundEnabled();
-        x.insertAdjacentHTML('beforeend',`<label class="setting-row">Theme Color <select id="mmc-theme-color" style="background:#0a2440;color:#eaf4ff;border:1px solid #20486e;border-radius:6px;padding:6px 8px"><option value="blue">Blue</option><option value="cyan">Cyan</option><option value="purple">Purple</option><option value="green">Green</option><option value="orange">Orange</option></select></label><label class="setting-row">Signal Sound <input type="checkbox" id="mmc-signal-sound" ${sound?'checked':''}></label>`);
-        const sel=document.getElementById('mmc-theme-color'); if(sel){sel.value=theme;sel.onchange=()=>applyTheme(sel.value)}
-        document.getElementById('mmc-signal-sound')?.addEventListener('change',e=>localStorage.setItem(SOUND_KEY,e.target.checked?'on':'off'));
-      },0);
-      return r;
-    }
-  }
+  const modal=document.getElementById('modal');
+  if(modal){new MutationObserver(attachSettings).observe(modal,{attributes:true,childList:true,subtree:true});attachSettings()}
 })();
