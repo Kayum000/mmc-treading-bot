@@ -2,8 +2,9 @@
 
 Signal-data-only: it does not log in, collect passwords/SSIDs, or place orders.
 It attaches to Chrome DevTools Protocol (CDP), reads the browser's WebSocket
-frames, normalizes supported OTC candles/quotes, builds 1-minute OHLC when
-needed, and sends only candle data to the MMC Render ingest endpoint.
+frames, normalizes Quotex candles/quotes, builds 1-minute OHLC when needed,
+and sends OTC candles to the existing OTC ingest plus real-market quotes and
+candles to the separate Quotex real-market feed.
 
 Environment variables:
   MMC_BOT_URL            e.g. https://mmc-treading-bot.onrender.com
@@ -56,7 +57,7 @@ def _target() -> dict[str, Any]:
     if not candidates:
         raise RuntimeError(
             "No Quotex browser tab found. Start the isolated Chrome launcher, log in, "
-            "and leave the OTC chart open."
+            "and leave the market chart open."
         )
     return candidates[0]
 
@@ -144,7 +145,7 @@ def _normalise_candle(payload: Any, fallback_asset: str | None = None) -> list[d
                 ts, op, cl, hi, lo = item[:5]
             else:
                 continue
-            if str(item_asset) not in OTC_PAIRS or None in (ts, op, hi, lo, cl):
+            if not item_asset or None in (ts, op, hi, lo, cl):
                 continue
             ts = float(ts)
             if ts > 10_000_000_000:
@@ -213,18 +214,14 @@ class Collector:
         self.last_signature = ""
         self.last_send = 0.0
         self.last_partial_send: dict[str, float] = {}
+        self.last_quote_send: dict[str, float] = {}
 
-    def _send(self, rows: list[dict[str, Any]]) -> None:
-        if not rows:
-            return
+    def _post(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
         if not INGEST_SECRET:
             raise RuntimeError("QUOTEX_INGEST_SECRET is missing. Set the same secret on Render and locally.")
-        signature = "|".join(f"{r['asset']}:{r['timestamp']}:{r['close']}" for r in rows[-5:])
-        if signature == self.last_signature and time.monotonic() - self.last_send < 45:
-            return
         response = self.session.post(
-            f"{BOT_URL}/quotex/ingest",
-            json={"sent_at": time.time(), "candles": rows},
+            f"{BOT_URL}{endpoint}",
+            json=payload,
             headers={"X-MMC-Quotex-Key": INGEST_SECRET},
             timeout=10,
             allow_redirects=False,
@@ -238,13 +235,44 @@ class Collector:
             body = response.text.strip().replace("\r", " ").replace("\n", " ")[:240]
             raise RuntimeError(f"Render returned non-JSON response: {body or 'empty response'}")
         if not data.get("ok"):
-            raise RuntimeError(f"Render rejected candles: {data.get('error', 'unknown error')}")
+            raise RuntimeError(f"Render rejected market data: {data.get('error', 'unknown error')}")
+        return data
+
+    def _send(self, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
+        otc_rows = [r for r in rows if r.get("asset") in OTC_PAIRS]
+        real_rows = [r for r in rows if r.get("asset") not in OTC_PAIRS]
+        signature = "|".join(f"{r['asset']}:{r['timestamp']}:{r['close']}" for r in rows[-5:])
+        if signature == self.last_signature and time.monotonic() - self.last_send < 45:
+            return
+        accepted = 0
+        if otc_rows:
+            data = self._post("/quotex/ingest", {"sent_at": time.time(), "candles": otc_rows})
+            accepted += int(data.get("accepted", 0) or 0)
+        if real_rows:
+            data = self._post("/quotex/real-ingest", {"sent_at": time.time(), "candles": real_rows})
+            accepted += int(data.get("accepted", 0) or 0)
         self.last_signature = signature
         self.last_send = time.monotonic()
-        log(f"sent {data.get('accepted', len(rows))} candle rows to MMC")
+        log(f"sent {accepted} candle rows to MMC ({len(otc_rows)} OTC, {len(real_rows)} real-market)")
+
+    def _send_quote(self, asset: str, price: float, ts: float) -> None:
+        if asset in OTC_PAIRS:
+            return
+        now = time.monotonic()
+        if now - self.last_quote_send.get(asset, 0.0) < 1.0:
+            return
+        data = self._post("/quotex/real-ingest", {
+            "sent_at": time.time(),
+            "quotes": [{"asset": asset, "price": price, "timestamp": ts}],
+        })
+        self.last_quote_send[asset] = now
+        if VERBOSE:
+            log(f"sent live real-market quote for {asset}: accepted={data.get('accepted', 0)}")
 
     def _add_price(self, asset: str, price: float, ts: float) -> None:
-        if asset not in OTC_PAIRS:
+        if not asset:
             return
         bucket = int(ts // PERIOD) * PERIOD
         state = self.partial.get(asset)
@@ -262,6 +290,7 @@ class Collector:
             state["high"] = max(state["high"], price)
             state["low"] = min(state["low"], price)
             state["close"] = price
+        self._send_quote(asset, price, ts)
 
     def flush_partials(self) -> None:
         now = time.monotonic()
