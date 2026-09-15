@@ -38,9 +38,13 @@ def _collector_secret_valid() -> bool:
     return bool(expected and supplied and hmac.compare_digest(supplied, expected))
 
 
+def _master_request_authorized() -> bool:
+    return bool(session.get("authenticated")) or _collector_secret_valid()
+
+
 def init_quotex_browser_ingest(app):
     def allow_collector_endpoint():
-        if request.endpoint in {"quotex_ingest", "quotex_stream_status", "quotex_current_market"} and _collector_secret_valid():
+        if request.endpoint in {"quotex_ingest", "quotex_stream_status", "quotex_current_market", "quotex_master"} and _collector_secret_valid():
             session["authenticated"] = True
         return None
 
@@ -49,15 +53,14 @@ def init_quotex_browser_ingest(app):
     @app.route("/quotex/master", methods=["GET", "POST"])
     def quotex_master():
         if request.method == "POST":
-            supplied = (request.headers.get("X-MMC-Quotex-Key") or request.args.get("key") or "").strip()
-            if not _collector_secret_valid() and supplied:
-                return jsonify({"ok": False, "error": "Invalid ingest key."}), 401
+            if not _master_request_authorized():
+                return jsonify({"ok": False, "error": "Master authentication required."}), 401
             raw = request.form.get("enabled")
             if raw is None and request.is_json:
                 raw = (request.get_json(silent=True) or {}).get("enabled")
-            enabled = str(raw).strip().lower() in {"1", "true", "on", "yes", "enabled"}
             if raw is None:
                 return jsonify({"ok": False, "error": "enabled is required."}), 400
+            enabled = str(raw).strip().lower() in {"1", "true", "on", "yes", "enabled"}
             _set_otc_master(enabled)
         return jsonify({"ok": True, "enabled": otc_master_enabled(), "mode": "quotex_otc"})
 
@@ -94,12 +97,13 @@ def init_quotex_browser_ingest(app):
     @app.route("/quotex/current-market", methods=["GET"])
     def quotex_current_market():
         asset = local_active_asset()
+        enabled = otc_master_enabled()
         return jsonify({
-            "ok": bool(asset) and otc_master_enabled(),
+            "ok": bool(asset) and enabled,
             "market_mode": "quotex_otc",
             "asset": asset,
-            "pair": display_for_asset(asset) if asset and otc_master_enabled() else None,
-            "master_otc_enabled": otc_master_enabled(),
+            "pair": display_for_asset(asset) if asset and enabled else None,
+            "master_otc_enabled": enabled,
             "source": "Quotex local screen collector",
         })
 
@@ -158,7 +162,7 @@ def init_quotex_browser_ingest(app):
         html = response.get_data(as_text=True)
         if "id=\"pair\"" not in html or "QUOTEX_AUTO_MARKET_SYNC" in html:
             return response
-        script = '''<script id="QUOTEX_AUTO_MARKET_SYNC">(()=>{const mode=document.getElementById('mode'),pair=document.getElementById('pair'),button=document.getElementById('signal-button');if(!mode||!pair)return;let busy=false;async function sync(){if(busy||mode.value!=='quotex_otc')return;busy=true;try{const r=await fetch('/quotex/current-market',{cache:'no-store',credentials:'same-origin'}),d=await r.json();if(d.ok&&d.pair){let o=Array.from(pair.options).find(x=>x.value===d.pair);if(!o){o=document.createElement('option');o.value=d.pair;o.textContent=d.pair;o.dataset.market='quotex_otc';pair.appendChild(o)}Array.from(pair.options).forEach(x=>x.hidden=x.dataset.market&&x.dataset.market!==mode.value);pair.value=d.pair;pair.dispatchEvent(new Event('change',{bubbles:true}));if(button)button.disabled=false;await fetch('/select-market',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},credentials:'same-origin',body:new URLSearchParams({mode:'quotex_otc',pair:d.pair})})}}catch(_){ }finally{busy=false}}document.querySelectorAll('.mode-btn').forEach(b=>b.addEventListener('click',()=>setTimeout(sync,150)));sync();setInterval(sync,1500)})();</script>'''
+        script = '''<script id="QUOTEX_AUTO_MARKET_SYNC">(()=>{const mode=document.getElementById('mode'),pair=document.getElementById('pair'),button=document.getElementById('signal-button');if(!mode||!pair)return;let busy=false;async function sync(){if(busy||mode.value!=='quotex_otc')return;busy=true;try{const r=await fetch('/quotex/current-market',{cache:'no-store',credentials:'same-origin'}),d=await r.json();if(d.ok&&d.pair){let o=Array.from(pair.options).find(x=>x.value===d.pair);if(!o){o=document.createElement('option');o.value=d.pair;o.textContent=d.pair;o.dataset.market='quotex_otc';pair.appendChild(o)}Array.from(pair.options).forEach(x=>x.hidden=x.dataset.market&&x.dataset.market!==mode.value);pair.value=d.pair;pair.dispatchEvent(new Event('change',{bubbles:true}));if(button)button.disabled=false;await fetch('/select-market',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},credentials:'same-origin',body:new URLSearchParams({mode:'quotex_otc',pair:d.pair})})}}catch(_){ }finally{busy=false}}async function master(){try{const r=await fetch('/quotex/master',{cache:'no-store',credentials:'same-origin'}),d=await r.json();let b=document.getElementById('quotex-master-toggle');if(!b){b=document.createElement('button');b.id='quotex-master-toggle';b.type='button';b.style.cssText='position:fixed;right:18px;bottom:18px;z-index:99999;border:0;border-radius:12px;padding:11px 16px;font-weight:700;box-shadow:0 6px 22px rgba(0,0,0,.3);cursor:pointer';document.body.appendChild(b);b.onclick=async()=>{b.disabled=true;try{const on=b.dataset.enabled!=='true';await fetch('/quotex/master',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({enabled:on})});await master();await sync()}finally{b.disabled=false}}}b.dataset.enabled=String(!!d.enabled);b.textContent=d.enabled?'🟢 OTC MASTER: ON':'🔴 OTC MASTER: OFF';b.title=d.enabled?'Click to stop OTC collection/signals':'Click to enable OTC collection/signals';b.style.background=d.enabled?'#d9f99d':'#fecaca';b.style.color='#111827';}catch(_){}}document.querySelectorAll('.mode-btn').forEach(b=>b.addEventListener('click',()=>setTimeout(sync,150)));master();sync();setInterval(master,3000);setInterval(sync,1500)})();</script>'''
         marker = '</body>'
         if marker in html:
             html = html.replace(marker, script + marker, 1)
