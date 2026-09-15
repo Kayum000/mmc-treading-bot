@@ -1,63 +1,27 @@
 """Quotex OTC candle data adapter.
 
-Signal-data only: this module never places orders.
-
-Two data sources are supported:
-1) a local collector attached to the user's own Quotex browser session;
-2) the legacy direct WebSocket path when QUOTEX_SSID/QUOTEX_SESSION_TOKEN is set.
-
-The local-browser/Android path is preferred because the Render service never
-needs the user's Quotex session token. Collectors forward only candle/price
-data.
+Signal-data only: this module never places orders and never handles a
+Quotex password/session token. The only supported source is the local
+collector attached to the user's own Quotex browser session.
 """
 from __future__ import annotations
 
-import asyncio
-import json
-import os
 import threading
 import time
 from typing import Any
 
 import pandas as pd
-import websockets
 
 from data.otc_markets import OTC_PAIRS
 
 PERIOD = 60
-CACHE_TTL = 8
-FETCH_TIMEOUT = 18
 _LOCAL_TTL = 15
-_CACHE: dict[tuple[str, int], tuple[float, pd.DataFrame]] = {}
 _LOCAL_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}
 _LOCAL_ACTIVE_ASSET: tuple[float, str] | None = None
 _LOCAL_LOCK = threading.Lock()
 
 
-def _ssid() -> str:
-    return (os.getenv("QUOTEX_SSID") or os.getenv("QUOTEX_SESSION_TOKEN") or "").strip()
-
-
-def _is_demo() -> bool:
-    return os.getenv("QUOTEX_DEMO", "1").strip().lower() not in {"0", "false", "no"}
-
-
-def _event(name: str, payload: Any = None) -> str:
-    body = [name] if payload is None else [name, payload]
-    return "42" + json.dumps(body, separators=(",", ":"))
-
-
-def _parse_event(raw: str):
-    if not isinstance(raw, str) or not raw.startswith("42"):
-        return None, None
-    try:
-        packet = json.loads(raw[2:])
-        return (packet[0], packet[1] if len(packet) > 1 else None) if isinstance(packet, list) and packet else (None, None)
-    except Exception:
-        return None, None
-
-
-def _normalise_rows(payload: Any, default_asset: str):
+def _normalise_rows(payload: Any, default_asset: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if isinstance(payload, dict):
         asset = payload.get("asset") or payload.get("symbol") or default_asset
@@ -89,23 +53,27 @@ def _normalise_rows(payload: Any, default_asset: str):
             stamp = pd.to_datetime(ts, unit="s" if isinstance(ts, (int, float)) else None, utc=True, errors="coerce")
             if pd.isna(stamp):
                 continue
-            rows.append({"timestamp": stamp, "open": float(op), "high": float(hi), "low": float(lo), "close": float(cl), "asset": str(item_asset), "period": period})
+            rows.append({
+                "timestamp": stamp,
+                "open": float(op), "high": float(hi), "low": float(lo), "close": float(cl),
+                "asset": str(item_asset), "period": period,
+            })
         except (TypeError, ValueError, OverflowError):
             continue
     return rows
 
 
 def ingest_local_candles(payload: Any) -> int:
-    """Store candle data received from a local Quotex collector."""
+    """Store candle data received from the authenticated local collector."""
     global _LOCAL_ACTIVE_ASSET
     rows = _normalise_rows(payload, str(payload.get("asset") if isinstance(payload, dict) else ""))
-    if not rows:
-        return 0
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         asset = str(row["asset"])
         if asset in OTC_PAIRS:
             grouped.setdefault(asset, []).append(row)
+    if not grouped:
+        return 0
     active_asset = str(payload.get("active_asset") or "").strip() if isinstance(payload, dict) else ""
     with _LOCAL_LOCK:
         for asset, asset_rows in grouped.items():
@@ -116,36 +84,33 @@ def ingest_local_candles(payload: Any) -> int:
             _LOCAL_CACHE[asset] = (time.monotonic(), frame.tail(500).reset_index(drop=True))
         if active_asset in OTC_PAIRS:
             _LOCAL_ACTIVE_ASSET = (time.monotonic(), active_asset)
-        elif grouped:
+        else:
             newest = max(grouped, key=lambda name: max(row["timestamp"] for row in grouped[name]))
             _LOCAL_ACTIVE_ASSET = (time.monotonic(), newest)
     return sum(len(v) for v in grouped.values())
 
 
 def local_active_asset() -> str | None:
-    """Return the fresh market detected by the local Quotex collector."""
     with _LOCAL_LOCK:
         if not _LOCAL_ACTIVE_ASSET:
             return None
         stamp, asset = _LOCAL_ACTIVE_ASSET
-        if time.monotonic() - stamp > _LOCAL_TTL:
-            return None
-        return asset
+        return asset if time.monotonic() - stamp <= _LOCAL_TTL else None
 
 
 def local_stream_status(asset: str | None = None) -> dict:
     now = time.monotonic()
     with _LOCAL_LOCK:
-        assets = [asset] if asset else list(_LOCAL_CACHE)
-        rows = []
-        for name in assets:
+        names = [asset] if asset else list(_LOCAL_CACHE)
+        assets = []
+        for name in names:
             cached = _LOCAL_CACHE.get(name)
             if not cached:
                 continue
             age = max(0.0, now - cached[0])
-            rows.append({"asset": name, "fresh": age <= _LOCAL_TTL, "age_seconds": round(age, 1), "candles": len(cached[1])})
+            assets.append({"asset": name, "fresh": age <= _LOCAL_TTL, "age_seconds": round(age, 1), "candles": len(cached[1])})
         active = _LOCAL_ACTIVE_ASSET[1] if _LOCAL_ACTIVE_ASSET and now - _LOCAL_ACTIVE_ASSET[0] <= _LOCAL_TTL else None
-    return {"ok": bool(rows) and all(x["fresh"] for x in rows), "source": "Quotex local screen/browser collector", "active_asset": active, "assets": rows}
+    return {"ok": bool(assets) and all(x["fresh"] for x in assets), "source": "Quotex local browser WebSocket collector", "active_asset": active, "assets": assets}
 
 
 def _local_candles(asset: str, count: int) -> pd.DataFrame | None:
@@ -161,57 +126,6 @@ def _local_candles(asset: str, count: int) -> pd.DataFrame | None:
     return df if len(df) >= 8 else None
 
 
-async def _fetch(asset: str, count: int) -> list[dict[str, Any]]:
-    ssid = _ssid()
-    if not ssid:
-        raise RuntimeError("Quotex local collector is not connected. Run the Windows/Android screen collector on the PC where the Quotex app is displayed, or set QUOTEX_SSID as a Render Secret.")
-    origin = os.getenv("QUOTEX_ORIGIN", "https://qxbroker.com").strip()
-    ws_url = os.getenv("QUOTEX_WS_URL", "wss://ws2.qxbroker.com/socket.io/?EIO=3&transport=websocket").strip()
-    headers = {"Origin": origin, "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36", "Accept-Language": "en-US,en;q=0.9"}
-    rows: list[dict[str, Any]] = []
-    pending_binary_event: str | None = None
-    subscribed = False
-    deadline = time.monotonic() + FETCH_TIMEOUT
-    async with websockets.connect(ws_url, additional_headers=headers, origin=origin, open_timeout=8, close_timeout=3, ping_interval=None, max_size=4 * 1024 * 1024) as ws:
-        while time.monotonic() < deadline:
-            raw = await asyncio.wait_for(ws.recv(), timeout=max(0.5, deadline - time.monotonic()))
-            if raw == "2":
-                await ws.send("3")
-                continue
-            if isinstance(raw, (bytes, bytearray)):
-                if pending_binary_event:
-                    try:
-                        rows.extend(_normalise_rows(json.loads(bytes(raw).decode("utf-8", errors="ignore")), asset))
-                    except Exception:
-                        pass
-                    pending_binary_event = None
-                continue
-            if not isinstance(raw, str):
-                continue
-            if raw.startswith("0") or raw == "40":
-                if raw == "40":
-                    await ws.send(_event("authorization", {"session": ssid, "isDemo": 1 if _is_demo() else 0, "tournamentId": 0}))
-                continue
-            event_name, payload = _parse_event(raw)
-            if not event_name:
-                continue
-            event_text = str(event_name).lower()
-            if "reject" in event_text or event_text in {"auth_error", "authorization/reject"}:
-                raise RuntimeError("Quotex SSID rejected or expired; refresh the session token.")
-            if event_text in {"s_authorization", "authorization"} and not subscribed:
-                subscribed = True
-                await ws.send(_event("instruments/update", {"asset": asset, "period": PERIOD}))
-                await ws.send(_event("history/load", {"asset": asset, "index": 0, "period": PERIOD, "time": int(time.time()), "offset": max(3600, count * PERIOD)}))
-            if isinstance(payload, dict) and payload.get("_placeholder"):
-                pending_binary_event = str(event_name)
-                continue
-            if event_text in {"candle", "candles", "history/list", "history/load", "candle-generated", "chart_notification/get"}:
-                rows.extend(_normalise_rows(payload, asset))
-                if len(rows) >= max(60, count):
-                    break
-    return rows
-
-
 def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> pd.DataFrame:
     canonical = next((p for p in OTC_PAIRS if str(asset).strip().lower() == p.lower()), None)
     if not canonical:
@@ -220,37 +134,25 @@ def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> 
         raise ValueError("Quotex OTC MMC uses 1-minute candles only")
     count = max(60, min(int(count), 300))
     local = _local_candles(canonical, count)
-    if local is not None:
-        return local
-    key = (canonical, count)
-    cached = _CACHE.get(key)
-    if cached and time.monotonic() - cached[0] < CACHE_TTL:
-        return cached[1].copy(deep=True)
-    try:
-        rows = asyncio.run(_fetch(canonical, count))
-    except RuntimeError:
-        raise
-    except Exception as exc:
-        raise RuntimeError(f"Quotex OTC data connection failed: {type(exc).__name__}: {exc}") from exc
-    if not rows:
-        raise RuntimeError(f"Quotex returned no candle data for {canonical}.")
-    df = pd.DataFrame(rows).drop_duplicates("timestamp").sort_values("timestamp")
-    boundary = pd.Timestamp((int(time.time()) // PERIOD) * PERIOD, unit="s", tz="UTC")
-    df = df.loc[df["timestamp"] < boundary].tail(count).reset_index(drop=True)
-    if len(df) < 8:
-        raise RuntimeError(f"Quotex returned only {len(df)} closed 1m candles for {canonical}.")
-    _CACHE[key] = (time.monotonic(), df)
-    return df.copy(deep=True)
+    if local is None:
+        raise RuntimeError("Quotex local WebSocket collector is not connected or has no fresh closed candles.")
+    return local
 
 
 def quotex_status(asset: str) -> dict:
     started = time.time()
     local = local_stream_status(asset)
-    if local.get("ok"):
-        match = next((x for x in local.get("assets", []) if x["asset"] == asset), None)
-        return {"ok": True, "connected": True, "asset": asset, "timeframe": "1m", "closed_candles": match["candles"] if match else 0, "source": "Quotex local screen/browser collector", "latency_ms": int((time.time() - started) * 1000)}
-    try:
-        df = fetch_quotex_candles(asset, "1m", 80)
-        return {"ok": True, "connected": True, "asset": asset, "timeframe": "1m", "closed_candles": len(df), "latest_closed_candle": pd.Timestamp(df.iloc[-1]["timestamp"]).strftime("%d %b %Y, %H:%M:%S UTC"), "source": "Quotex OTC WebSocket", "latency_ms": int((time.time() - started) * 1000)}
-    except Exception as exc:
-        return {"ok": False, "connected": False, "asset": asset, "timeframe": "1m", "error": str(exc), "source": "Quotex local screen/browser collector / WebSocket", "latency_ms": int((time.time() - started) * 1000)}
+    match = next((x for x in local.get("assets", []) if x["asset"] == asset), None)
+    if match and match.get("fresh"):
+        return {
+            "ok": True, "connected": True, "asset": asset, "timeframe": "1m",
+            "closed_candles": match["candles"],
+            "source": "Quotex local browser WebSocket collector",
+            "latency_ms": int((time.time() - started) * 1000),
+        }
+    return {
+        "ok": False, "connected": False, "asset": asset, "timeframe": "1m",
+        "error": "Quotex local WebSocket collector is not connected or data is stale.",
+        "source": "Quotex local browser WebSocket collector",
+        "latency_ms": int((time.time() - started) * 1000),
+    }
