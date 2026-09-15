@@ -20,9 +20,7 @@ android {
         versionName appVersionName
     }
 
-    buildFeatures {
-        buildConfig true
-    }
+    buildFeatures { buildConfig true }
 
     buildTypes {
         debug {
@@ -30,9 +28,7 @@ android {
             buildConfigField 'long', 'BUILD_TIMESTAMP_MS', "${System.currentTimeMillis()}L"
         }
         release {
-            if (System.getenv('ANDROID_KEYSTORE_FILE')) {
-                signingConfig signingConfigs.release
-            }
+            if (System.getenv('ANDROID_KEYSTORE_FILE')) { signingConfig signingConfigs.release }
             minifyEnabled false
             buildConfigField 'String', 'BUILD_CHANNEL', '\"github\"'
             buildConfigField 'long', 'BUILD_TIMESTAMP_MS', "${System.currentTimeMillis()}L"
@@ -54,6 +50,4 @@ android {
 
 dependencies {
     implementation 'androidx.core:core:1.15.0'
-    // Native Android tun2socks backend. It provides the TUN -> SOCKS5 packet forwarding layer.
-    implementation 'com.zaneschepke:hevtunnel:1.0.1'
 }
