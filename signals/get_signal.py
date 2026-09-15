@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 
-from data.biquote_forex import fetch_tick_history
 from data.quotex_otc import fetch_quotex_candles, OTC_PAIRS, local_active_asset
 from data.otc_markets import display_for_asset, asset_for_display
 from strategy.tick_run_pressure import generate_signal as generate_forex_signal
 from strategy.otc_candle_pressure import generate_signal as generate_otc_signal
+from quotex_browser_ingest import real_market_ticks
 
 
 def _bengali_reason(reason: str) -> str:
@@ -19,9 +19,10 @@ def _bengali_reason(reason: str) -> str:
 
 def _real_signal(pair: str, automatic: bool) -> dict:
     signal_at_utc = datetime.now(timezone.utc)
-    ticks = fetch_tick_history(pair, count=1000)
+    asset = "".join(ch for ch in pair.upper() if ch.isalnum() or ch in "._-")
+    ticks = real_market_ticks(asset, count=1000)
     if ticks is None or ticks.empty:
-        raise RuntimeError("No live tick data was returned")
+        raise RuntimeError("No live Quotex Real Market quote data is available")
     result = generate_forex_signal(ticks, run_length=3, microprice_threshold=0.40)
     last = ticks.iloc[-1]
     signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
@@ -32,14 +33,14 @@ def _real_signal(pair: str, automatic: bool) -> dict:
     is_entry = result.action in {"BUY", "SELL"}
     candle = signal_at_utc.replace(second=0, microsecond=0)
     return {
-        "pair": pair, "requested_pair": pair, "market_mode": "real", "source": "BiQuote tick history",
+        "pair": pair, "requested_pair": pair, "market_mode": "real", "source": "Quotex Real Market browser WebSocket",
         "signal": result.action, "market_bias": result.action, "entry_signal": result.action,
         "buy_score": 1 if result.action == "BUY" else 0, "sell_score": 1 if result.action == "SELL" else 0,
         "reason": _bengali_reason(result.reason), "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
         "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
         "candle_time": candle.isoformat(timespec="seconds") if is_entry else None,
         "analysis_candle_time_utc": tick_time.isoformat(timespec="milliseconds"),
-        "entry_price": float((last["askPrice"] + last["bidPrice"]) / 2), "entry_price_type": "latest_tick_mid_reference",
+        "entry_price": float((last["askPrice"] + last["bidPrice"]) / 2), "entry_price_type": "latest_quotex_quote_reference",
         "entry_time_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None,
         "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_candle_time_utc": candle.isoformat(timespec="seconds") if is_entry else None,
