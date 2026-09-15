@@ -1,14 +1,29 @@
 """Restore a previously authorized Master session from its stable device ID."""
 from __future__ import annotations
 
+import hashlib
+import re
+
 from flask import jsonify, request, session
 
 from master_store import store
 
 
 def _device_hash(device_id: str) -> str:
-    import hashlib
     return hashlib.sha256(device_id.encode("utf-8")).hexdigest()
+
+
+def _delete_legacy_dashboard_duplicates(html: str) -> str:
+    """Delete legacy dashboard fragments instead of hiding duplicate UI."""
+    patterns = (
+        r'<[^>]*\bid=["\']performance-compact["\'][^>]*>.*?</[^>]+>',
+        r'<[^>]*\bid=["\']market-status-panel["\'][^>]*>.*?</[^>]+>',
+    )
+    cleaned = html
+    for pattern in patterns:
+        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r'<[^>]*\bclass=["\'][^"\']*\bchart-bar\b[^"\']*["\'][^>]*>.*?</[^>]+>', "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+    return cleaned
 
 
 def init_master_session_restore(app) -> None:
@@ -31,9 +46,12 @@ def init_master_session_restore(app) -> None:
         if not (response.content_type or "").startswith("text/html"):
             return response
         html = response.get_data(as_text=True)
+        html = _delete_legacy_dashboard_duplicates(html)
         if "id=\"master-session-restore\"" in html:
+            response.set_data(html)
             return response
         script = r'''<script id="master-session-restore">(()=>{try{const id=localStorage.getItem('mmc_master_device_id')||'';if(!id)return;fetch('/master/restore-session',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({device_id:id}),cache:'no-store'}).then(r=>r.ok?r.json():null).then(d=>{if(d&&d.ok&&!document.cookie.includes('mmc_master_restored=1')){document.cookie='mmc_master_restored=1; path=/; max-age=60';location.reload()}}).catch(()=>{})}catch(_){}})();</script>'''
         if "</body>" in html:
-            response.set_data(html.replace("</body>", script + "</body>", 1))
+            html = html.replace("</body>", script + "</body>", 1)
+        response.set_data(html)
         return response
