@@ -30,47 +30,46 @@ def init_db():
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute("""CREATE TABLE IF NOT EXISTS mmc_signal_performance (
-                id BIGSERIAL PRIMARY KEY, market_mode VARCHAR(16) NOT NULL, pair VARCHAR(32) NOT NULL,
+                id BIGSERIAL PRIMARY KEY, user_id BIGINT, market_mode VARCHAR(16) NOT NULL, pair VARCHAR(32) NOT NULL,
                 signal VARCHAR(8) NOT NULL CHECK (signal IN ('BUY','SELL')), signal_time_utc TIMESTAMPTZ NOT NULL,
                 entry_time_utc TIMESTAMPTZ NOT NULL, entry_price_reference DOUBLE PRECISION,
                 entry_price_actual DOUBLE PRECISION, result_price DOUBLE PRECISION, result VARCHAR(16) NOT NULL DEFAULT 'PENDING',
                 reason TEXT, mmc_level_type VARCHAR(16), mmc_level_price DOUBLE PRECISION,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), resolved_at TIMESTAMPTZ,
-                UNIQUE (market_mode,pair,signal,entry_time_utc))""")
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), resolved_at TIMESTAMPTZ)""")
+            # Migrate existing installations without touching stored strategy data.
+            cur.execute("ALTER TABLE mmc_signal_performance ADD COLUMN IF NOT EXISTS user_id BIGINT")
+            cur.execute("ALTER TABLE mmc_signal_performance DROP CONSTRAINT IF EXISTS mmc_signal_performance_market_mode_pair_signal_entry_time_utc_key")
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS mmc_signal_performance_user_entry_uq ON mmc_signal_performance (COALESCE(user_id,0),market_mode,pair,signal,entry_time_utc)")
+            cur.execute("CREATE INDEX IF NOT EXISTS mmc_signal_performance_user_time_idx ON mmc_signal_performance (user_id,signal_time_utc DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS mmc_signal_performance_signal_time_idx ON mmc_signal_performance (signal_time_utc DESC)")
             cur.execute("DELETE FROM mmc_signal_performance WHERE signal_time_utc < NOW() - INTERVAL '24 hours'")
         conn.commit()
 
 def _reject_entry(result, reason):
-    """Turn a rejected generated entry into an explicit NO_TRADE result for callers."""
     if isinstance(result,dict):
-        result['signal']='NO_TRADE'
-        result['is_entry']=False
-        result['entry_time_utc']=None
-        result['entry_price']=None
+        result['signal']='NO_TRADE'; result['is_entry']=False; result['entry_time_utc']=None; result['entry_price']=None
         result['reason']=((str(result.get('reason') or '').strip()+' ' + reason).strip())
     return False
 
-def record_signal(result):
-    """Store at most one entry per pair/mode/candle and reject overlapping entries."""
+def record_signal(result, user_id=None):
+    """Store an entry under its user boundary; None remains the system/global owner."""
     signal=str(result.get('signal','')).upper(); mode=str(result.get('market_mode','real')).lower()
     if signal not in {'BUY','SELL'} or mode not in {'real','quotex_otc'}: return False
     try:
         init_db(); signal_time=_utc(result['signal_time_utc']); entry_time=_minute_start(result.get('entry_time_utc') or signal_time)
         pair=str(result.get('pair','')).strip().upper()
         if not pair: return _reject_entry(result,'Entry rejected: invalid pair.')
+        owner = int(user_id) if user_id is not None else None
         with _connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"mmc-entry:{mode}:{pair}",))
-                cur.execute("""SELECT 1 FROM mmc_signal_performance WHERE market_mode=%s AND pair=%s AND entry_time_utc=%s LIMIT 1""", (mode,pair,entry_time))
+                cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"mmc-entry:{owner}:{mode}:{pair}",))
+                cur.execute("""SELECT 1 FROM mmc_signal_performance WHERE user_id IS NOT DISTINCT FROM %s AND market_mode=%s AND pair=%s AND entry_time_utc=%s LIMIT 1""", (owner,mode,pair,entry_time))
                 if cur.fetchone() is not None:
-                    conn.rollback()
-                    return _reject_entry(result,'Entry rejected: this candle already has an entry.')
-                cur.execute("""SELECT 1 FROM mmc_signal_performance WHERE market_mode=%s AND pair=%s AND result='PENDING' AND entry_time_utc + INTERVAL '1 minute' > NOW() LIMIT 1""", (mode,pair))
+                    conn.rollback(); return _reject_entry(result,'Entry rejected: this candle already has an entry.')
+                cur.execute("""SELECT 1 FROM mmc_signal_performance WHERE user_id IS NOT DISTINCT FROM %s AND market_mode=%s AND pair=%s AND result='PENDING' AND entry_time_utc + INTERVAL '1 minute' > NOW() LIMIT 1""", (owner,mode,pair))
                 if cur.fetchone() is not None:
-                    conn.rollback()
-                    return _reject_entry(result,'Entry rejected: previous candle entry is still active.')
-                cur.execute("""INSERT INTO mmc_signal_performance (market_mode,pair,signal,signal_time_utc,entry_time_utc,entry_price_reference,reason,mmc_level_type,mmc_level_price) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""", (mode,pair,signal,signal_time,entry_time,result.get('entry_price'),result.get('reason'),result.get('mmc_level_type'),result.get('mmc_level_price')))
+                    conn.rollback(); return _reject_entry(result,'Entry rejected: previous candle entry is still active.')
+                cur.execute("""INSERT INTO mmc_signal_performance (user_id,market_mode,pair,signal,signal_time_utc,entry_time_utc,entry_price_reference,reason,mmc_level_type,mmc_level_price) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", (owner,mode,pair,signal,signal_time,entry_time,result.get('entry_price'),result.get('reason'),result.get('mmc_level_type'),result.get('mmc_level_price')))
             conn.commit()
         return True
     except Exception:
@@ -104,8 +103,7 @@ def settle_pending():
                     try:
                         if mode=='real': frames[key]=fetch_forex_candles(pair,'1min',outputsize=200)
                         else:
-                            asset=_otc_asset(pair)
-                            frames[key]=fetch_quotex_candles(asset,'1m',240) if asset else None
+                            asset=_otc_asset(pair); frames[key]=fetch_quotex_candles(asset,'1m',240) if asset else None
                     except Exception: frames[key]=None
                 candle=_entry_candle(frames[key],entry_time); outcome=_outcome(signal,candle)
                 if outcome is None: continue
@@ -114,24 +112,24 @@ def settle_pending():
             cur.execute("DELETE FROM mmc_signal_performance WHERE signal_time_utc < NOW() - INTERVAL '24 hours'")
         conn.commit()
 
-def clear_performance_history():
+def clear_performance_history(user_id=None):
     try:
-        init_db()
+        init_db(); owner = int(user_id) if user_id is not None else None
         with _connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM mmc_signal_performance WHERE result IN ('WIN','LOSS','VOID')"); cleared=cur.rowcount
+                cur.execute("DELETE FROM mmc_signal_performance WHERE user_id IS NOT DISTINCT FROM %s AND result IN ('WIN','LOSS','VOID')", (owner,)); cleared=cur.rowcount
             conn.commit()
         return {'ok':True,'cleared':int(cleared)}
     except Exception as exc:return {'ok':False,'error':str(exc)}
 
-def get_performance():
+def get_performance(user_id=None):
     try:
-        settle_pending()
+        settle_pending(); owner = int(user_id) if user_id is not None else None
         with _connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("""SELECT COUNT(*) FILTER (WHERE result IN ('WIN','LOSS')),COUNT(*) FILTER (WHERE result='WIN'),COUNT(*) FILTER (WHERE result='LOSS') FROM mmc_signal_performance WHERE market_mode IN ('real','quotex_otc') AND signal_time_utc >= NOW()-INTERVAL '24 hours'""")
+                cur.execute("""SELECT COUNT(*) FILTER (WHERE result IN ('WIN','LOSS')),COUNT(*) FILTER (WHERE result='WIN'),COUNT(*) FILTER (WHERE result='LOSS') FROM mmc_signal_performance WHERE user_id IS NOT DISTINCT FROM %s AND market_mode IN ('real','quotex_otc') AND signal_time_utc >= NOW()-INTERVAL '24 hours'""", (owner,))
                 total,wins,losses=[int(x or 0) for x in cur.fetchone()]; accuracy=wins/total*100.0 if total else 0.0
-                cur.execute("""SELECT id,market_mode,pair,signal,signal_time_utc,entry_time_utc,entry_price_actual,result_price,result FROM mmc_signal_performance WHERE market_mode IN ('real','quotex_otc') AND signal_time_utc >= NOW()-INTERVAL '24 hours' AND result IN ('WIN','LOSS') ORDER BY signal_time_utc DESC LIMIT 50""")
+                cur.execute("""SELECT id,market_mode,pair,signal,signal_time_utc,entry_time_utc,entry_price_actual,result_price,result FROM mmc_signal_performance WHERE user_id IS NOT DISTINCT FROM %s AND market_mode IN ('real','quotex_otc') AND signal_time_utc >= NOW()-INTERVAL '24 hours' AND result IN ('WIN','LOSS') ORDER BY signal_time_utc DESC LIMIT 50""", (owner,))
                 history=[{'id':int(r[0]),'market_mode':r[1],'pair':r[2],'signal':r[3],'signal_time_utc':r[4].isoformat(),'entry_time_utc':r[5].isoformat(),'entry_price':float(r[6]) if r[6] is not None else None,'result_price':float(r[7]) if r[7] is not None else None,'result':r[8]} for r in cur.fetchall()]
         return {'ok':True,'total':total,'wins':wins,'losses':losses,'accuracy':round(accuracy,2),'win_rate':round(accuracy,2),'history':history,'timeframe':'1m','evaluation':'signal entry candle','strategy':'tick_run_pressure + Quotex OTC candle pressure'}
     except Exception as exc:return {'ok':False,'error':str(exc)}
