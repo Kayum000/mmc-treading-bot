@@ -7,7 +7,6 @@ from data.quotex_otc import fetch_quotex_candles, OTC_PAIRS, local_active_asset
 from data.otc_markets import display_for_asset, asset_for_display
 from strategy.tick_run_pressure import generate_signal as generate_forex_signal
 from strategy.otc_candle_pressure import generate_signal as generate_otc_signal
-from quotex_browser_ingest import real_market_ticks
 
 
 def _bengali_reason(reason: str) -> str:
@@ -18,6 +17,8 @@ def _bengali_reason(reason: str) -> str:
 
 
 def _real_signal(pair: str, automatic: bool) -> dict:
+    from quotex_browser_ingest import real_market_ticks
+
     signal_at_utc = datetime.now(timezone.utc)
     asset = "".join(ch for ch in pair.upper() if ch.isalnum() or ch in "._-")
     ticks = real_market_ticks(asset, count=1000)
