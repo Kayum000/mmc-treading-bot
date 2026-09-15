@@ -93,7 +93,10 @@ def require_login():
     if _collector_request_authenticated():
         session["authenticated"] = True
         return None
-    if not session.get("authenticated"): return redirect(url_for("login"))
+    if not session.get("authenticated"):
+        if request.path in {"/news-alert", "/news-direction", "/performance", "/auto-signal", "/select-market"}:
+            return jsonify({"ok": False, "authenticated": False, "error": "Session expired. Please refresh and log in again."}), 401
+        return redirect(url_for("login"))
     return None
 
 
