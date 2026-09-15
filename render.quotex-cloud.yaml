@@ -1,0 +1,28 @@
+# Separate Blueprint for the Quotex Real Market cloud collector.
+# This is intentionally separate from render.yaml so the existing OTC/web
+# service is not changed automatically.
+services:
+  - type: worker
+    name: mmc-quotex-real-collector
+    runtime: docker
+    repo: https://github.com/Kayum000/mmc-treading-bot
+    branch: main
+    region: oregon
+    plan: starter
+    autoDeploy: false
+    dockerfilePath: ./Dockerfile.quotex-cloud
+    envVars:
+      - key: MMC_BOT_URL
+        value: https://mmc-treading-bot.onrender.com
+      - key: QUOTEX_URL
+        value: https://market-qx.info/en/demo-trade
+      - key: QUOTEX_REAL_ASSET
+        value: AUDCAD
+      - key: QUOTEX_INGEST_SECRET
+        sync: false
+      - key: QUOTEX_STORAGE_STATE_B64
+        sync: false
+      - key: QUOTEX_LOGIN_EMAIL
+        sync: false
+      - key: QUOTEX_LOGIN_PASSWORD
+        sync: false
