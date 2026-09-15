@@ -336,9 +336,9 @@ async def run() -> None:
                     await _cdp_command(ws, counter, "Page.reload", {"ignoreCache": False})
                     last_frame_at = time.monotonic()
                 continue
-            last_frame_at = time.monotonic()
             if message.get("method") != "Network.webSocketFrameReceived":
                 continue
+            last_frame_at = time.monotonic()
             response = message.get("params", {}).get("response", {})
             payload = response.get("payloadData", "")
             opcode = int(response.get("opcode", 1))
