@@ -41,7 +41,7 @@ def _target() -> dict[str, Any]:
     response = requests.get(f"{CDP_URL}/json/list", timeout=5)
     response.raise_for_status()
     targets = response.json()
-    allowed_hosts = ("qxbroker.com", "market-qx.trade")
+    allowed_hosts = ("qxbroker.com", "market-qx.trade", "market-qx.info")
     candidates = [
         t for t in targets
         if t.get("type") == "page"
@@ -310,7 +310,9 @@ async def run() -> None:
             ws, counter, "Network.enable",
             {"maxTotalBufferSize": 50 * 1024 * 1024, "maxResourceBufferSize": 5 * 1024 * 1024},
         )
-        log("CDP Network capture enabled. Keep the Quotex OTC chart open.")
+        await _cdp_command(ws, counter, "Page.enable")
+        await _cdp_command(ws, counter, "Page.reload", {"ignoreCache": False})
+        log("CDP Network capture enabled and Quotex page reloaded once to capture WebSocket from startup.")
         collector = Collector()
         pending_event: str | None = None
         while True:
