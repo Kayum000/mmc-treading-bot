@@ -25,6 +25,34 @@
     bind('chart-full-view',async()=>{const el=document.getElementById('chart');if(!el)return;try{if(document.fullscreenElement){await document.exitFullscreen();}else if(el.requestFullscreen){await el.requestFullscreen();}else{el.classList.toggle('chart-expanded')}}catch(_){el.classList.toggle('chart-expanded')}});
     const chart=document.getElementById('chart');if(chart&&!chart.dataset.mmcFullscreenStyle){chart.dataset.mmcFullscreenStyle='1';const style=document.createElement('style');style.textContent=`#chart.chart-expanded{position:fixed;inset:0;z-index:99998;margin:0;border-radius:0;width:100vw;height:100vh;background:#061a31}.chart-panel:fullscreen{width:100vw;height:100vh;margin:0;border-radius:0}.chart-panel:fullscreen .chart-canvas-wrap{height:calc(100vh - 54px)!important}`;document.head.appendChild(style)}
   }
-  document.addEventListener('DOMContentLoaded',()=>{configureDownloadApp();installQuotexLabels();cleanUnwantedAutoStatus();watchEntryTitle();watchRenderedSignal();stabilizeModernChart();bindDashboardChartControls();const a=document.getElementById('auto-status');if(a&&window.MutationObserver)new MutationObserver(cleanUnwantedAutoStatus).observe(a,{childList:true,characterData:true,subtree:true})});
+  function cleanupLegacyDuplicates(){
+    if(!window.__mmcModernDashboard)return;
+    ['performance-compact','market-status-panel'].forEach(id=>document.getElementById(id)?.remove());
+    document.querySelectorAll('.chart-bar').forEach(el=>el.remove());
+    const chart=document.getElementById('live-market-chart');
+    if(chart&&window.MutationObserver){new MutationObserver(()=>chart.querySelectorAll('.chart-bar').forEach(el=>el.remove())).observe(chart,{childList:true,subtree:true});}
+  }
+  function openModernModal(title,body,extra=''){const modal=document.getElementById('modal');if(!modal)return;const t=document.getElementById('modal-title'),b=document.getElementById('modal-body'),x=document.getElementById('modal-extra');if(t)t.textContent=title;if(b)b.textContent=body;if(x)x.innerHTML=extra;modal.classList.add('open')}
+  function deviceId(){const key='mmc_master_device_id';let id=localStorage.getItem(key)||'';try{if(window.AndroidSignalAlert&&typeof window.AndroidSignalAlert.getDeviceId==='function')id=window.AndroidSignalAlert.getDeviceId()||id}catch(_){}if(!id)id=(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random());localStorage.setItem(key,id);try{if(window.AndroidSignalAlert&&typeof window.AndroidSignalAlert.setDeviceId==='function')window.AndroidSignalAlert.setDeviceId(id)}catch(_){}return id}
+  async function showTrustedStatus(){try{const id=deviceId();const r=await fetch('/master/trusted/status',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},credentials:'same-origin',body:JSON.stringify({device_id:id}),cache:'no-store'});const d=await r.json();if(!r.ok||d.ok===false)throw Error(d.error||`Trusted status failed (${r.status})`);openModernModal('Trusted Device',`Role: ${d.role||'VIEWER'}\nTrusted: ${d.trusted?'YES':'NO'}`,'<p style="color:#9eb7cf;font-size:11px;line-height:1.6">This device status is read from the existing Master/Trusted Device service. No local-only trust state is created here.</p>')}catch(e){openModernModal('Trusted Device','Unable to read Trusted Device status.',`<p style="color:#ff9aa7;font-size:11px">${String(e.message||e)}</p>`)}}
+  async function showAllSignals(){try{const r=await fetch('/performance',{credentials:'same-origin',cache:'no-store'});const d=await r.json();if(!r.ok||d.ok===false)throw Error(d.error||'Performance unavailable');const rows=d.history||[];const text=rows.length?rows.map(x=>`${x.pair||'—'} | ${x.signal||'—'} | ${x.result||'—'} | ${x.signal_time_utc||'—'}`).join('\n'):'No confirmed signals in the last 24 hours.';openModernModal('All Signals',text)}catch(e){openModernModal('All Signals',String(e.message||e))}}
+  function bindRealFunctionality(){
+    cleanupLegacyDuplicates();
+    const root=document.querySelector('.app');
+    if(root&&!root.dataset.mmcSettingsStyle){root.dataset.mmcSettingsStyle='1';const style=document.createElement('style');style.textContent='.app.mmc-compact{grid-template-columns:82px 1fr}.app.mmc-compact .sidebar{width:82px;padding-left:8px;padding-right:8px}.app.mmc-compact .brand div,.app.mmc-compact .nav button:not(.active),.app.mmc-compact .nav a,.app.mmc-compact .bot-foot{display:none}.app.mmc-compact .brand{justify-content:center;padding-left:0;padding-right:0}.app.mmc-compact .nav button.active{text-align:center;font-size:0}.app.mmc-compact .nav button.active:first-letter{font-size:16px}@media(max-width:760px){.app.mmc-compact{display:block}.app.mmc-compact .sidebar{width:280px}}';document.head.appendChild(style)}
+    const settingsOpen=()=>{const compact=localStorage.getItem('mmc_compact_sidebar')==='1',news=localStorage.getItem('mmc_auto_news')!=='0';openModernModal('Settings','Dashboard preferences are stored only in this browser.',`<label class="setting-row">Compact sidebar <input type="checkbox" id="mmc-compact-setting" ${compact?'checked':''}></label><label class="setting-row">Auto refresh news <input type="checkbox" id="mmc-news-setting" ${news?'checked':''}></label>`);document.getElementById('mmc-compact-setting')?.addEventListener('change',e=>{localStorage.setItem('mmc_compact_sidebar',e.target.checked?'1':'0');root?.classList.toggle('mmc-compact',e.target.checked)});document.getElementById('mmc-news-setting')?.addEventListener('change',e=>{localStorage.setItem('mmc_auto_news',e.target.checked?'1':'0')})};
+    if(localStorage.getItem('mmc_compact_sidebar')==='1')root?.classList.add('mmc-compact');
+    document.addEventListener('click',e=>{
+      const target=e.target?.closest?.('[data-action="trusted"],[data-action="settings"],#view-signal');
+      if(!target)return;
+      e.preventDefault();e.stopImmediatePropagation();
+      if(target.dataset.action==='trusted')showTrustedStatus();
+      else if(target.dataset.action==='settings')settingsOpen();
+      else showAllSignals();
+    },true);
+    const autoNews=()=>{if(localStorage.getItem('mmc_auto_news')==='0')return;const btn=document.getElementById('news-refresh');if(btn)btn.click()};
+    if(localStorage.getItem('mmc_auto_news')!=='0')setInterval(autoNews,30000);
+  }
+  document.addEventListener('DOMContentLoaded',()=>{configureDownloadApp();installQuotexLabels();cleanUnwantedAutoStatus();watchEntryTitle();watchRenderedSignal();stabilizeModernChart();bindDashboardChartControls();bindRealFunctionality();const a=document.getElementById('auto-status');if(a&&window.MutationObserver)new MutationObserver(cleanUnwantedAutoStatus).observe(a,{childList:true,characterData:true,subtree:true})});
   document.addEventListener('click',e=>{if(!e.target?.closest?.('.primary,.secondary,#auto-toggle,#enable-alerts'))window.enableSignalAudio()},{capture:true});
 })();
