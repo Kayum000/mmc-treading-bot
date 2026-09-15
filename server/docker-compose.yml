@@ -1,0 +1,68 @@
+services:
+  mmc-web:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: mmc-web
+    restart: unless-stopped
+    env_file:
+      - .env.server
+    environment:
+      DATABASE_URL: postgresql://mmc:${POSTGRES_PASSWORD}@postgres:5432/mmc
+      MMC_BOT_URL: http://mmc-web:5000
+      PORT: 5000
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: mmc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mmc
+      POSTGRES_USER: mmc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - mmc-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mmc -d mmc"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  quotex-real-collector:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile.collector
+    container_name: mmc-quotex-real-collector
+    restart: unless-stopped
+    env_file:
+      - .env.server
+    environment:
+      MMC_BOT_URL: http://mmc-web:5000
+      QUOTEX_URL: https://market-qx.info/en/demo-trade
+      QUOTEX_REAL_ASSET: ${QUOTEX_REAL_ASSET:-AUDCAD}
+    depends_on:
+      mmc-web:
+        condition: service_healthy
+    shm_size: "1gb"
+    init: true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  mmc-postgres-data:
