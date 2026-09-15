@@ -28,3 +28,32 @@
   function watch(){const pair=document.getElementById('pair');if(!pair){setTimeout(watch,500);return;}const start=()=>{const chart=document.getElementById('live-market-chart');if(!chart){setTimeout(start,500);return;}canvas();pair.onchange=()=>select(pair.value);select(pair.value);const interval=document.getElementById('chart-interval');if(interval){interval.value=S.interval;interval.addEventListener('change',async()=>{S.interval=interval.value||'1m';S.bars=[];S.scaleMin=S.scaleMax=null;await history();await connect();});}window.addEventListener('resize',draw,{passive:true});window.addEventListener('mmc-market-changed',()=>select(pair.value),{passive:true});clearInterval(S.clock);S.clock=setInterval(updateLiveInfo,1000);};start();}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',watch,{once:true});else watch();
 })();
+
+/* TEST-dashboard cleanup: keep the real MMC result target functional, but remove its legacy visual card from the redesigned Latest Signal box. */
+(() => {
+  const clean = () => {
+    const latest = document.getElementById('latest-signal');
+    if (!latest) return;
+    const legacyResult = latest.querySelector('#result-container');
+    if (legacyResult) {
+      legacyResult.style.display = 'none';
+      legacyResult.setAttribute('aria-hidden', 'true');
+    }
+    latest.querySelectorAll('.chart-panel,#live-market-chart').forEach(el => el.remove());
+    latest.querySelectorAll('.signal-card').forEach(el => {
+      if (!el.closest('.mmc-legacy-signal')) el.remove();
+    });
+  };
+  const start = () => {
+    clean();
+    if (window.MutationObserver) {
+      const observer = new MutationObserver(clean);
+      observer.observe(document.body, {childList:true, subtree:true});
+    }
+    setTimeout(clean, 250);
+    setTimeout(clean, 1000);
+    setTimeout(clean, 2500);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, {once:true});
+  else start();
+})();
