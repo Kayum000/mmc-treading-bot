@@ -1,16 +1,7 @@
 """Cloud Quotex Real-Market collector.
 
-Runs a headless Chromium session in a Render background worker and forwards
-Quotex WebSocket market data to the existing authenticated real-market ingest.
-
+Runs a headless Chromium session and forwards Quotex Real Market data to MMC.
 OTC is deliberately not handled here.
-
-Authentication options:
-  1) QUOTEX_STORAGE_STATE_B64: base64-encoded Playwright storage_state JSON.
-  2) QUOTEX_LOGIN_EMAIL + QUOTEX_LOGIN_PASSWORD: best-effort login fallback.
-
-The storage-state route is preferred because it avoids hard-coding account
-credentials in the collector and can preserve an already-authenticated session.
 """
 from __future__ import annotations
 
@@ -18,7 +9,9 @@ import asyncio
 import base64
 import json
 import os
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 import requests
@@ -31,11 +24,35 @@ STORAGE_STATE_B64 = os.getenv("QUOTEX_STORAGE_STATE_B64", "").strip()
 LOGIN_EMAIL = os.getenv("QUOTEX_LOGIN_EMAIL", "").strip()
 LOGIN_PASSWORD = os.getenv("QUOTEX_LOGIN_PASSWORD", "").strip()
 ASSET = os.getenv("QUOTEX_REAL_ASSET", "AUDCAD").strip().upper()
+HEALTH_PORT = int(os.getenv("QUOTEX_COLLECTOR_HEALTH_PORT", "8765"))
 PERIOD = 60
 
 
 def log(message: str) -> None:
     print(f"[MMC Quotex Cloud Collector] {message}", flush=True)
+
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        if self.path != "/health":
+            self.send_response(404)
+            self.end_headers()
+            return
+        body = b'{"ok":true,"service":"quotex-real-collector"}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args) -> None:
+        return
+
+
+def start_health_server() -> None:
+    server = ThreadingHTTPServer(("0.0.0.0", HEALTH_PORT), HealthHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    log(f"health endpoint listening on :{HEALTH_PORT}/health")
 
 
 def decode_json_after_prefix(text: str) -> Any:
@@ -113,10 +130,8 @@ def candle_rows(payload: Any) -> list[dict[str, Any]]:
             ts = float(ts)
             if ts > 10_000_000_000:
                 ts /= 1000
-            result.append({
-                "asset": str(a), "period": PERIOD, "timestamp": ts,
-                "open": float(op), "high": float(hi), "low": float(lo), "close": float(cl),
-            })
+            result.append({"asset": str(a), "period": PERIOD, "timestamp": ts,
+                           "open": float(op), "high": float(hi), "low": float(lo), "close": float(cl)})
         except (TypeError, ValueError, OverflowError):
             continue
     return result
@@ -133,10 +148,8 @@ class Ingest:
         if not INGEST_SECRET:
             raise RuntimeError("QUOTEX_INGEST_SECRET is missing")
         response = self.http.post(
-            f"{BOT_URL}/quotex/real-ingest",
-            json=payload,
-            headers={"X-MMC-Quotex-Key": INGEST_SECRET},
-            timeout=15,
+            f"{BOT_URL}/quotex/real-ingest", json=payload,
+            headers={"X-MMC-Quotex-Key": INGEST_SECRET}, timeout=15,
         )
         response.raise_for_status()
         data = response.json()
@@ -178,7 +191,6 @@ class Ingest:
 async def login_if_needed(page) -> None:
     if not LOGIN_EMAIL or not LOGIN_PASSWORD:
         return
-    # Only attempt login when the current page looks like a login page.
     email = page.locator('input[type="email"], input[name="email"], input[placeholder*="mail" i]').first
     password = page.locator('input[type="password"], input[name="password"]').first
     if await email.count() == 0 or await password.count() == 0:
@@ -195,6 +207,7 @@ async def login_if_needed(page) -> None:
 async def run() -> None:
     if not INGEST_SECRET:
         raise RuntimeError("Set QUOTEX_INGEST_SECRET")
+    start_health_server()
     ingest = Ingest()
     storage = None
     if STORAGE_STATE_B64:
@@ -244,8 +257,6 @@ async def run() -> None:
 
         while True:
             await page.wait_for_timeout(15000)
-            # Keep the session alive. If the page becomes unusable, the process
-            # exits so Render can restart the worker.
             if page.is_closed():
                 raise RuntimeError("Quotex page closed")
             try:
