@@ -64,5 +64,24 @@ services:
       retries: 3
       start_period: 30s
 
+  real-signal-worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: mmc-real-signal-worker
+    restart: unless-stopped
+    env_file:
+      - .env.server
+    environment:
+      DATABASE_URL: postgresql://mmc:${POSTGRES_PASSWORD}@postgres:5432/mmc
+      REAL_SIGNAL_PAIRS: ${REAL_SIGNAL_PAIRS:-AUD/CAD}
+      REAL_SIGNAL_INTERVAL_SECONDS: ${REAL_SIGNAL_INTERVAL_SECONDS:-60}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      quotex-real-collector:
+        condition: service_healthy
+    command: ["python", "server/real_signal_worker.py"]
+
 volumes:
   mmc-postgres-data:
