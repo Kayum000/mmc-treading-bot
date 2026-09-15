@@ -212,6 +212,7 @@ class Collector:
         self.session = requests.Session()
         self.last_signature = ""
         self.last_send = 0.0
+        self.last_partial_send: dict[str, float] = {}
 
     def _send(self, rows: list[dict[str, Any]]) -> None:
         if not rows:
@@ -261,6 +262,15 @@ class Collector:
             state["high"] = max(state["high"], price)
             state["low"] = min(state["low"], price)
             state["close"] = price
+
+    def flush_partials(self) -> None:
+        now = time.monotonic()
+        for asset, state in list(self.partial.items()):
+            if now - self.last_partial_send.get(asset, 0.0) < 10:
+                continue
+            row = {k: v for k, v in state.items() if k != "bucket"}
+            self._send([row])
+            self.last_partial_send[asset] = now
 
     def handle(self, event_name: str | None, payload: Any) -> None:
         if not event_name:
@@ -315,8 +325,18 @@ async def run() -> None:
         log("CDP Network capture enabled and Quotex page reloaded once to capture WebSocket from startup.")
         collector = Collector()
         pending_event: str | None = None
+        last_frame_at = time.monotonic()
         while True:
-            message = json.loads(await ws.recv())
+            try:
+                message = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+            except asyncio.TimeoutError:
+                collector.flush_partials()
+                if time.monotonic() - last_frame_at >= 30:
+                    log("No Quotex WebSocket frames for 30s; reloading the page to recover the stream.")
+                    await _cdp_command(ws, counter, "Page.reload", {"ignoreCache": False})
+                    last_frame_at = time.monotonic()
+                continue
+            last_frame_at = time.monotonic()
             if message.get("method") != "Network.webSocketFrameReceived":
                 continue
             response = message.get("params", {}).get("response", {})
@@ -335,14 +355,18 @@ async def run() -> None:
 
 def main() -> int:
     try:
-        asyncio.run(run())
-        return 0
+        while True:
+            try:
+                asyncio.run(run())
+            except KeyboardInterrupt:
+                log("stopped")
+                return 0
+            except Exception as exc:
+                log(f"stream error: {exc}; reconnecting in 3s")
+                time.sleep(3)
     except KeyboardInterrupt:
         log("stopped")
         return 0
-    except Exception as exc:
-        log(f"ERROR: {exc}")
-        return 1
 
 
 if __name__ == "__main__":
