@@ -17,14 +17,35 @@ def _bengali_reason(reason: str) -> str:
 
 
 def _real_signal(pair: str, automatic: bool) -> dict:
-    from quotex_browser_ingest import real_market_ticks
+    import pandas as pd
+    from quotex_browser_ingest import real_market_ticks, _REAL_MARKET, _REAL_MARKET_LOCK
+    from strategy.adaptive_real import generate_adaptive_signal
 
     signal_at_utc = datetime.now(timezone.utc)
     asset = "".join(ch for ch in pair.upper() if ch.isalnum() or ch in "._-")
     ticks = real_market_ticks(asset, count=1000)
     if ticks is None or ticks.empty:
         raise RuntimeError("No live Quotex Real Market quote data is available")
-    result = generate_forex_signal(ticks, run_length=3, microprice_threshold=0.40)
+
+    with _REAL_MARKET_LOCK:
+        state = dict(_REAL_MARKET.get(asset) or {})
+        candle_rows = list(state.get("bars") or [])[-300:]
+    candles = pd.DataFrame(candle_rows)
+    if not candles.empty:
+        candles["timestamp"] = pd.to_datetime(candles["timestamp"], unit="s", utc=True, errors="coerce")
+
+    if len(candles) >= 60:
+        result = generate_adaptive_signal(candles, ticks=ticks)
+        timeframe = f"adaptive-real/{result.strategy.lower()}"
+        regime = result.regime
+        strategy_name = result.strategy
+    else:
+        fallback = generate_forex_signal(ticks, run_length=3, microprice_threshold=0.40)
+        result = type("Signal", (), {"action": fallback.action, "confidence": fallback.confidence, "reason": fallback.reason, "regime": "MICRO_MOVE", "strategy": "TICK_PRESSURE"})()
+        timeframe = "adaptive-real/tick-pressure-fallback"
+        regime = result.regime
+        strategy_name = result.strategy
+
     last = ticks.iloc[-1]
     signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
     tick_time = last["timestamp"]
@@ -33,11 +54,12 @@ def _real_signal(pair: str, automatic: bool) -> dict:
     tick_time = tick_time.astimezone(timezone.utc)
     is_entry = result.action in {"BUY", "SELL"}
     candle = signal_at_utc.replace(second=0, microsecond=0)
+    reason = f"[{regime} / {strategy_name}] {result.reason}"
     return {
         "pair": pair, "requested_pair": pair, "market_mode": "real", "source": "Quotex Real Market browser WebSocket",
         "signal": result.action, "market_bias": result.action, "entry_signal": result.action,
         "buy_score": 1 if result.action == "BUY" else 0, "sell_score": 1 if result.action == "SELL" else 0,
-        "reason": _bengali_reason(result.reason), "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
+        "reason": _bengali_reason(reason), "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
         "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
         "candle_time": candle.isoformat(timespec="seconds") if is_entry else None,
         "analysis_candle_time_utc": tick_time.isoformat(timespec="milliseconds"),
@@ -46,9 +68,10 @@ def _real_signal(pair: str, automatic: bool) -> dict:
         "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_candle_time_utc": candle.isoformat(timespec="seconds") if is_entry else None,
         "entry_candle_time_bd": candle.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
-        "entry_delay_seconds": 0 if is_entry else None, "timeframe": "tick-run v2.1",
+        "entry_delay_seconds": 0 if is_entry else None, "timeframe": timeframe,
         "entry_timeframe": "signal candle (current 1-minute candle)", "automatic": automatic,
         "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
+        "regime": regime, "strategy": strategy_name,
     }
 
 
