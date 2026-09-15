@@ -13,12 +13,14 @@ from data.news_direction import get_news_direction_for_pair
 from data.news_events import get_weekly_news_events_for_pair
 from data.all_news_events import get_all_news_events
 from data.otc_markets import OTC_DISPLAY_PAIRS
+from user_auth import init_users, authenticate_user, create_user, get_user
 
 app = Flask(__name__)
 app.secret_key = os.getenv("APP_SECRET_KEY") or os.getenv("MASTER_SETUP_KEY") or os.urandom(32)
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "1") == "1")
 AUTH_USERNAME = os.getenv("APP_USERNAME", "admin")
 AUTH_PASSWORD = os.getenv("APP_PASSWORD", "")
+_USERS_READY = False
 
 REAL_PAIRS = [
     "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD",
@@ -26,8 +28,6 @@ REAL_PAIRS = [
     "AUD/JPY", "CAD/JPY", "CHF/JPY", "NZD/JPY", "EUR/AUD", "GBP/AUD",
     "AUD/CAD", "NZD/CAD",
 ]
-# Keep the dashboard, validation endpoint, signal layer and collectors on the
-# same canonical OTC registry. Do not maintain a second hard-coded OTC list here.
 QUOTEX_OTC_PAIRS = list(OTC_DISPLAY_PAIRS)
 _USAGE_CACHE = {"data": None, "at": 0.0}
 
@@ -48,26 +48,56 @@ def _usage_view():
     return {"daily_left": None, "daily_limit": None, "minute_left": minute.get("left"), "minute_limit": minute.get("limit")}
 
 
+def _ensure_users():
+    global _USERS_READY
+    if not _USERS_READY:
+        init_users()
+        _USERS_READY = True
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    _ensure_users()
+    if session.get("authenticated") and get_user(session.get("user_id")):
+        return redirect(url_for("index"))
+    error = None
+    if request.method == "POST":
+        user = authenticate_user(request.form.get("username", ""), request.form.get("password", ""))
+        if user:
+            session.clear()
+            session["authenticated"] = True
+            session["user_id"] = user["id"]
+            session["username"] = user["username"]
+            session["role"] = user["role"]
+            return redirect(url_for("index"))
+        error = "Invalid username or password."
+    return render_template("login.html", error=error)
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    _ensure_users()
     if session.get("authenticated"):
         return redirect(url_for("index"))
     error = None
     if request.method == "POST":
-        username = request.form.get("username", "")
-        password = request.form.get("password", "")
-        if not AUTH_PASSWORD:
-            error = "Login is not configured yet. Set APP_PASSWORD in the server environment."
-        elif hmac.compare_digest(username, AUTH_USERNAME) and hmac.compare_digest(password, AUTH_PASSWORD):
-            session.clear(); session["authenticated"] = True; return redirect(url_for("index"))
-        else:
-            error = "Invalid username or password."
-    return render_template("login.html", error=error)
+        try:
+            user = create_user(request.form.get("username", ""), request.form.get("password", ""))
+            session.clear()
+            session["authenticated"] = True
+            session["user_id"] = user["id"]
+            session["username"] = user["username"]
+            session["role"] = user["role"]
+            return redirect(url_for("index"))
+        except Exception as exc:
+            error = str(exc)
+    return render_template("login.html", error=error, register_mode=True)
 
 
 @app.route("/logout", methods=["GET"])
 def logout():
-    session.clear(); return redirect(url_for("login"))
+    session.clear()
+    return redirect(url_for("login"))
 
 
 @app.route("/favicon.ico")
@@ -79,7 +109,6 @@ def privacy(): return render_template("privacy.html")
 
 
 def _collector_request_authenticated() -> bool:
-    """Allow the private candle collector through the dashboard login gate."""
     if request.endpoint != "quotex_ingest":
         return False
     expected = (os.getenv("QUOTEX_INGEST_SECRET") or "").strip()
@@ -89,14 +118,20 @@ def _collector_request_authenticated() -> bool:
 
 @app.before_request
 def require_login():
-    if request.endpoint in {"login", "favicon", "privacy", "static"}: return None
+    if request.endpoint in {"login", "register", "favicon", "privacy", "static"}:
+        return None
     if _collector_request_authenticated():
-        session["authenticated"] = True
         return None
     if not session.get("authenticated"):
         if request.path in {"/news-alert", "/news-direction", "/performance", "/auto-signal", "/select-market"}:
             return jsonify({"ok": False, "authenticated": False, "error": "Session expired. Please refresh and log in again."}), 401
         return redirect(url_for("login"))
+    user = get_user(session.get("user_id"))
+    if not user:
+        session.clear()
+        return redirect(url_for("login"))
+    session["username"] = user["username"]
+    session["role"] = user["role"]
     return None
 
 
@@ -105,8 +140,9 @@ def select_market():
     mode = request.form.get("mode", "").strip().lower()
     pair = request.form.get("pair", "").strip().upper()
     if pair not in _valid_pairs(mode): return jsonify({"ok": False, "error": "অবৈধ মার্কেট।"}), 400
-    session["selected_mode"] = mode; session["selected_pair"] = pair
-    return jsonify({"ok": True, "mode": mode, "pair": pair})
+    session["selected_mode"] = mode
+    session["selected_pair"] = pair
+    return jsonify({"ok": True, "mode": mode, "pair": pair, "user_id": session["user_id"]})
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -123,9 +159,11 @@ def index():
             error = "Please select a market before GET SIGNAL."
         else:
             session["selected_mode"] = mode; session["selected_pair"] = pair
-            try: result = get_signal(pair, mode); record_signal(result)
+            try:
+                result = get_signal(pair, mode)
+                record_signal(result, user_id=session["user_id"])
             except Exception as exc: error = str(exc)
-    return render_template("index.html", real_pairs=REAL_PAIRS, otc_pairs=QUOTEX_OTC_PAIRS, mode=mode, pair=pair, error=error, result=result, usage=_usage_view())
+    return render_template("index.html", real_pairs=REAL_PAIRS, otc_pairs=QUOTEX_OTC_PAIRS, mode=mode, pair=pair, error=error, result=result, usage=_usage_view(), username=session.get("username"), role=session.get("role"))
 
 
 @app.route("/auto-signal", methods=["GET"])
@@ -133,14 +171,17 @@ def auto_signal():
     mode = session.get("selected_mode", "").strip().lower(); pair = session.get("selected_pair", "").strip().upper()
     if pair not in _valid_pairs(mode): return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
     try:
-        result = get_signal(pair, mode, automatic=True); record_signal(result); return jsonify({"ok": True, "result": result})
+        result = get_signal(pair, mode, automatic=True)
+        record_signal(result, user_id=session["user_id"])
+        return jsonify({"ok": True, "result": result})
     except Exception as exc: return jsonify({"ok": False, "error": str(exc)}), 502
 
 
 @app.route("/performance", methods=["GET", "POST"])
 def performance():
-    if request.method == "POST": return jsonify(clear_performance_history())
-    return jsonify(get_performance())
+    user_id = session["user_id"]
+    if request.method == "POST": return jsonify(clear_performance_history(user_id=user_id))
+    return jsonify(get_performance(user_id=user_id))
 
 
 @app.route("/news-alert", methods=["GET"])
