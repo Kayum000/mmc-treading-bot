@@ -1,7 +1,7 @@
 """Authenticated ingest endpoint for the local Quotex browser collector.
 
-The endpoint accepts candle data only. It never accepts or stores a Quotex
-SSID/session token and it never places orders.
+The endpoint accepts candle/quote market data only. It never accepts or stores a
+Quotex SSID/session token and it never places orders.
 """
 from __future__ import annotations
 
@@ -18,6 +18,8 @@ from performance import record_signal
 
 _OTC_MASTER_ENABLED = True
 _OTC_MASTER_LOCK = threading.Lock()
+_REAL_MARKET_LOCK = threading.Lock()
+_REAL_MARKET: dict[str, dict] = {}
 
 
 def otc_master_enabled() -> bool:
@@ -42,9 +44,57 @@ def _master_request_authorized() -> bool:
     return bool(session.get("authenticated")) or _collector_secret_valid()
 
 
+def _real_asset(value) -> str:
+    return "".join(ch for ch in str(value or "").upper() if ch.isalnum() or ch in "._-")[:80]
+
+
+def _store_real_market(payload: dict) -> int:
+    accepted = 0
+    now = time.time()
+    with _REAL_MARKET_LOCK:
+        for row in payload.get("candles") or []:
+            if not isinstance(row, dict):
+                continue
+            asset = _real_asset(row.get("asset") or row.get("symbol"))
+            try:
+                ts = float(row.get("timestamp", row.get("time", row.get("from"))))
+                o, h, l, c = (float(row[k]) for k in ("open", "high", "low", "close"))
+            except (TypeError, ValueError, KeyError):
+                continue
+            if not asset or not all(map(lambda v: v == v and abs(v) != float("inf"), (ts, o, h, l, c))):
+                continue
+            state = _REAL_MARKET.setdefault(asset, {"bars": [], "quote": None})
+            bars = state["bars"]
+            bucket = int(ts // 60) * 60
+            item = {"timestamp": float(bucket), "open": o, "high": h, "low": l, "close": c}
+            if bars and int(float(bars[-1]["timestamp"])) == bucket:
+                bars[-1].update(item)
+            else:
+                bars.append(item)
+            state["bars"] = bars[-300:]
+            state["updated_at"] = now
+            accepted += 1
+        for row in payload.get("quotes") or []:
+            if not isinstance(row, dict):
+                continue
+            asset = _real_asset(row.get("asset") or row.get("symbol"))
+            try:
+                price = float(row.get("price", row.get("close")))
+                ts = float(row.get("timestamp", row.get("time", now)))
+            except (TypeError, ValueError):
+                continue
+            if not asset or not price == price or abs(price) == float("inf"):
+                continue
+            state = _REAL_MARKET.setdefault(asset, {"bars": [], "quote": None})
+            state["quote"] = {"price": price, "timestamp": ts}
+            state["updated_at"] = now
+            accepted += 1
+    return accepted
+
+
 def init_quotex_browser_ingest(app):
     def allow_collector_endpoint():
-        if request.endpoint in {"quotex_ingest", "quotex_stream_status", "quotex_current_market", "quotex_master"} and _collector_secret_valid():
+        if request.endpoint in {"quotex_ingest", "quotex_real_ingest", "quotex_stream_status", "quotex_current_market", "quotex_master"} and _collector_secret_valid():
             session["authenticated"] = True
         return None
 
@@ -88,10 +138,45 @@ def init_quotex_browser_ingest(app):
             return jsonify({"ok": False, "error": "No supported closed candle data found."}), 422
         return jsonify({"ok": True, "accepted": accepted, "status": local_stream_status()})
 
+    @app.route("/quotex/real-ingest", methods=["POST"])
+    def quotex_real_ingest():
+        if not _collector_secret_valid():
+            return jsonify({"ok": False, "error": "Invalid ingest key."}), 401
+        if not request.is_json:
+            return jsonify({"ok": False, "error": "JSON body required."}), 415
+        payload = request.get_json(silent=True) or {}
+        sent_at = payload.get("sent_at")
+        try:
+            if sent_at is not None and abs(time.time() - float(sent_at)) > 30:
+                return jsonify({"ok": False, "error": "Stale collector payload."}), 408
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "Invalid sent_at."}), 400
+        accepted = _store_real_market(payload)
+        return jsonify({"ok": True, "accepted": accepted})
+
+    @app.route("/quotex/real-market", methods=["GET"])
+    def quotex_real_market():
+        asset = _real_asset(request.args.get("asset"))
+        if not asset:
+            pair = str(session.get("selected_pair", ""))
+            asset = _real_asset(pair)
+        with _REAL_MARKET_LOCK:
+            state = _REAL_MARKET.get(asset, {"bars": [], "quote": None})
+            return jsonify({
+                "ok": bool(state.get("bars") or state.get("quote")),
+                "asset": asset,
+                "bars": list(state.get("bars") or []),
+                "quote": state.get("quote"),
+                "updated_at": state.get("updated_at"),
+                "source": "Quotex browser WebSocket",
+            })
+
     @app.route("/quotex/stream-status", methods=["GET"])
     def quotex_stream_status():
         result = local_stream_status()
         result["master_otc_enabled"] = otc_master_enabled()
+        with _REAL_MARKET_LOCK:
+            result["real_market_assets"] = sorted(_REAL_MARKET.keys())
         return jsonify(result)
 
     @app.route("/quotex/current-market", methods=["GET"])
@@ -162,7 +247,7 @@ def init_quotex_browser_ingest(app):
         html = response.get_data(as_text=True)
         if "QUOTEX_AUTO_MARKET_SYNC" in html:
             return response
-        script = """<script id="QUOTEX_AUTO_MARKET_SYNC">(()=>{const mode=document.getElementById('mode'),pair=document.getElementById('pair');function ensureMasterUi(){let b=document.getElementById('quotex-master-toggle');if(!b){b=document.createElement('button');b.id='quotex-master-toggle';b.type='button';b.style.cssText='position:fixed;right:18px;top:78px;z-index:99999;border:0;border-radius:12px;padding:11px 16px;font-weight:800;box-shadow:0 6px 22px rgba(0,0,0,.3);cursor:pointer;font-size:12px';document.body.appendChild(b);b.onclick=async()=>{b.disabled=true;try{const on=b.dataset.enabled!=='true';const r=await fetch('/quotex/master',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({enabled:on})});if(r.ok)await master()}finally{b.disabled=false}}}return b}async function master(){try{const r=await fetch('/quotex/master',{cache:'no-store',credentials:'same-origin'});if(!r.ok)return;const d=await r.json();const b=ensureMasterUi();b.dataset.enabled=String(!!d.enabled);b.textContent=d.enabled?'🟢 OTC MASTER: ON':'🔴 OTC MASTER: OFF';b.title=d.enabled?'Click to stop OTC collection/signals':'Click to enable OTC collection/signals';b.style.background=d.enabled?'#d9f99d':'#fecaca';b.style.color='#111827'}catch(_){}}async function sync(){if(!mode||!pair||mode.value!=='quotex_otc')return;try{const r=await fetch('/quotex/current-market',{cache:'no-store',credentials:'same-origin'}),d=await r.json();if(d.ok&&d.pair){let o=Array.from(pair.options).find(x=>x.value===d.pair);if(!o){o=document.createElement('option');o.value=d.pair;o.textContent=d.pair;o.dataset.market='quotex_otc';pair.appendChild(o)}pair.value=d.pair;pair.dispatchEvent(new Event('change',{bubbles:true}));await fetch('/select-market',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},credentials:'same-origin',body:new URLSearchParams({mode:'quotex_otc',pair:d.pair})})}}catch(_){}}ensureMasterUi();master();sync();setInterval(master,3000);setInterval(sync,1500)})();</script>"""
+        script = """<script id="QUOTEX_AUTO_MARKET_SYNC">(()=>{const mode=document.getElementById('mode'),pair=document.getElementById('pair');function ensureMasterUi(){let b=document.getElementById('quotex-master-toggle');if(!b){b=document.createElement('button');b.id='quotex-master-toggle';b.type='button';b.style.cssText='position:fixed;right:18px;top:78px;z-index:99999;border:0;border-radius:12px;padding:11px 16px;font-weight:800;box-shadow:0 6px 22px rgba(0,0,0,.3);cursor:pointer;font-size:12px';document.body.appendChild(b);b.onclick=async()=>{b.disabled=true;try{const on=b.dataset.enabled!=='true';const r=await fetch('/quotex/master',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({enabled:on})});if(r.ok)await master()}finally{b.disabled=false}}}return b}async function master(){try{const r=await fetch('/quotex/master',{cache:'no-store',credentials:'same-origin'});if(!r.ok)return;const d=await r.json();const b=ensureMasterUi();b.dataset.enabled=String(!!d.enabled);b.textContent=d.enabled?'🟢 OTC MASTER: ON':'🔴 OTC MASTER: OFF';b.title=d.enabled?'Click to stop OTC collection/signals':'Click to enable OTC collection/signals';b.style.background=d.enabled?'#d9f99d':'#fecaca';b.style.color='#111827'}catch(_){}}async function sync(){if(!mode||!pair||mode.value!=='quotex_otc')return;try{const r=await fetch('/quotex/current-market',{cache:'no-store',credentials:'same-origin'}),d=await r.json();if(d.ok&&d.pair){let o=Array.from(pair.options).find(x=>x.value===d.pair);if(!o){o=document.createElement('option');o.value=d.pair;o.textContent=d.pair;o.dataset.market='quotex_otc';pair.appendChild(o)}pair.value=d.pair;pair.dispatchEvent(new Event('change',{bubbles:true}));await fetch('/select-market',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},credentials:'same-origin',body:new URLSearchParams({mode:'quotex_otc',pair:d.pair})})}}catch(_){}}ensureMasterUi();master();sync();setInterval(master,3000);setInterval(sync,1500);const s=document.createElement('script');s.src='/static/quotex_real_chart.js';s.defer=true;document.body.appendChild(s)})();</script>"""
         marker = '</body>'
         if marker in html:
             html = html.replace(marker, script + marker, 1)
