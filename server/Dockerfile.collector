@@ -1,0 +1,14 @@
+FROM mcr.microsoft.com/playwright/python:v1.55.0-noble
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY tools/quotex_cloud_collector.py ./tools/quotex_cloud_collector.py
+
+EXPOSE 8765
+
+CMD ["python", "tools/quotex_cloud_collector.py"]
