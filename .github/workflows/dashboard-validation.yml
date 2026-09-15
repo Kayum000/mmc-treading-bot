@@ -1,0 +1,33 @@
+name: Dashboard Validation
+
+on:
+  push:
+    branches: [ui/sk-dashboard]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate-dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Python syntax
+        run: python -m compileall -q web main.py master_access.py master_trusted_devices.py market_status.py
+      - name: JavaScript syntax
+        run: |
+          node --check web/static/signal_alert.js
+          node --check web/static/live_stream_chart.js
+      - name: Dashboard structural checks
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('web/templates/index.html').read_text(encoding='utf-8')
+          for ident in ['pair','get-signal','auto-signal','performance','market-status','latest-signal','news','chart','chart-interval','chart-zoom-out','chart-zoom-in','chart-full-view']:
+              assert p.count(f'id="{ident}"') == 1, f'duplicate/missing id: {ident}'
+          assert 'id="performance-compact"' not in p, 'legacy compact performance must not be in modern template'
+          assert 'id="market-status-panel"' not in p, 'legacy market status panel must not be in modern template'
+          assert 'url_for(\'static\',filename=\'live_stream_chart.js\')' in p
+          print('Dashboard structural checks passed')
+          PY
