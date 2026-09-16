@@ -5,6 +5,10 @@ from market_status import init_market_status
 from quotex_browser_ingest import init_quotex_browser_ingest
 from remember_me import init_remember_me
 
+# Register the isolated owner/admin control panel after the Flask app exists.
+from web.admin import init_admin_routes
+init_admin_routes(app)
+
 # web.app registers its login middleware before this module is imported.
 # Patch the middleware's global helper rather than registering a later hook,
 # so both private Quotex ingest routes are authenticated before redirects.
