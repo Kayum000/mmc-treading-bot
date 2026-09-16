@@ -46,8 +46,18 @@ def init_user_db() -> None:
                 id BIGSERIAL PRIMARY KEY, username VARCHAR(64) UNIQUE NOT NULL,
                 email VARCHAR(255) UNIQUE, password_hash TEXT NOT NULL,
                 role VARCHAR(16) NOT NULL DEFAULT 'user', active BOOLEAN NOT NULL DEFAULT TRUE,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), last_login_at TIMESTAMPTZ
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), last_login_at TIMESTAMPTZ,
+                full_name VARCHAR(160), phone VARCHAR(32), date_of_birth DATE,
+                telegram VARCHAR(128), nid_verified BOOLEAN NOT NULL DEFAULT FALSE,
+                profile_pic_url TEXT
             )""")
+            # Backward-compatible migration for databases created by older versions.
+            cur.execute("ALTER TABLE mmc_users ADD COLUMN IF NOT EXISTS full_name VARCHAR(160)")
+            cur.execute("ALTER TABLE mmc_users ADD COLUMN IF NOT EXISTS phone VARCHAR(32)")
+            cur.execute("ALTER TABLE mmc_users ADD COLUMN IF NOT EXISTS date_of_birth DATE")
+            cur.execute("ALTER TABLE mmc_users ADD COLUMN IF NOT EXISTS telegram VARCHAR(128)")
+            cur.execute("ALTER TABLE mmc_users ADD COLUMN IF NOT EXISTS nid_verified BOOLEAN NOT NULL DEFAULT FALSE")
+            cur.execute("ALTER TABLE mmc_users ADD COLUMN IF NOT EXISTS profile_pic_url TEXT")
             cur.execute("""CREATE TABLE IF NOT EXISTS mmc_user_settings (
                 user_id BIGINT PRIMARY KEY REFERENCES mmc_users(id) ON DELETE CASCADE,
                 market_mode VARCHAR(16) NOT NULL DEFAULT 'real', pair VARCHAR(32),
@@ -136,11 +146,13 @@ def get_user(user_id: int) -> Optional[dict]:
     init_user_db()
     with _connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id,username,email,role,active FROM mmc_users WHERE id=%s", (int(user_id),))
+            cur.execute("SELECT id,username,email,role,active,full_name,phone,date_of_birth,telegram,nid_verified,profile_pic_url FROM mmc_users WHERE id=%s", (int(user_id),))
             row = cur.fetchone()
     if not row or not row[4]:
         return None
-    return {"id": int(row[0]), "username": row[1], "email": row[2] or "", "role": row[3]}
+    return {"id": int(row[0]), "username": row[1], "email": row[2] or "", "role": row[3],
+            "full_name": row[5] or "", "phone": row[6] or "", "date_of_birth": row[7].isoformat() if row[7] else "",
+            "telegram": row[8] or "", "nid_verified": bool(row[9]), "profile_pic_url": row[10] or ""}
 
 
 def get_settings(user_id: int) -> dict:
