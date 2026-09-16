@@ -15,7 +15,7 @@ from data.all_news_events import get_all_news_events
 from data.otc_markets import OTC_DISPLAY_PAIRS
 
 app = Flask(__name__)
-app.secret_key = os.getenv("APP_SECRET_KEY") or os.getenv("MASTER_SETUP_KEY") or os.urandom(32)
+app.secret_key = os.getenv("APP_SECRET_KEY") or os.urandom(32)
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "1") == "1")
 AUTH_USERNAME = os.getenv("APP_USERNAME", "admin")
 AUTH_PASSWORD = os.getenv("APP_PASSWORD", "")
@@ -79,8 +79,8 @@ def privacy(): return render_template("privacy.html")
 
 
 def _collector_request_authenticated() -> bool:
-    """Allow the private candle collector through the dashboard login gate."""
-    if request.endpoint != "quotex_ingest":
+    """Allow the private Quotex collector through the dashboard login gate."""
+    if request.path not in {"/quotex/ingest", "/quotex/real-ingest"}:
         return False
     expected = (os.getenv("QUOTEX_INGEST_SECRET") or "").strip()
     supplied = (request.headers.get("X-MMC-Quotex-Key") or request.args.get("key") or "").strip()
