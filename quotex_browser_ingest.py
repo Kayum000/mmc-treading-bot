@@ -1,14 +1,11 @@
-"""Authenticated ingest endpoint for the local Quotex browser collector.
-
-The endpoint accepts candle/quote market data only. It never accepts or stores a
-Quotex SSID/session token and it never places orders.
-"""
+"""Authenticated Quotex Real Market + OTC ingest and dynamic signal integration."""
 from __future__ import annotations
 
 import hmac
 import os
-import time
 import threading
+import time
+
 from flask import jsonify, request, session
 
 from data.quotex_otc import ingest_local_candles, local_stream_status, local_active_asset
@@ -16,32 +13,14 @@ from data.otc_markets import display_for_asset, OTC_DISPLAY_PAIRS
 from signals.get_signal import get_signal
 from performance import record_signal
 
-_OTC_MASTER_ENABLED = True
-_OTC_MASTER_LOCK = threading.Lock()
 _REAL_MARKET_LOCK = threading.Lock()
 _REAL_MARKET: dict[str, dict] = {}
-
-
-def otc_master_enabled() -> bool:
-    with _OTC_MASTER_LOCK:
-        return _OTC_MASTER_ENABLED
-
-
-def _set_otc_master(enabled: bool) -> bool:
-    global _OTC_MASTER_ENABLED
-    with _OTC_MASTER_LOCK:
-        _OTC_MASTER_ENABLED = bool(enabled)
-    return _OTC_MASTER_ENABLED
 
 
 def _collector_secret_valid() -> bool:
     expected = (os.getenv("QUOTEX_INGEST_SECRET") or "").strip()
     supplied = (request.headers.get("X-MMC-Quotex-Key") or request.args.get("key") or "").strip()
     return bool(expected and supplied and hmac.compare_digest(supplied, expected))
-
-
-def _master_request_authorized() -> bool:
-    return bool(session.get("authenticated")) or _collector_secret_valid()
 
 
 def _real_asset(value) -> str:
@@ -61,7 +40,7 @@ def _store_real_market(payload: dict) -> int:
                 o, h, l, c = (float(row[k]) for k in ("open", "high", "low", "close"))
             except (TypeError, ValueError, KeyError):
                 continue
-            if not asset or not all(map(lambda v: v == v and abs(v) != float("inf"), (ts, o, h, l, c))):
+            if not asset or not all(v == v and abs(v) != float("inf") for v in (ts, o, h, l, c)):
                 continue
             state = _REAL_MARKET.setdefault(asset, {"bars": [], "quote": None, "quote_history": []})
             bars = state["bars"]
@@ -74,6 +53,7 @@ def _store_real_market(payload: dict) -> int:
             state["bars"] = bars[-300:]
             state["updated_at"] = now
             accepted += 1
+
         for row in payload.get("quotes") or []:
             if not isinstance(row, dict):
                 continue
@@ -96,25 +76,20 @@ def _store_real_market(payload: dict) -> int:
 
 
 def real_market_ticks(asset: str, count: int = 1000):
-    """Return recent Quotex browser quote history as strategy-compatible ticks."""
     import pandas as pd
 
     clean = _real_asset(asset)
     limit = max(1, min(int(count), 1000))
     with _REAL_MARKET_LOCK:
-        state = _REAL_MARKET.get(clean) or {}
-        rows = list(state.get("quote_history") or [])[-limit:]
+        rows = list((_REAL_MARKET.get(clean) or {}).get("quote_history") or [])[-limit:]
     if not rows:
         return pd.DataFrame(columns=["timestamp", "askPrice", "bidPrice"])
+
     out = []
     for row in rows:
         try:
             price = float(row["price"])
             ts = pd.to_datetime(float(row["timestamp"]), unit="s", utc=True)
-            # Quotex browser stream supplies the authoritative market price, not
-            # separate bid/ask. Keep a minimal synthetic spread so the existing
-            # tick strategy can evaluate directional pressure without inventing
-            # a second market price.
             spread = max(abs(price) * 0.00001, 0.00001)
             out.append({"timestamp": ts, "askPrice": price + spread / 2.0, "bidPrice": price - spread / 2.0})
         except (TypeError, ValueError, KeyError):
@@ -124,41 +99,21 @@ def real_market_ticks(asset: str, count: int = 1000):
 
 def init_quotex_browser_ingest(app):
     def allow_collector_endpoint():
-        if request.endpoint in {"quotex_ingest", "quotex_real_ingest", "quotex_stream_status", "quotex_current_market", "quotex_master"} and _collector_secret_valid():
+        if request.endpoint in {"quotex_ingest", "quotex_real_ingest", "quotex_stream_status", "quotex_current_market"} and _collector_secret_valid():
             session["authenticated"] = True
         return None
 
     app.before_request_funcs.setdefault(None, []).insert(0, allow_collector_endpoint)
 
-    @app.route("/quotex/master", methods=["GET", "POST"])
-    def quotex_master():
-        if request.method == "POST":
-            if not _master_request_authorized():
-                return jsonify({"ok": False, "error": "Master authentication required."}), 401
-            raw = request.form.get("enabled")
-            if raw is None and request.is_json:
-                raw = (request.get_json(silent=True) or {}).get("enabled")
-            if raw is None:
-                return jsonify({"ok": False, "error": "enabled is required."}), 400
-            enabled = str(raw).strip().lower() in {"1", "true", "on", "yes", "enabled"}
-            _set_otc_master(enabled)
-        return jsonify({"ok": True, "enabled": otc_master_enabled(), "mode": "quotex_otc"})
-
     @app.route("/quotex/ingest", methods=["POST"])
     def quotex_ingest():
-        expected = (os.getenv("QUOTEX_INGEST_SECRET") or "").strip()
-        supplied = (request.headers.get("X-MMC-Quotex-Key") or request.args.get("key") or "").strip()
-        if not expected:
-            return jsonify({"ok": False, "error": "QUOTEX_INGEST_SECRET is not configured on the server."}), 503
-        if not supplied or not hmac.compare_digest(supplied, expected):
+        if not _collector_secret_valid():
             return jsonify({"ok": False, "error": "Invalid ingest key."}), 401
         if not request.is_json:
             return jsonify({"ok": False, "error": "JSON body required."}), 415
-        if not otc_master_enabled():
-            return jsonify({"ok": True, "enabled": False, "accepted": 0, "status": local_stream_status()}), 200
         payload = request.get_json(silent=True) or {}
-        sent_at = payload.get("sent_at")
         try:
+            sent_at = payload.get("sent_at")
             if sent_at is not None and abs(time.time() - float(sent_at)) > 30:
                 return jsonify({"ok": False, "error": "Stale collector payload."}), 408
         except (TypeError, ValueError):
@@ -175,21 +130,19 @@ def init_quotex_browser_ingest(app):
         if not request.is_json:
             return jsonify({"ok": False, "error": "JSON body required."}), 415
         payload = request.get_json(silent=True) or {}
-        sent_at = payload.get("sent_at")
         try:
+            sent_at = payload.get("sent_at")
             if sent_at is not None and abs(time.time() - float(sent_at)) > 30:
                 return jsonify({"ok": False, "error": "Stale collector payload."}), 408
         except (TypeError, ValueError):
             return jsonify({"ok": False, "error": "Invalid sent_at."}), 400
-        accepted = _store_real_market(payload)
-        return jsonify({"ok": True, "accepted": accepted})
+        return jsonify({"ok": True, "accepted": _store_real_market(payload)})
 
     @app.route("/quotex/real-market", methods=["GET"])
     def quotex_real_market():
         asset = _real_asset(request.args.get("asset"))
         if not asset:
-            pair = str(session.get("selected_pair", ""))
-            asset = _real_asset(pair)
+            asset = _real_asset(session.get("selected_pair", ""))
         with _REAL_MARKET_LOCK:
             state = _REAL_MARKET.get(asset, {"bars": [], "quote": None})
             return jsonify({
@@ -204,7 +157,6 @@ def init_quotex_browser_ingest(app):
     @app.route("/quotex/stream-status", methods=["GET"])
     def quotex_stream_status():
         result = local_stream_status()
-        result["master_otc_enabled"] = otc_master_enabled()
         with _REAL_MARKET_LOCK:
             result["real_market_assets"] = sorted(_REAL_MARKET.keys())
         return jsonify(result)
@@ -212,14 +164,12 @@ def init_quotex_browser_ingest(app):
     @app.route("/quotex/current-market", methods=["GET"])
     def quotex_current_market():
         asset = local_active_asset()
-        enabled = otc_master_enabled()
         return jsonify({
-            "ok": bool(asset) and enabled,
+            "ok": bool(asset),
             "market_mode": "quotex_otc",
             "asset": asset,
-            "pair": display_for_asset(asset) if asset and enabled else None,
-            "master_otc_enabled": enabled,
-            "source": "Quotex local screen collector",
+            "pair": display_for_asset(asset) if asset else None,
+            "source": "Quotex local browser WebSocket collector",
         })
 
     original_select_market = app.view_functions.get("select_market")
@@ -229,8 +179,6 @@ def init_quotex_browser_ingest(app):
         mode = request.form.get("mode", "").strip().lower()
         pair = request.form.get("pair", "").strip().upper()
         if mode == "quotex_otc":
-            if not otc_master_enabled():
-                return jsonify({"ok": False, "error": "OTC MASTER switch is OFF."}), 423
             detected = local_active_asset()
             detected_pair = display_for_asset(detected) if detected else None
             if detected_pair:
@@ -247,8 +195,6 @@ def init_quotex_browser_ingest(app):
     def auto_signal_dynamic():
         mode = session.get("selected_mode", "").strip().lower()
         if mode == "quotex_otc":
-            if not otc_master_enabled():
-                return jsonify({"ok": False, "error": "OTC MASTER switch is OFF."}), 423
             asset = local_active_asset()
             pair = display_for_asset(asset) if asset else None
             if not pair:
@@ -277,11 +223,9 @@ def init_quotex_browser_ingest(app):
         html = response.get_data(as_text=True)
         if "QUOTEX_AUTO_MARKET_SYNC" in html:
             return response
-        script = """<script id="QUOTEX_AUTO_MARKET_SYNC">(()=>{const mode=document.getElementById('mode'),pair=document.getElementById('pair');function ensureMasterUi(){let b=document.getElementById('quotex-master-toggle');if(!b){b=document.createElement('button');b.id='quotex-master-toggle';b.type='button';b.style.cssText='position:fixed;right:18px;top:78px;z-index:99999;border:0;border-radius:12px;padding:11px 16px;font-weight:800;box-shadow:0 6px 22px rgba(0,0,0,.3);cursor:pointer;font-size:12px';document.body.appendChild(b);b.onclick=async()=>{b.disabled=true;try{const on=b.dataset.enabled!=='true';const r=await fetch('/quotex/master',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({enabled:on})});if(r.ok)await master()}finally{b.disabled=false}}}return b}async function master(){try{const r=await fetch('/quotex/master',{cache:'no-store',credentials:'same-origin'});if(!r.ok)return;const d=await r.json();const b=ensureMasterUi();b.dataset.enabled=String(!!d.enabled);b.textContent=d.enabled?'🟢 OTC MASTER: ON':'🔴 OTC MASTER: OFF';b.title=d.enabled?'Click to stop OTC collection/signals':'Click to enable OTC collection/signals';b.style.background=d.enabled?'#d9f99d':'#fecaca';b.style.color='#111827'}catch(_){}}async function sync(){if(!mode||!pair||mode.value!=='quotex_otc')return;try{const r=await fetch('/quotex/current-market',{cache:'no-store',credentials:'same-origin'}),d=await r.json();if(d.ok&&d.pair){let o=Array.from(pair.options).find(x=>x.value===d.pair);if(!o){o=document.createElement('option');o.value=d.pair;o.textContent=d.pair;o.dataset.market='quotex_otc';pair.appendChild(o)}pair.value=d.pair;pair.dispatchEvent(new Event('change',{bubbles:true}));await fetch('/select-market',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},credentials:'same-origin',body:new URLSearchParams({mode:'quotex_otc',pair:d.pair})})}}catch(_){}}ensureMasterUi();master();sync();setInterval(master,3000);setInterval(sync,1500);const s=document.createElement('script');s.src='/static/quotex_real_chart.js';s.defer=true;document.body.appendChild(s)})();</script>"""
-        marker = '</body>'
-        if marker in html:
-            html = html.replace(marker, script + marker, 1)
-            response.set_data(html)
+        script = """<script id=\"QUOTEX_AUTO_MARKET_SYNC\">(()=>{const mode=document.getElementById('mode'),pair=document.getElementById('pair');async function sync(){if(!mode||!pair||mode.value!=='quotex_otc')return;try{const r=await fetch('/quotex/current-market',{cache:'no-store',credentials:'same-origin'}),d=await r.json();if(d.ok&&d.pair){let o=Array.from(pair.options).find(x=>x.value===d.pair);if(!o){o=document.createElement('option');o.value=d.pair;o.textContent=d.pair;o.dataset.market='quotex_otc';pair.appendChild(o)}pair.value=d.pair;pair.dispatchEvent(new Event('change',{bubbles:true}));await fetch('/select-market',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},credentials:'same-origin',body:new URLSearchParams({mode:'quotex_otc',pair:d.pair})})}}catch(_){}}sync();setInterval(sync,1500);const s=document.createElement('script');s.src='/static/quotex_real_chart.js';s.defer=true;document.body.appendChild(s)})();</script>"""
+        if "</body>" in html:
+            response.set_data(html.replace("</body>", script + "</body>", 1))
         return response
 
     return app
