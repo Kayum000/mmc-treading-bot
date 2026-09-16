@@ -10,6 +10,22 @@ from master_session_restore import init_master_session_restore
 from master_recovery_ui import init_master_recovery_ui
 from master_trusted_devices import init_master_trusted_devices
 
+# web.app registers its login middleware before this module is imported.
+# Patch the middleware's global helper rather than registering a later hook,
+# so both private Quotex ingest routes are authenticated before redirects.
+import web.app as web_app
+
+def _collector_request_authenticated_for_embedded() -> bool:
+    if request.path not in {"/quotex/ingest", "/quotex/real-ingest"}:
+        return False
+    expected = (os.getenv("QUOTEX_INGEST_SECRET") or "").strip()
+    supplied = (request.headers.get("X-MMC-Quotex-Key") or request.args.get("key") or "").strip()
+    return bool(expected and supplied and hmac.compare_digest(supplied, expected))
+
+import hmac
+import os
+web_app._collector_request_authenticated = _collector_request_authenticated_for_embedded
+
 init_market_status(app)
 init_remember_me(app)
 init_master_access(app)
@@ -19,10 +35,6 @@ init_master_recovery_ui(app)
 init_master_trusted_devices(app)
 init_quotex_browser_ingest(app)
 
-# The dashboard login middleware in web.app is registered before the collector
-# module's hooks. Exempt only this path at the routing layer so the collector
-# endpoint itself can perform its own constant-time secret validation and return
-# 401/503 instead of being redirected to the HTML login page.
 @app.before_request
 def allow_quotex_ingest_route():
     if request.path in {"/quotex/ingest", "/quotex/real-ingest"}:
@@ -31,16 +43,10 @@ def allow_quotex_ingest_route():
 
 
 def _start_embedded_quotex_collector() -> None:
-    """Run the Quotex browser collector inside the MMC server process.
-
-    This mode is local-only. The collector attaches to the user's isolated
-    Chrome CDP session and posts both Real Market and OTC data back to this
-    same Flask process. Render/cloud deployments never start it.
-    """
+    """Run the Quotex browser collector inside the MMC server process."""
     import asyncio
     import threading
     import time
-
     from tools.quotex_local_collector import run as collector_run
 
     def worker() -> None:
