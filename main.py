@@ -3,7 +3,6 @@ from web.app import app
 from flask import request, session
 from market_status import init_market_status
 from quotex_browser_ingest import init_quotex_browser_ingest
-from remember_me import init_remember_me
 
 # Register the isolated owner/admin control panel after the Flask app exists.
 from web.admin import init_admin_routes
@@ -28,7 +27,6 @@ import os
 web_app._collector_request_authenticated = _collector_request_authenticated_for_embedded
 
 init_market_status(app)
-init_remember_me(app)
 init_quotex_browser_ingest(app)
 
 
