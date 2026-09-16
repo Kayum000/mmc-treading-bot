@@ -7,7 +7,7 @@ import time
 from flask import Flask, jsonify, render_template, request, redirect, url_for, session
 
 from signals.get_signal import get_signal
-from performance import record_signal, get_performance, clear_performance_history
+from user_performance import record_signal, get_performance, clear_performance_history
 from data.biquote_forex import fetch_api_usage, get_credit_usage
 from data.news_direction import get_news_direction_for_pair
 from data.news_events import get_weekly_news_events_for_pair
@@ -63,12 +63,10 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "")
         password = request.form.get("password", "")
-        if not password:
-            error = "Password is required."
+        if not password: error = "Password is required."
         else:
             try:
-                ensure_env_admin()
-                user = authenticate(username, password)
+                ensure_env_admin(); user = authenticate(username, password)
             except Exception as exc:
                 user = None; error = f"Login service unavailable: {exc}"
             if user:
@@ -86,8 +84,7 @@ def register():
     if request.method == "POST":
         try:
             user_id = create_user(request.form.get("username", ""), request.form.get("password", ""), request.form.get("email", ""))
-            user = get_user(user_id)
-            session.clear(); session["authenticated"] = True; session["user_id"] = user_id
+            user = get_user(user_id); session.clear(); session["authenticated"] = True; session["user_id"] = user_id
             session["username"] = user["username"]; session["role"] = user["role"]
             return redirect(url_for("index"))
         except Exception as exc: error = str(exc)
@@ -104,8 +101,7 @@ def account():
     user = _current_user()
     if not user: return redirect(url_for("login"))
     if request.method == "POST":
-        mode = request.form.get("market_mode", "real").strip().lower()
-        pair = request.form.get("pair", "").strip().upper()
+        mode = request.form.get("market_mode", "real").strip().lower(); pair = request.form.get("pair", "").strip().upper()
         if pair not in _valid_pairs(mode): return jsonify({"ok": False, "error": "অবৈধ মার্কেট।"}), 400
         save_settings(user["id"], mode, pair, request.form.get("auto_signal") == "1", float(request.form.get("min_confidence", "0") or 0), request.form.get("timezone", "Asia/Dhaka"))
         return jsonify({"ok": True})
@@ -122,8 +118,7 @@ def privacy(): return render_template("privacy.html")
 
 def _collector_request_authenticated() -> bool:
     if request.path not in {"/quotex/ingest", "/quotex/real-ingest"}: return False
-    expected = (os.getenv("QUOTEX_INGEST_SECRET") or "").strip()
-    supplied = (request.headers.get("X-MMC-Quotex-Key") or request.args.get("key") or "").strip()
+    expected = (os.getenv("QUOTEX_INGEST_SECRET") or "").strip(); supplied = (request.headers.get("X-MMC-Quotex-Key") or request.args.get("key") or "").strip()
     return bool(expected and supplied and hmac.compare_digest(supplied, expected))
 
 
@@ -143,14 +138,14 @@ def select_market():
     mode = request.form.get("mode", "").strip().lower(); pair = request.form.get("pair", "").strip().upper()
     if pair not in _valid_pairs(mode): return jsonify({"ok": False, "error": "অবৈধ মার্কেট।"}), 400
     session["selected_mode"] = mode; session["selected_pair"] = pair
-    save_settings(_user_id(), mode, pair, get_settings(_user_id()).get("auto_signal", False), get_settings(_user_id()).get("min_confidence", 0), get_settings(_user_id()).get("timezone", "Asia/Dhaka"))
+    settings = get_settings(_user_id())
+    save_settings(_user_id(), mode, pair, settings.get("auto_signal", False), settings.get("min_confidence", 0), settings.get("timezone", "Asia/Dhaka"))
     return jsonify({"ok": True, "mode": mode, "pair": pair})
 
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-    result = None; error = None; uid = _user_id()
-    saved = get_settings(uid) if uid else {}
+    result = None; error = None; uid = _user_id(); saved = get_settings(uid) if uid else {}
     if request.method == "POST": mode = request.form.get("mode", "").strip().lower(); pair = request.form.get("pair", "").strip().upper()
     else: mode = session.get("selected_mode", saved.get("market_mode", "")); pair = session.get("selected_pair", saved.get("pair", ""))
     if mode not in {"real", "quotex_otc"}: mode, pair = "", ""
@@ -166,7 +161,7 @@ def index():
 
 @app.route("/auto-signal", methods=["GET"])
 def auto_signal():
-    uid = _user_id(); mode = session.get("selected_mode", get_settings(uid).get("market_mode", "")).strip().lower(); pair = session.get("selected_pair", get_settings(uid).get("pair", "") or "").strip().upper()
+    uid = _user_id(); settings = get_settings(uid); mode = session.get("selected_mode", settings.get("market_mode", "")).strip().lower(); pair = session.get("selected_pair", settings.get("pair", "") or "").strip().upper()
     if pair not in _valid_pairs(mode): return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
     try:
         result = get_signal(pair, mode, automatic=True); record_signal(result, uid); return jsonify({"ok": True, "result": result})
