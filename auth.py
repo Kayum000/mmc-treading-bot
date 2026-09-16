@@ -97,9 +97,13 @@ def ensure_env_admin() -> None:
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT id FROM mmc_users WHERE username=%s", (username,))
-            if cur.fetchone() is None:
-                cur.execute("INSERT INTO mmc_users (username,password_hash,role) VALUES (%s,%s,'admin')", (username, _hash_password(password)))
+            row = cur.fetchone()
+            if row is None:
+                cur.execute("INSERT INTO mmc_users (username,password_hash,role) VALUES (%s,%s,'owner')", (username, _hash_password(password)))
                 cur.execute("INSERT INTO mmc_user_settings (user_id) SELECT id FROM mmc_users WHERE username=%s", (username,))
+            else:
+                # The configured application account is the protected owner account.
+                cur.execute("UPDATE mmc_users SET role='owner',active=TRUE WHERE id=%s", (row[0],))
         conn.commit()
 
 
