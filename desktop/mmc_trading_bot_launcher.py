@@ -7,8 +7,7 @@ APP_URL = os.getenv("MMC_APP_URL", "https://mmc-treading-bot.onrender.com/")
 
 # WebView2 must reuse the same writable user-data folder between launches.
 # pywebview otherwise defaults to private mode, which discards cookies/localStorage
-# when the desktop app closes. That was causing both Remember Me and the stable
-# Master device ID to disappear on every restart.
+# when the desktop app closes.
 APP_DATA = Path(os.getenv("APPDATA") or Path.home()) / "MMC-Trading-Bot"
 WEBVIEW_DATA = APP_DATA / "WebView2"
 WEBVIEW_DATA.mkdir(parents=True, exist_ok=True)
