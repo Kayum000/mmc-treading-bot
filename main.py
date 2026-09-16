@@ -4,18 +4,15 @@ from flask import request, session
 from market_status import init_market_status
 from quotex_browser_ingest import init_quotex_browser_ingest
 
-# Register the isolated owner/admin control panel after the Flask app exists.
 from web.admin import init_admin_routes
 init_admin_routes(app)
 
-# Register the private Admin App shell. It reuses the exact signal dashboard
-# and adds only the admin controls for owner/admin users.
 from web.admin_app import init_admin_app_routes
 init_admin_app_routes(app)
 
-# web.app registers its login middleware before this module is imported.
-# Patch the middleware's global helper rather than registering a later hook,
-# so both private Quotex ingest routes are authenticated before redirects.
+from web.user_profile import init_user_profile_routes
+init_user_profile_routes(app)
+
 import web.app as web_app
 
 
