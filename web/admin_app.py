@@ -15,7 +15,6 @@ def init_admin_app_routes(app):
     def admin_app():
         uid = session.get("user_id")
         user = get_user(uid) if uid else None
-        # The private Admin App is for the owner account only.
         if not user or user.get("role") != "owner":
             return redirect(url_for("login"))
         return render_template("admin_app.html", user=user)
