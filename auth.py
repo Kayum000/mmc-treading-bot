@@ -79,7 +79,7 @@ def init_user_db() -> None:
         conn.commit()
 
 
-def create_user(username: str, password: str, email: str = "") -> int:
+def create_user(username: str, password: str, email: str = "", active: bool = False) -> int:
     username = username.strip().lower()
     email = email.strip().lower() or None
     if len(username) < 3 or len(username) > 64:
@@ -89,7 +89,7 @@ def create_user(username: str, password: str, email: str = "") -> int:
     init_user_db()
     with _connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("INSERT INTO mmc_users (username,email,password_hash) VALUES (%s,%s,%s) RETURNING id", (username, email, _hash_password(password)))
+            cur.execute("INSERT INTO mmc_users (username,email,password_hash,active) VALUES (%s,%s,%s,%s) RETURNING id", (username, email, _hash_password(password), bool(active)))
             user_id = int(cur.fetchone()[0])
             cur.execute("INSERT INTO mmc_user_settings (user_id) VALUES (%s)", (user_id,))
             cur.execute("INSERT INTO mmc_user_permissions (user_id) VALUES (%s)", (user_id,))
@@ -122,7 +122,7 @@ def ensure_env_admin() -> None:
             cur.execute("SELECT id FROM mmc_users WHERE username=%s", (username,))
             row = cur.fetchone()
             if row is None:
-                cur.execute("INSERT INTO mmc_users (username,password_hash,role) VALUES (%s,%s,'owner') RETURNING id", (username, _hash_password(password)))
+                cur.execute("INSERT INTO mmc_users (username,password_hash,role,active) VALUES (%s,%s,'owner',TRUE) RETURNING id", (username, _hash_password(password)))
                 owner_id = int(cur.fetchone()[0])
                 cur.execute("INSERT INTO mmc_user_settings (user_id) VALUES (%s) ON CONFLICT DO NOTHING", (owner_id,))
                 cur.execute("INSERT INTO mmc_user_permissions (user_id,advanced_settings_access) VALUES (%s,TRUE) ON CONFLICT DO NOTHING", (owner_id,))
