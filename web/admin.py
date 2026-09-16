@@ -4,12 +4,13 @@ from __future__ import annotations
 import hmac
 import os
 import secrets
+import time
 from functools import wraps
 
 import psycopg2
 from flask import jsonify, redirect, render_template, request, session, url_for
 
-from auth import _db_url, _hash_password, create_user, get_settings, get_user, save_settings
+from auth import _db_url, _hash_password, create_user, get_user, init_user_db, save_settings
 
 
 def _connect():
@@ -35,13 +36,52 @@ def _csrf_ok():
     return bool(expected and supplied and hmac.compare_digest(expected, supplied))
 
 
+def _audit(actor_id, action, target_id=None, details=""):
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO mmc_admin_audit(actor_user_id,action,target_user_id,details) VALUES (%s,%s,%s,%s)", (actor_id, action, target_id, details[:1000]))
+        conn.commit()
+
+
+def _memory_status():
+    try:
+        values = {}
+        with open("/proc/meminfo", "r", encoding="utf-8") as fh:
+            for line in fh:
+                key, raw = line.split(":", 1)
+                values[key] = int(raw.strip().split()[0])
+        total = values.get("MemTotal", 0)
+        available = values.get("MemAvailable", values.get("MemFree", 0))
+        used = max(total - available, 0)
+        return {"used_mb": round(used / 1024), "total_mb": round(total / 1024), "pct": round((used / total) * 100, 1) if total else 0}
+    except Exception:
+        return {"used_mb": 0, "total_mb": 0, "pct": 0}
+
+
+def _load_status():
+    try:
+        load = os.getloadavg()[0]
+        return round(load, 2)
+    except Exception:
+        return None
+
+
+def _system_settings(cur):
+    cur.execute("SELECT key,value FROM mmc_system_settings WHERE key IN ('maintenance_mode','maintenance_message')")
+    data = {row[0]: row[1] for row in cur.fetchall()}
+    return data.get("maintenance_mode", "off") == "on", data.get("maintenance_message", "")
+
+
 def _dashboard_data():
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute("""SELECT u.id,u.username,u.email,u.role,u.active,u.created_at,u.last_login_at,
-                          s.market_mode,s.pair,s.auto_signal,s.min_confidence,s.timezone
+                          s.market_mode,s.pair,s.auto_signal,s.min_confidence,s.timezone,
+                          COALESCE(p.signal_access,TRUE),COALESCE(p.auto_signal_access,TRUE),
+                          COALESCE(p.real_market_access,TRUE),COALESCE(p.demo_market_access,TRUE),
+                          COALESCE(p.advanced_settings_access,FALSE)
                           FROM mmc_users u LEFT JOIN mmc_user_settings s ON s.user_id=u.id
-                          ORDER BY u.id ASC""")
+                          LEFT JOIN mmc_user_permissions p ON p.user_id=u.id ORDER BY u.id ASC""")
             rows = cur.fetchall()
             cur.execute("SELECT COUNT(*) FROM mmc_users")
             total_users = int(cur.fetchone()[0])
@@ -53,6 +93,9 @@ def _dashboard_data():
             admin_count = int(cur.fetchone()[0])
             cur.execute("SELECT COUNT(*) FROM mmc_user_settings WHERE auto_signal")
             auto_signal_users = int(cur.fetchone()[0])
+            maintenance_mode, maintenance_message = _system_settings(cur)
+            cur.execute("SELECT id,action,actor_user_id,target_user_id,details,created_at FROM mmc_admin_audit ORDER BY id DESC LIMIT 30")
+            audit_rows = cur.fetchall()
     users = []
     for row in rows:
         users.append({
@@ -60,25 +103,36 @@ def _dashboard_data():
             "active": bool(row[4]), "created_at": row[5], "last_login_at": row[6],
             "market_mode": row[7] or "", "pair": row[8] or "", "auto_signal": bool(row[9]),
             "min_confidence": float(row[10] or 0), "timezone": row[11] or "Asia/Dhaka",
+            "signal_access": bool(row[12]), "auto_signal_access": bool(row[13]),
+            "real_market_access": bool(row[14]), "demo_market_access": bool(row[15]),
+            "advanced_settings_access": bool(row[16]),
         })
-    return users, total_users, active_users, inactive_users, admin_count, auto_signal_users
+    audits = [{"id": r[0], "action": r[1], "actor": r[2], "target": r[3], "details": r[4] or "", "created_at": r[5]} for r in audit_rows]
+    return users, total_users, active_users, inactive_users, admin_count, auto_signal_users, maintenance_mode, maintenance_message, audits
 
 
 def init_admin_routes(app):
+    init_user_db()
+
     @app.route("/admin", methods=["GET"])
     @_admin_required
     def admin_panel():
-        users, total_users, active_users, inactive_users, admin_count, auto_signal_users = _dashboard_data()
+        data = _dashboard_data()
+        users, total_users, active_users, inactive_users, admin_count, auto_signal_users, maintenance_mode, maintenance_message, audits = data
         try:
             with _connect():
                 db_status = "CONNECTED"
         except Exception:
             db_status = "ERROR"
+        collector_hint = os.getenv("COLLECTOR_STATUS", "NOT REPORTED").upper()
         return render_template(
             "admin.html", users=users, total_users=total_users, active_users=active_users,
             inactive_users=inactive_users, admin_count=admin_count, auto_signal_users=auto_signal_users,
-            current_user=get_user(session["user_id"]), csrf=session["admin_csrf"],
-            db_status=db_status, signal_status="ONLINE", app_env="configured" if os.getenv("DATABASE_URL") else "missing",
+            current_user=get_user(session["user_id"]), csrf=session["admin_csrf"], db_status=db_status,
+            app_env="configured" if os.getenv("DATABASE_URL") else "missing", memory=_memory_status(),
+            load_avg=_load_status(), collector_status=collector_hint, signal_status="ROUTE AVAILABLE",
+            maintenance_mode=maintenance_mode, maintenance_message=maintenance_message, audits=audits,
+            server_time=int(time.time()),
         )
 
     @app.route("/admin/user/create", methods=["POST"])
@@ -91,6 +145,7 @@ def init_admin_routes(app):
         password = request.form.get("password", "")
         try:
             user_id = create_user(username, password, email)
+            _audit(session["user_id"], "create_user", user_id, username)
         except Exception as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
         return redirect(url_for("admin_panel"))
@@ -101,18 +156,9 @@ def init_admin_routes(app):
         if not _csrf_ok():
             return jsonify({"ok": False, "error": "Invalid admin session token."}), 403
         action = request.form.get("action", "").strip().lower()
-        if user_id == int(session.get("user_id")) and action in {"deactivate", "delete"}:
+        actor_id = int(session.get("user_id"))
+        if user_id == actor_id and action in {"deactivate", "delete"}:
             return jsonify({"ok": False, "error": "You cannot disable or delete your own owner account."}), 400
-        if action == "save_settings":
-            try:
-                save_settings(
-                    user_id, request.form.get("market_mode", "real"), request.form.get("pair", ""),
-                    request.form.get("auto_signal") == "on", float(request.form.get("min_confidence", "0") or 0),
-                    request.form.get("timezone", "Asia/Dhaka"),
-                )
-            except Exception as exc:
-                return jsonify({"ok": False, "error": str(exc)}), 400
-            return redirect(url_for("admin_panel"))
         with _connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT id,role FROM mmc_users WHERE id=%s", (user_id,))
@@ -121,7 +167,18 @@ def init_admin_routes(app):
                     return jsonify({"ok": False, "error": "User not found."}), 404
                 if row[1] == "owner":
                     return jsonify({"ok": False, "error": "Owner account is protected."}), 400
-                if action == "activate":
+                if action == "save_settings":
+                    cur.execute("""INSERT INTO mmc_user_settings(user_id,market_mode,pair,auto_signal,min_confidence,timezone)
+                        VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT(user_id) DO UPDATE SET market_mode=EXCLUDED.market_mode,
+                        pair=EXCLUDED.pair,auto_signal=EXCLUDED.auto_signal,min_confidence=EXCLUDED.min_confidence,
+                        timezone=EXCLUDED.timezone,updated_at=NOW()""", (user_id, request.form.get("market_mode", "real"), request.form.get("pair", ""), request.form.get("auto_signal") == "on", float(request.form.get("min_confidence", "0") or 0), request.form.get("timezone", "Asia/Dhaka")))
+                    cur.execute("""INSERT INTO mmc_user_permissions(user_id,signal_access,auto_signal_access,real_market_access,demo_market_access,advanced_settings_access)
+                        VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT(user_id) DO UPDATE SET signal_access=EXCLUDED.signal_access,
+                        auto_signal_access=EXCLUDED.auto_signal_access,real_market_access=EXCLUDED.real_market_access,
+                        demo_market_access=EXCLUDED.demo_market_access,advanced_settings_access=EXCLUDED.advanced_settings_access,updated_at=NOW()""",
+                        (user_id, request.form.get("signal_access") == "on", request.form.get("auto_signal_access") == "on", request.form.get("real_market_access") == "on", request.form.get("demo_market_access") == "on", request.form.get("advanced_settings_access") == "on"))
+                    action = "save_user_access"
+                elif action == "activate":
                     cur.execute("UPDATE mmc_users SET active=TRUE WHERE id=%s", (user_id,))
                 elif action == "deactivate":
                     cur.execute("UPDATE mmc_users SET active=FALSE WHERE id=%s", (user_id,))
@@ -139,4 +196,24 @@ def init_admin_routes(app):
                 else:
                     return jsonify({"ok": False, "error": "Unsupported action."}), 400
             conn.commit()
+        _audit(actor_id, action, user_id)
+        return redirect(url_for("admin_panel"))
+
+    @app.route("/admin/system", methods=["POST"])
+    @_admin_required
+    def admin_system_control():
+        if not _csrf_ok():
+            return jsonify({"ok": False, "error": "Invalid admin session token."}), 403
+        action = request.form.get("action", "")
+        if action != "maintenance":
+            return jsonify({"ok": False, "error": "Unsupported system action."}), 400
+        enabled = request.form.get("enabled") == "on"
+        message = request.form.get("message", "").strip()[:500]
+        with _connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""INSERT INTO mmc_system_settings(key,value) VALUES('maintenance_mode,%s')""" if False else "SELECT 1")
+                cur.execute("INSERT INTO mmc_system_settings(key,value) VALUES ('maintenance_mode,%s') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()" % ("on" if enabled else "off",))
+                cur.execute("INSERT INTO mmc_system_settings(key,value) VALUES ('maintenance_message',%s) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()", (message,))
+            conn.commit()
+        _audit(session["user_id"], "maintenance_on" if enabled else "maintenance_off", None, message)
         return redirect(url_for("admin_panel"))
