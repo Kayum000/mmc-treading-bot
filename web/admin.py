@@ -7,7 +7,6 @@ admin session and a per-session CSRF token.
 from __future__ import annotations
 
 import hmac
-import os
 import secrets
 from functools import wraps
 
@@ -82,7 +81,7 @@ def init_admin_routes(app):
                 row = cur.fetchone()
                 if not row:
                     return jsonify({"ok": False, "error": "User not found."}), 404
-                if row[1] == "owner" and action != "promote_owner":
+                if row[1] == "owner":
                     return jsonify({"ok": False, "error": "Owner account is protected."}), 400
                 if action == "activate":
                     cur.execute("UPDATE mmc_users SET active=TRUE WHERE id=%s", (user_id,))
