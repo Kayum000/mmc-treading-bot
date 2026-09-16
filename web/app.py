@@ -46,6 +46,10 @@ def _current_user():
     return get_user(uid) if uid else None
 
 
+def _post_login_redirect(user):
+    return url_for("admin_app") if user.get("role") == "owner" else url_for("index")
+
+
 def _usage_view():
     now = time.time()
     if now - _USAGE_CACHE["at"] >= 60 or _USAGE_CACHE["data"] is None:
@@ -58,7 +62,8 @@ def _usage_view():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    if session.get("authenticated") and _current_user(): return redirect(url_for("index"))
+    current_user = _current_user()
+    if session.get("authenticated") and current_user: return redirect(_post_login_redirect(current_user))
     error = None
     if request.method == "POST":
         username = request.form.get("username", "")
@@ -72,21 +77,19 @@ def login():
             if user:
                 session.clear(); session["authenticated"] = True; session["user_id"] = user["id"]
                 session["username"] = user["username"]; session["role"] = user["role"]
-                return redirect(url_for("index"))
-            if error is None: error = "Invalid username or password."
+                return redirect(_post_login_redirect(user))
+            if error is None: error = "Invalid username/password, or your account is awaiting owner approval."
     return render_template("login.html", error=error)
 
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
-    if session.get("authenticated") and _current_user(): return redirect(url_for("index"))
+    if session.get("authenticated") and _current_user(): return redirect(_post_login_redirect(_current_user()))
     error = None
     if request.method == "POST":
         try:
             user_id = create_user(request.form.get("username", ""), request.form.get("password", ""), request.form.get("email", ""))
-            user = get_user(user_id); session.clear(); session["authenticated"] = True; session["user_id"] = user_id
-            session["username"] = user["username"]; session["role"] = user["role"]
-            return redirect(url_for("index"))
+            return render_template("register.html", success="Account created. Your account is now waiting for owner approval. You can log in after the owner enables your account.")
         except Exception as exc: error = str(exc)
     return render_template("register.html", error=error)
 
