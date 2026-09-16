@@ -10,7 +10,7 @@ from functools import wraps
 import psycopg2
 from flask import jsonify, redirect, render_template, request, session, url_for
 
-from auth import _db_url, _hash_password, create_user, get_user, init_user_db, save_settings
+from auth import _db_url, _hash_password, create_user, get_user, init_user_db
 
 
 def _connect():
@@ -60,8 +60,7 @@ def _memory_status():
 
 def _load_status():
     try:
-        load = os.getloadavg()[0]
-        return round(load, 2)
+        return round(os.getloadavg()[0], 2)
     except Exception:
         return None
 
@@ -117,8 +116,7 @@ def init_admin_routes(app):
     @app.route("/admin", methods=["GET"])
     @_admin_required
     def admin_panel():
-        data = _dashboard_data()
-        users, total_users, active_users, inactive_users, admin_count, auto_signal_users, maintenance_mode, maintenance_message, audits = data
+        users, total_users, active_users, inactive_users, admin_count, auto_signal_users, maintenance_mode, maintenance_message, audits = _dashboard_data()
         try:
             with _connect():
                 db_status = "CONNECTED"
@@ -140,12 +138,9 @@ def init_admin_routes(app):
     def admin_create_user():
         if not _csrf_ok():
             return jsonify({"ok": False, "error": "Invalid admin session token."}), 403
-        username = request.form.get("username", "").strip()
-        email = request.form.get("email", "").strip()
-        password = request.form.get("password", "")
         try:
-            user_id = create_user(username, password, email)
-            _audit(session["user_id"], "create_user", user_id, username)
+            user_id = create_user(request.form.get("username", ""), request.form.get("password", ""), request.form.get("email", ""))
+            _audit(session["user_id"], "create_user", user_id, request.form.get("username", "").strip())
         except Exception as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
         return redirect(url_for("admin_panel"))
@@ -204,15 +199,16 @@ def init_admin_routes(app):
     def admin_system_control():
         if not _csrf_ok():
             return jsonify({"ok": False, "error": "Invalid admin session token."}), 403
-        action = request.form.get("action", "")
-        if action != "maintenance":
+        actor = get_user(int(session["user_id"]))
+        if not actor or actor.get("role") != "owner":
+            return jsonify({"ok": False, "error": "Owner permission required."}), 403
+        if request.form.get("action", "") != "maintenance":
             return jsonify({"ok": False, "error": "Unsupported system action."}), 400
         enabled = request.form.get("enabled") == "on"
         message = request.form.get("message", "").strip()[:500]
         with _connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("""INSERT INTO mmc_system_settings(key,value) VALUES('maintenance_mode,%s')""" if False else "SELECT 1")
-                cur.execute("INSERT INTO mmc_system_settings(key,value) VALUES ('maintenance_mode,%s') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()" % ("on" if enabled else "off",))
+                cur.execute("INSERT INTO mmc_system_settings(key,value) VALUES ('maintenance_mode',%s) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()", ("on" if enabled else "off",))
                 cur.execute("INSERT INTO mmc_system_settings(key,value) VALUES ('maintenance_message',%s) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()", (message,))
             conn.commit()
         _audit(session["user_id"], "maintenance_on" if enabled else "maintenance_off", None, message)
