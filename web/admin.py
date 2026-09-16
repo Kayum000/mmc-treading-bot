@@ -139,7 +139,7 @@ def init_admin_routes(app):
         if not _csrf_ok():
             return jsonify({"ok": False, "error": "Invalid admin session token."}), 403
         try:
-            user_id = create_user(request.form.get("username", ""), request.form.get("password", ""), request.form.get("email", ""))
+            user_id = create_user(request.form.get("username", ""), request.form.get("password", ""), request.form.get("email", ""), active=True)
             _audit(session["user_id"], "create_user", user_id, request.form.get("username", "").strip())
         except Exception as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
