@@ -6,13 +6,12 @@ not depend on an ephemeral Render filesystem.
 """
 from __future__ import annotations
 
-import base64
 import datetime as dt
 import hmac
 import os
 
 import psycopg2
-from flask import jsonify, redirect, render_template, request, session, url_for
+from flask import Response, jsonify, redirect, render_template, request, session, url_for
 
 from auth import _db_url, get_user, init_user_db
 
@@ -76,8 +75,7 @@ def _valid_image(upload):
         return None, None, "প্রতিটি ছবি সর্বোচ্চ 3 MB হতে পারবে।"
     if not data:
         return None, None, "ছবিটি খালি।"
-    # Lightweight magic-byte check prevents simply renaming another file to .jpg.
-    good = (data.startswith(b"\xff\xd8\xff") or data.startswith(b"\x89PNG\r\n\x1a\n") or data.startswith(b"RIFF") and b"WEBP" in data[:16])
+    good = (data.startswith(b"\xff\xd8\xff") or data.startswith(b"\x89PNG\r\n\x1a\n") or (data.startswith(b"RIFF") and b"WEBP" in data[:16]))
     if not good:
         return None, None, "ছবির ফরম্যাট যাচাই করা যায়নি।"
     return data, upload.mimetype, None
@@ -158,7 +156,7 @@ def init_user_profile_routes(app):
             with conn.cursor() as cur:
                 cur.execute("INSERT INTO mmc_user_verification(user_id) VALUES (%s) ON CONFLICT(user_id) DO NOTHING", (uid,))
                 cur.execute(f"UPDATE mmc_user_verification SET {field}=%s,{field}_mime=%s,updated_at=NOW() WHERE user_id=%s", (psycopg2.Binary(data), mime, uid))
-                if kind == "nid_front" or kind == "nid_back":
+                if kind in {"nid_front", "nid_back"}:
                     cur.execute("UPDATE mmc_user_verification SET nid_status='pending_review',auto_check_status='not_checked',updated_at=NOW() WHERE user_id=%s", (uid,))
                 elif kind == "selfie":
                     cur.execute("UPDATE mmc_user_verification SET selfie_status='pending_review',auto_check_status='not_checked',updated_at=NOW() WHERE user_id=%s", (uid,))
@@ -187,7 +185,6 @@ def init_user_profile_routes(app):
                 row = cur.fetchone()
         if not row or not row[0]:
             return ("", 404)
-        from flask import Response
         return Response(bytes(row[0]), mimetype=row[1] or "image/jpeg", headers={"Cache-Control": "private, max-age=60"})
 
     @app.route("/profile/verification/recheck", methods=["POST"])
@@ -207,3 +204,23 @@ def init_user_profile_routes(app):
                 cur.execute("UPDATE mmc_user_verification SET auto_check_status=%s,auto_check_note=%s,updated_at=NOW() WHERE user_id=%s", (status, note, uid))
             conn.commit()
         return redirect(url_for("user_profile"))
+
+    @app.after_request
+    def inject_user_profile_navigation(response):
+        """Make the existing User App identity area and Settings entry open My Profile.
+
+        This is deliberately client-side navigation only: it does not touch the
+        signal-generation routes or their state, and it keeps profile navigation
+        in the same browser window.
+        """
+        if not (response.content_type or "").startswith("text/html"):
+            return response
+        html = response.get_data(as_text=True)
+        if "USER_PROFILE_NAV" in html or "/profile" in request.path:
+            return response
+        if 'data-action="settings"' not in html and 'class="avatar"' not in html:
+            return response
+        script = """<script id=\"USER_PROFILE_NAV\">(()=>{\nconst go=()=>{window.location.assign('/profile')};\nconst settings=document.querySelector('[data-action=\"settings\"]');\nif(settings){settings.addEventListener('click',e=>{e.preventDefault();e.stopImmediatePropagation();go()},true);settings.setAttribute('aria-label','My Profile');}\nconst avatar=document.querySelector('.avatar');\nif(avatar){avatar.style.cursor='pointer';avatar.setAttribute('role','link');avatar.setAttribute('tabindex','0');avatar.setAttribute('title','Open My Profile');avatar.addEventListener('click',e=>{e.preventDefault();go()},true);avatar.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}},true);}\n})();</script>"""
+        if "</body>" in html:
+            response.set_data(html.replace("</body>", script + "</body>", 1))
+        return response
