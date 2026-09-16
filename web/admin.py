@@ -98,17 +98,13 @@ def _dashboard_data():
             audit_rows = cur.fetchall()
     users = []
     for row in rows:
-        users.append({
-            "id": int(row[0]), "username": row[1], "email": row[2] or "", "role": row[3],
-            "active": bool(row[4]), "created_at": row[5], "last_login_at": row[6],
-            "full_name": row[7] or "", "phone": row[8] or "", "date_of_birth": row[9].isoformat() if row[9] else "",
-            "telegram": row[10] or "", "nid_verified": bool(row[11]), "profile_pic_url": row[12] or "",
-            "market_mode": row[13] or "", "pair": row[14] or "", "auto_signal": bool(row[15]),
-            "min_confidence": float(row[16] or 0), "timezone": row[17] or "Asia/Dhaka",
-            "signal_access": bool(row[18]), "auto_signal_access": bool(row[19]),
-            "real_market_access": bool(row[20]), "demo_market_access": bool(row[21]),
-            "advanced_settings_access": bool(row[22]),
-        })
+        users.append({"id": int(row[0]), "username": row[1], "email": row[2] or "", "role": row[3], "active": bool(row[4]),
+            "created_at": row[5], "last_login_at": row[6], "full_name": row[7] or "", "phone": row[8] or "",
+            "date_of_birth": row[9].isoformat() if row[9] else "", "telegram": row[10] or "", "nid_verified": bool(row[11]),
+            "profile_pic_url": row[12] or "", "market_mode": row[13] or "", "pair": row[14] or "", "auto_signal": bool(row[15]),
+            "min_confidence": float(row[16] or 0), "timezone": row[17] or "Asia/Dhaka", "signal_access": bool(row[18]),
+            "auto_signal_access": bool(row[19]), "real_market_access": bool(row[20]), "demo_market_access": bool(row[21]),
+            "advanced_settings_access": bool(row[22])})
     audits = [{"id": r[0], "action": r[1], "actor": r[2], "target": r[3], "details": r[4] or "", "created_at": r[5]} for r in audit_rows]
     return users, total_users, active_users, inactive_users, admin_count, auto_signal_users, maintenance_mode, maintenance_message, registration_enabled, audits
 
@@ -119,23 +115,20 @@ def init_admin_routes(app):
     @app.route("/admin", methods=["GET"])
     @_admin_required
     def admin_panel():
-        (users, total_users, active_users, inactive_users, admin_count, auto_signal_users,
-         maintenance_mode, maintenance_message, registration_enabled, audits) = _dashboard_data()
+        (users, total_users, active_users, inactive_users, admin_count, auto_signal_users, maintenance_mode,
+         maintenance_message, registration_enabled, audits) = _dashboard_data()
         try:
             with _connect():
                 db_status = "CONNECTED"
         except Exception:
             db_status = "ERROR"
-        collector_hint = os.getenv("COLLECTOR_STATUS", "NOT REPORTED").upper()
-        return render_template(
-            "admin.html", users=users, total_users=total_users, active_users=active_users,
+        return render_template("admin.html", users=users, total_users=total_users, active_users=active_users,
             inactive_users=inactive_users, admin_count=admin_count, auto_signal_users=auto_signal_users,
             current_user=get_user(session["user_id"]), csrf=session["admin_csrf"], db_status=db_status,
-            app_env="configured" if os.getenv("DATABASE_URL") else "missing", memory=_memory_status(),
-            load_avg=_load_status(), collector_status=collector_hint, signal_status="ROUTE AVAILABLE",
-            maintenance_mode=maintenance_mode, maintenance_message=maintenance_message,
-            registration_enabled=registration_enabled, audits=audits, server_time=int(time.time()),
-        )
+            app_env="configured" if os.getenv("DATABASE_URL") else "missing", memory=_memory_status(), load_avg=_load_status(),
+            collector_status=os.getenv("COLLECTOR_STATUS", "NOT REPORTED").upper(), signal_status="ROUTE AVAILABLE",
+            maintenance_mode=maintenance_mode, maintenance_message=maintenance_message, registration_enabled=registration_enabled,
+            audits=audits, server_time=int(time.time()))
 
     @app.route("/admin/user/create", methods=["POST"])
     @_admin_required
@@ -169,27 +162,23 @@ def init_admin_routes(app):
                 if action == "save_profile_settings":
                     email = request.form.get("email", "").strip().lower() or None
                     dob = request.form.get("date_of_birth", "").strip() or None
-                    cur.execute("""UPDATE mmc_users SET email=%s,full_name=%s,phone=%s,date_of_birth=%s,
-                        telegram=%s,nid_verified=%s,profile_pic_url=%s WHERE id=%s""",
-                        (email, request.form.get("full_name", "").strip()[:160] or None,
-                         request.form.get("phone", "").strip()[:32] or None, dob,
-                         request.form.get("telegram", "").strip()[:128] or None,
-                         request.form.get("nid_verified") == "on",
+                    cur.execute("""UPDATE mmc_users SET email=%s,full_name=%s,phone=%s,date_of_birth=%s,telegram=%s,nid_verified=%s,profile_pic_url=%s WHERE id=%s""",
+                        (email, request.form.get("full_name", "").strip()[:160] or None, request.form.get("phone", "").strip()[:32] or None,
+                         dob, request.form.get("telegram", "").strip()[:128] or None, request.form.get("nid_verified") == "on",
                          request.form.get("profile_pic_url", "").strip()[:2000] or None, user_id))
+                elif action == "save_settings":
                     cur.execute("""INSERT INTO mmc_user_settings(user_id,market_mode,pair,auto_signal,min_confidence,timezone)
                         VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT(user_id) DO UPDATE SET market_mode=EXCLUDED.market_mode,
-                        pair=EXCLUDED.pair,auto_signal=EXCLUDED.auto_signal,min_confidence=EXCLUDED.min_confidence,
-                        timezone=EXCLUDED.timezone,updated_at=NOW()""", (user_id, request.form.get("market_mode", "real"),
-                        request.form.get("pair", "").strip() or None, request.form.get("auto_signal") == "on",
-                        float(request.form.get("min_confidence", "0") or 0), request.form.get("timezone", "Asia/Dhaka").strip() or "Asia/Dhaka"))
+                        pair=EXCLUDED.pair,auto_signal=EXCLUDED.auto_signal,min_confidence=EXCLUDED.min_confidence,timezone=EXCLUDED.timezone,updated_at=NOW()""",
+                        (user_id, request.form.get("market_mode", "real"), request.form.get("pair", "").strip() or None,
+                         request.form.get("auto_signal") == "on", float(request.form.get("min_confidence", "0") or 0),
+                         request.form.get("timezone", "Asia/Dhaka").strip() or "Asia/Dhaka"))
                     cur.execute("""INSERT INTO mmc_user_permissions(user_id,signal_access,auto_signal_access,real_market_access,demo_market_access,advanced_settings_access)
                         VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT(user_id) DO UPDATE SET signal_access=EXCLUDED.signal_access,
                         auto_signal_access=EXCLUDED.auto_signal_access,real_market_access=EXCLUDED.real_market_access,
                         demo_market_access=EXCLUDED.demo_market_access,advanced_settings_access=EXCLUDED.advanced_settings_access,updated_at=NOW()""",
                         (user_id, request.form.get("signal_access") == "on", request.form.get("auto_signal_access") == "on",
-                         request.form.get("real_market_access") == "on", request.form.get("demo_market_access") == "on",
-                         request.form.get("advanced_settings_access") == "on"))
-                    action = "save_profile_settings"
+                         request.form.get("real_market_access") == "on", request.form.get("demo_market_access") == "on", request.form.get("advanced_settings_access") == "on"))
                 elif action == "activate":
                     cur.execute("UPDATE mmc_users SET active=TRUE WHERE id=%s", (user_id,))
                 elif action == "deactivate":
