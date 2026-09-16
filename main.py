@@ -4,16 +4,12 @@ from flask import request, session
 from market_status import init_market_status
 from quotex_browser_ingest import init_quotex_browser_ingest
 from remember_me import init_remember_me
-from master_access import init_master_access
-from master_selection_sync import init_master_selection_sync
-from master_session_restore import init_master_session_restore
-from master_recovery_ui import init_master_recovery_ui
-from master_trusted_devices import init_master_trusted_devices
 
 # web.app registers its login middleware before this module is imported.
 # Patch the middleware's global helper rather than registering a later hook,
 # so both private Quotex ingest routes are authenticated before redirects.
 import web.app as web_app
+
 
 def _collector_request_authenticated_for_embedded() -> bool:
     if request.path not in {"/quotex/ingest", "/quotex/real-ingest"}:
@@ -22,18 +18,15 @@ def _collector_request_authenticated_for_embedded() -> bool:
     supplied = (request.headers.get("X-MMC-Quotex-Key") or request.args.get("key") or "").strip()
     return bool(expected and supplied and hmac.compare_digest(supplied, expected))
 
+
 import hmac
 import os
 web_app._collector_request_authenticated = _collector_request_authenticated_for_embedded
 
 init_market_status(app)
 init_remember_me(app)
-init_master_access(app)
-init_master_selection_sync(app)
-init_master_session_restore(app)
-init_master_recovery_ui(app)
-init_master_trusted_devices(app)
 init_quotex_browser_ingest(app)
+
 
 @app.before_request
 def allow_quotex_ingest_route():
@@ -62,7 +55,6 @@ def _start_embedded_quotex_collector() -> None:
 
 
 if __name__ == "__main__":
-    import os
     port = int(os.getenv("PORT", "5000"))
     if os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"):
         os.execvp("gunicorn", ["gunicorn", "--bind", f"0.0.0.0:{port}", "--workers", "1", "--threads", "4", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "main:app"])
