@@ -13,7 +13,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Python syntax
-        run: python -m compileall -q web main.py master_access.py master_trusted_devices.py market_status.py
+        run: python -m compileall -q web main.py market_status.py quotex_browser_ingest.py remember_me.py signals strategy data
       - name: JavaScript syntax
         run: |
           node --check web/static/signal_alert.js
@@ -22,7 +22,6 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
           p=Path('web/templates/index.html').read_text(encoding='utf-8')
           for ident in ['pair','get-signal','auto-signal','performance','market-status','latest-signal','news','chart','chart-interval','chart-zoom-out','chart-zoom-in','chart-full-view']:
               assert p.count(f'id="{ident}"') == 1, f'duplicate/missing id: {ident}'
