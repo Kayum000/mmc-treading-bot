@@ -54,6 +54,28 @@ def init_user_db() -> None:
                 auto_signal BOOLEAN NOT NULL DEFAULT FALSE, min_confidence DOUBLE PRECISION DEFAULT 0.0,
                 timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Dhaka', updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS mmc_user_permissions (
+                user_id BIGINT PRIMARY KEY REFERENCES mmc_users(id) ON DELETE CASCADE,
+                signal_access BOOLEAN NOT NULL DEFAULT TRUE,
+                auto_signal_access BOOLEAN NOT NULL DEFAULT TRUE,
+                real_market_access BOOLEAN NOT NULL DEFAULT TRUE,
+                demo_market_access BOOLEAN NOT NULL DEFAULT TRUE,
+                advanced_settings_access BOOLEAN NOT NULL DEFAULT FALSE,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS mmc_admin_audit (
+                id BIGSERIAL PRIMARY KEY,
+                actor_user_id BIGINT REFERENCES mmc_users(id) ON DELETE SET NULL,
+                action VARCHAR(64) NOT NULL,
+                target_user_id BIGINT REFERENCES mmc_users(id) ON DELETE SET NULL,
+                details TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS mmc_system_settings (
+                key VARCHAR(64) PRIMARY KEY,
+                value TEXT NOT NULL DEFAULT '',
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )""")
         conn.commit()
 
 
@@ -70,6 +92,7 @@ def create_user(username: str, password: str, email: str = "") -> int:
             cur.execute("INSERT INTO mmc_users (username,email,password_hash) VALUES (%s,%s,%s) RETURNING id", (username, email, _hash_password(password)))
             user_id = int(cur.fetchone()[0])
             cur.execute("INSERT INTO mmc_user_settings (user_id) VALUES (%s)", (user_id,))
+            cur.execute("INSERT INTO mmc_user_permissions (user_id) VALUES (%s)", (user_id,))
         conn.commit()
     return user_id
 
@@ -99,11 +122,13 @@ def ensure_env_admin() -> None:
             cur.execute("SELECT id FROM mmc_users WHERE username=%s", (username,))
             row = cur.fetchone()
             if row is None:
-                cur.execute("INSERT INTO mmc_users (username,password_hash,role) VALUES (%s,%s,'owner')", (username, _hash_password(password)))
-                cur.execute("INSERT INTO mmc_user_settings (user_id) SELECT id FROM mmc_users WHERE username=%s", (username,))
+                cur.execute("INSERT INTO mmc_users (username,password_hash,role) VALUES (%s,%s,'owner') RETURNING id", (username, _hash_password(password)))
+                owner_id = int(cur.fetchone()[0])
+                cur.execute("INSERT INTO mmc_user_settings (user_id) VALUES (%s) ON CONFLICT DO NOTHING", (owner_id,))
+                cur.execute("INSERT INTO mmc_user_permissions (user_id,advanced_settings_access) VALUES (%s,TRUE) ON CONFLICT DO NOTHING", (owner_id,))
             else:
-                # The configured application account is the protected owner account.
                 cur.execute("UPDATE mmc_users SET role='owner',active=TRUE WHERE id=%s", (row[0],))
+                cur.execute("INSERT INTO mmc_user_permissions (user_id,advanced_settings_access) VALUES (%s,TRUE) ON CONFLICT DO NOTHING", (row[0],))
         conn.commit()
 
 
