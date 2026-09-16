@@ -17,6 +17,7 @@
     <nav class="actions" aria-label="Admin App navigation">
       <button id="signalTab" class="active" type="button" onclick="showPanel('signal',this)">Signal System</button>
       <button id="adminTab" type="button" onclick="showPanel('admin',this)">Admin Panel</button>
+      <button type="button" onclick="goBack()">Back</button>
       <a class="logout" href="{{ url_for('logout') }}">Logout</a>
     </nav>
   </header>
@@ -30,8 +31,55 @@ function showPanel(name, button){
   document.querySelectorAll('.panel').forEach(function(p){p.classList.remove('active');});
   document.getElementById(name).classList.add('active');
   document.querySelectorAll('.actions button').forEach(function(b){b.classList.remove('active');});
-  button.classList.add('active');
+  var activeButton=button || document.getElementById(name+'Tab');
+  if(activeButton) activeButton.classList.add('active');
 }
+
+function goBack(){
+  var admin=document.getElementById('admin');
+  var signal=document.getElementById('signal');
+  if(admin.classList.contains('active') && admin.contentWindow && admin.contentWindow.history.length>1){
+    admin.contentWindow.history.back();
+    return;
+  }
+  if(signal.classList.contains('active') && signal.contentWindow && signal.contentWindow.history.length>1){
+    signal.contentWindow.history.back();
+    return;
+  }
+  showPanel('signal',document.getElementById('signalTab'));
+}
+
+function wireFrame(frame, name){
+  try{
+    var doc=frame.contentDocument;
+    if(!doc) return;
+    doc.addEventListener('click',function(event){
+      var link=event.target.closest && event.target.closest('a');
+      if(!link) return;
+      var href=link.getAttribute('href') || '';
+      if(href === '/' || href === '{{ url_for("index") }}' || href.indexOf('/')===0 && href.indexOf('/admin')===-1 && href.indexOf('/logout')===-1 && href.indexOf('/profile')===-1){
+        if(href === '/' || href.indexOf('/admin')===-1){
+          event.preventDefault();
+          showPanel('signal',document.getElementById('signalTab'));
+        }
+      }
+      if(href.indexOf('/logout')===0){
+        link.target='_top';
+      }
+    },true);
+  }catch(e){}
+}
+
+document.getElementById('signal').addEventListener('load',function(){wireFrame(this,'signal');});
+document.getElementById('admin').addEventListener('load',function(){wireFrame(this,'admin');});
+window.addEventListener('message',function(event){
+  if(!event.data || event.data.type!=='mmc-admin-nav') return;
+  if(event.data.target==='signal') showPanel('signal',document.getElementById('signalTab'));
+  if(event.data.target==='admin') showPanel('admin',document.getElementById('adminTab'));
+});
+window.addEventListener('keydown',function(event){
+  if(event.key==='Escape') goBack();
+});
 </script>
 </body>
 </html>
