@@ -46,10 +46,20 @@ def get_performance(user_id=None):
     if not user_id:
         return _global_performance()
     try:
+        # The owner dashboard is the system-wide monitoring view, so it must
+        # report every stored signal rather than only signals linked to the
+        # owner's own account. Regular users keep the existing per-user scope.
+        _init_links()
+        with _connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT role FROM mmc_users WHERE id=%s LIMIT 1", (int(user_id),))
+                role_row = cur.fetchone()
+        if role_row and str(role_row[0]).lower() == "owner":
+            return _global_performance()
+
         # Settle eligible PENDING entries before filtering the per-user view.
         # Outcomes are calculated only from the real stored entry candle.
         settle_pending()
-        _init_links()
         with _connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("""SELECT COUNT(*) FILTER (WHERE p.result IN ('WIN','LOSS')),
