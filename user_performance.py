@@ -1,10 +1,16 @@
 """Per-user view of the existing persistent signal performance table."""
 from __future__ import annotations
 
+from datetime import timezone, timedelta
 from performance import record_signal as _record_signal
 from performance import get_performance as _global_performance
 from performance import clear_performance_history as _global_clear
 from performance import _connect, init_db
+
+BD_TZ=timezone(timedelta(hours=6))
+
+def _market_time(value):
+    return value.astimezone(BD_TZ).strftime('%d %b %Y, %I:%M:%S %p')
 
 
 def _init_links():
@@ -45,9 +51,6 @@ def get_performance(user_id=None):
     if not user_id:
         return _global_performance()
     try:
-        # The owner dashboard is the system-wide monitoring view, so it must
-        # report every stored signal rather than only signals linked to the
-        # owner's own account. Regular users keep the existing per-user scope.
         _init_links()
         with _connect() as conn:
             with conn.cursor() as cur:
@@ -56,8 +59,6 @@ def get_performance(user_id=None):
         if role_row and str(role_row[0]).lower() == "owner":
             return _global_performance()
 
-        # Settlement runs in the background from the /performance route so
-        # this user-specific read never waits for external candle fetching.
         with _connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("""SELECT COUNT(*) FILTER (WHERE p.result IN ('WIN','LOSS')),
@@ -71,7 +72,7 @@ def get_performance(user_id=None):
                     JOIN mmc_user_signal_links l ON l.performance_id=p.id
                     WHERE l.user_id=%s AND p.signal_time_utc >= NOW()-INTERVAL '24 hours'
                     AND p.result IN ('WIN','LOSS') ORDER BY p.signal_time_utc DESC LIMIT 50""", (int(user_id),))
-                history=[{'id':int(r[0]),'market_mode':r[1],'pair':r[2],'signal':r[3],'signal_time_utc':r[4].isoformat(),'entry_time_utc':r[5].isoformat(),'entry_price':float(r[6]) if r[6] is not None else None,'result_price':float(r[7]) if r[7] is not None else None,'result':r[8]} for r in cur.fetchall()]
+                history=[{'id':int(r[0]),'market_mode':r[1],'pair':r[2],'signal':r[3],'signal_time_utc':_market_time(r[4]),'entry_time_utc':_market_time(r[5]),'entry_price':float(r[6]) if r[6] is not None else None,'result_price':float(r[7]) if r[7] is not None else None,'result':r[8]} for r in cur.fetchall()]
         return {'ok':True,'total':total,'wins':wins,'losses':losses,'accuracy':round(accuracy,2),'win_rate':round(accuracy,2),'history':history,'timeframe':'1m','evaluation':'signal entry candle','scope':'user'}
     except Exception as exc:
         return {'ok':False,'error':str(exc)}
