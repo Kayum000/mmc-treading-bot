@@ -34,11 +34,7 @@ _SETTLE_RUNNING = False
 
 
 def _usage_view():
-    """Return the API/credit usage data used by the dashboard.
-
-    Keep this lightweight and cached because it is called while rendering the
-    main page. A usage-provider failure must not make the whole dashboard 500.
-    """
+    """Return cached API/credit usage without blocking the dashboard unnecessarily."""
     now = time.time()
     if _USAGE_CACHE["data"] is not None and now - _USAGE_CACHE["at"] < 30:
         return _USAGE_CACHE["data"]
@@ -71,6 +67,17 @@ def _settle_in_background():
             _SETTLE_RUNNING = False
             _SETTLE_LOCK.release()
     threading.Thread(target=worker, name="mmc-performance-settler", daemon=True).start()
+
+
+def _record_signal_in_background(result, uid):
+    if not uid:
+        return
+    def worker():
+        try:
+            record_signal(result, uid)
+        except Exception:
+            pass
+    threading.Thread(target=worker, name="mmc-signal-recorder", daemon=True).start()
 
 
 def _valid_pairs(mode: str):
@@ -169,14 +176,16 @@ def select_market():
     mode = request.form.get("mode", "").strip().lower(); pair = request.form.get("pair", "").strip().upper()
     if pair not in _valid_pairs(mode): return jsonify({"ok": False, "error": "অবৈধ মার্কেট।"}), 400
     session["selected_mode"] = mode; session["selected_pair"] = pair
-    settings = get_settings(_user_id())
-    save_settings(_user_id(), mode, pair, settings.get("auto_signal", False), settings.get("min_confidence", 0), settings.get("timezone", "Asia/Dhaka"))
+    uid = _user_id()
+    settings = get_settings(uid)
+    if settings.get("market_mode") != mode or (settings.get("pair") or "").upper() != pair:
+        save_settings(uid, mode, pair, settings.get("auto_signal", False), settings.get("min_confidence", 0), settings.get("timezone", "Asia/Dhaka"))
     return jsonify({"ok": True, "mode": mode, "pair": pair})
 
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-    result = None; error = None; uid = _user_id(); saved = get_settings(uid) if uid else {}
+    result = None; error = None; uid = _user_id(); saved = get_settings(uid) if uid else {}; current_user = _current_user()
     if request.method == "POST": mode = request.form.get("mode", "").strip().lower(); pair = request.form.get("pair", "").strip().upper()
     else: mode = session.get("selected_mode", saved.get("market_mode", "")); pair = session.get("selected_pair", saved.get("pair", ""))
     if mode not in {"real", "quotex_otc"}: mode, pair = "", ""
@@ -185,9 +194,11 @@ def index():
         if not pair: error = "Please select a market before GET SIGNAL."
         else:
             session["selected_mode"] = mode; session["selected_pair"] = pair
-            try: result = get_signal(pair, mode); record_signal(result, uid)
+            try:
+                result = get_signal(pair, mode)
+                _record_signal_in_background(result, uid)
             except Exception as exc: error = str(exc)
-    return render_template("index.html", real_pairs=REAL_PAIRS, otc_pairs=QUOTEX_OTC_PAIRS, mode=mode, pair=pair, error=error, result=result, usage=_usage_view(), user=_current_user(), user_settings=saved)
+    return render_template("index.html", real_pairs=REAL_PAIRS, otc_pairs=QUOTEX_OTC_PAIRS, mode=mode, pair=pair, error=error, result=result, usage=_usage_view(), user=current_user, user_settings=saved)
 
 
 @app.route("/auto-signal", methods=["GET"])
@@ -195,7 +206,9 @@ def auto_signal():
     uid = _user_id(); settings = get_settings(uid); mode = session.get("selected_mode", settings.get("market_mode", "")).strip().lower(); pair = session.get("selected_pair", settings.get("pair", "") or "").strip().upper()
     if pair not in _valid_pairs(mode): return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
     try:
-        result = get_signal(pair, mode, automatic=True); record_signal(result, uid); return jsonify({"ok": True, "result": result})
+        result = get_signal(pair, mode, automatic=True)
+        _record_signal_in_background(result, uid)
+        return jsonify({"ok": True, "result": result})
     except Exception as exc: return jsonify({"ok": False, "error": str(exc)}), 502
 
 
