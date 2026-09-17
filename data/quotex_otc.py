@@ -81,7 +81,9 @@ def ingest_local_candles(payload: Any) -> int:
             old = _LOCAL_CACHE.get(asset)
             if old and time.monotonic() - old[0] < 3600:
                 frame = pd.concat([old[1], frame], ignore_index=True).drop_duplicates("timestamp").sort_values("timestamp")
-            _LOCAL_CACHE[asset] = (time.monotonic(), frame.tail(500).reset_index(drop=True))
+            # Keep >24h of 1-minute candles so a delayed settlement can still
+            # resolve an otherwise valid pending signal after a short outage.
+            _LOCAL_CACHE[asset] = (time.monotonic(), frame.tail(2000).reset_index(drop=True))
         if active_asset in OTC_PAIRS:
             _LOCAL_ACTIVE_ASSET = (time.monotonic(), active_asset)
         else:
