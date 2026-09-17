@@ -4,10 +4,12 @@ from __future__ import annotations
 import hmac
 import os
 import time
+import threading
 from flask import Flask, jsonify, render_template, request, redirect, url_for, session
 
 from signals.get_signal import get_signal
 from user_performance import record_signal, get_performance, clear_performance_history
+from performance import settle_pending
 from data.biquote_forex import fetch_api_usage, get_credit_usage
 from data.news_direction import get_news_direction_for_pair
 from data.news_events import get_weekly_news_events_for_pair
@@ -29,6 +31,25 @@ REAL_PAIRS = [
 ]
 QUOTEX_OTC_PAIRS = list(OTC_DISPLAY_PAIRS)
 _USAGE_CACHE = {"data": None, "at": 0.0}
+_SETTLE_LOCK = threading.Lock()
+_SETTLE_RUNNING = False
+
+
+def _settle_in_background():
+    global _SETTLE_RUNNING
+    if _SETTLE_RUNNING or not _SETTLE_LOCK.acquire(blocking=False):
+        return
+    _SETTLE_RUNNING = True
+    def worker():
+        global _SETTLE_RUNNING
+        try:
+            settle_pending()
+        except Exception:
+            pass
+        finally:
+            _SETTLE_RUNNING = False
+            _SETTLE_LOCK.release()
+    threading.Thread(target=worker, name="mmc-performance-settler", daemon=True).start()
 
 
 def _valid_pairs(mode: str):
@@ -175,6 +196,9 @@ def auto_signal():
 def performance():
     uid = _user_id()
     if request.method == "POST": return jsonify(clear_performance_history(uid))
+    # Never block the dashboard on external candle fetching. Return the stored
+    # performance immediately and settle eligible pending entries in background.
+    _settle_in_background()
     return jsonify(get_performance(uid))
 
 
