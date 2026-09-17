@@ -125,8 +125,9 @@ def clear_performance_history():
     except Exception as exc:return {'ok':False,'error':str(exc)}
 
 def get_performance():
+    """Return stored completed performance immediately; settlement is separate."""
     try:
-        settle_pending()
+        init_db()
         with _connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("""SELECT COUNT(*) FILTER (WHERE result IN ('WIN','LOSS')),COUNT(*) FILTER (WHERE result='WIN'),COUNT(*) FILTER (WHERE result='LOSS') FROM mmc_signal_performance WHERE market_mode IN ('real','quotex_otc') AND signal_time_utc >= NOW()-INTERVAL '24 hours'""")
