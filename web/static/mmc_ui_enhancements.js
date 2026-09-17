@@ -22,10 +22,43 @@
     document.getElementById('mmc-signal-sound')?.addEventListener('change',e=>{localStorage.setItem(SOUND_KEY,e.target.checked?'on':'off');if(e.target.checked){unlockAudio();playSignalSound()}});
     document.getElementById('mmc-test-sound')?.addEventListener('click',()=>{unlockAudio();playSignalSound()});
   }
+  function formatSignalTimes(){
+    document.querySelectorAll('.signal-time,.perf-row span').forEach(el=>{
+      const text=(el.textContent||'').trim();
+      const m=text.match(/(?:T|\s)(\d{2}:\d{2}:\d{2})(?:\.\d+)?(?:Z|\s|$)/);
+      if(m) el.textContent=m[1];
+    });
+  }
+  function enhancePerformance(){
+    if(!document.getElementById('performance'))return;
+    let s=document.getElementById('mmc-performance-style');
+    if(!s){s=document.createElement('style');s.id='mmc-performance-style';document.head.appendChild(s)}
+    s.textContent='.performance-panel{padding:16px!important}.performance-panel .section-head h2{font-size:20px!important}.performance-panel .section-head p{font-size:13px!important}.performance-panel .period{font-size:12px!important;padding:9px 12px!important}.performance-panel .mini-btn{font-size:12px!important;padding:8px 11px!important}.performance-panel .metric{padding:14px!important}.performance-panel .metric span{font-size:12px!important}.performance-panel .metric strong{font-size:24px!important}.performance-panel .metric .trend{font-size:12px!important}.performance-panel .perf-row{padding:10px!important;font-size:12px!important}.performance-panel .perf-row b{font-size:13px!important}.performance-panel .perf-history{max-height:260px!important}.performance-panel .perf-actions{gap:8px!important}@media(max-width:760px){.performance-panel .section-head h2{font-size:18px!important}.performance-panel .metric strong{font-size:22px!important}.performance-panel .perf-row{grid-template-columns:1fr .8fr 1.4fr .8fr .8fr!important;font-size:11px!important}}';
+  }
   applyTheme(localStorage.getItem(KEY)||'blue');
+  enhancePerformance();
+  formatSignalTimes();
   const result=document.getElementById('result-container');
-  if(result){let last='';new MutationObserver(()=>{const text=result.textContent.replace(/\s+/g,' ').trim();if(text&&text!==last&&/\b(BUY|SELL)\b/.test(text)){last=text;playSignalSound()}}).observe(result,{childList:true,subtree:true,characterData:true})}
+  if(result){let last='';new MutationObserver(()=>{formatSignalTimes();const text=result.textContent.replace(/\s+/g,' ').trim();if(text&&text!==last&&/\b(BUY|SELL)\b/.test(text)){last=text;playSignalSound()}}).observe(result,{childList:true,subtree:true,characterData:true})}
   const modal=document.getElementById('modal');if(modal){new MutationObserver(attachSettings).observe(modal,{attributes:true,childList:true,subtree:true});attachSettings()}
   const nativeFetch=window.fetch.bind(window);
-  window.fetch=function(input,init){const url=typeof input==='string'?input:(input?.url||'');if(!url.includes('/news-alert'))return nativeFetch(input,init);const opts=Object.assign({credentials:'same-origin',cache:'no-store',headers:{'Accept':'application/json'}},init||{});return nativeFetch(input,opts).then(async r=>{const ct=(r.headers.get('content-type')||'').toLowerCase();if(ct.includes('application/json'))return r;const text=await r.clone().text();if(/^\s*</.test(text)||/DOCTYPE/i.test(text))return new Response(JSON.stringify({ok:false,auth_redirect:true,error:'News service session expired. Please refresh the dashboard.'}),{status:r.status||401,headers:{'Content-Type':'application/json'}});return r})};
+  let performanceInFlight=null;
+  window.fetch=function(input,init){
+    const url=typeof input==='string'?input:(input?.url||'');
+    const method=String(init?.method||((typeof input!=='string'&&input?.method)||'GET')).toUpperCase();
+    if(url.includes('/performance')&&method==='GET'){
+      if(performanceInFlight)return performanceInFlight;
+      performanceInFlight=nativeFetch(input,Object.assign({credentials:'same-origin',cache:'no-store',headers:{'Accept':'application/json'}},init||{})).finally(()=>{performanceInFlight=null});
+      return performanceInFlight;
+    }
+    if(!url.includes('/news-alert'))return nativeFetch(input,init);
+    const opts=Object.assign({credentials:'same-origin',cache:'no-store',headers:{'Accept':'application/json'}},init||{});
+    return nativeFetch(input,opts).then(async r=>{const ct=(r.headers.get('content-type')||'').toLowerCase();if(ct.includes('application/json'))return r;const text=await r.clone().text();if(/^\s*</.test(text)||/DOCTYPE/i.test(text))return new Response(JSON.stringify({ok:false,auth_redirect:true,error:'News service session expired. Please refresh the dashboard.'}),{status:r.status||401,headers:{'Content-Type':'application/json'}});return r});
+  };
+  function livePerformance(){
+    const btn=document.getElementById('perf-refresh');
+    if(!btn)return;
+    setInterval(()=>{if(!document.hidden&&!btn.disabled)btn.click()},1500);
+  }
+  livePerformance();
 })();
