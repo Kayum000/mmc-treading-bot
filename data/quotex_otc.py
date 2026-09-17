@@ -15,12 +15,13 @@ import pandas as pd
 from data.otc_markets import OTC_PAIRS
 
 PERIOD = 60
-# Market identity is allowed to remain known slightly longer than the
-# candle-data freshness window. The collector can legitimately suppress
-# duplicate candle payloads, so a 15s identity TTL caused spurious 409s
-# even while the same market was still active.
+# The collector publishes the closed-candle batch roughly once per minute.
+# Keep market identity and candle-cache freshness long enough to cover that
+# cadence plus normal network/deploy jitter. Candle selection below still
+# excludes the currently forming candle, so this does not change the signal
+# strategy or allow an incomplete candle into analysis.
 _LOCAL_TTL = 50
-_LOCAL_DATA_TTL = 15
+_LOCAL_DATA_TTL = 75
 _LOCAL_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}
 _LOCAL_ACTIVE_ASSET: tuple[float, str] | None = None
 _LOCAL_LOCK = threading.Lock()
@@ -86,8 +87,6 @@ def ingest_local_candles(payload: Any) -> int:
             old = _LOCAL_CACHE.get(asset)
             if old and time.monotonic() - old[0] < 3600:
                 frame = pd.concat([old[1], frame], ignore_index=True).drop_duplicates("timestamp").sort_values("timestamp")
-            # Keep >24h of 1-minute candles so a delayed settlement can still
-            # resolve an otherwise valid pending signal after a short outage.
             _LOCAL_CACHE[asset] = (time.monotonic(), frame.tail(2000).reset_index(drop=True))
         if active_asset in OTC_PAIRS:
             _LOCAL_ACTIVE_ASSET = (time.monotonic(), active_asset)
