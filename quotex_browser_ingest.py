@@ -1,5 +1,5 @@
 """Authenticated Quotex Real Market + OTC ingest and dynamic signal integration."""
-from __future__ import annotations__
+from __future__ import annotations
 
 import hmac
 import os
@@ -91,7 +91,7 @@ def real_market_ticks(asset: str, count: int = 1000):
     clean = _real_asset(asset)
     limit = max(1, min(int(count), 1000))
     with _REAL_MARKET_LOCK:
-        rows = list((_REAL_MARKET.get(clean) or {}).get("quote_history") or [])[-limit:]
+        rows = list((_REAL_MARKET.get(clean) or {}).get("quote_history", []))[-limit:]
     if not rows:
         return pd.DataFrame(columns=["timestamp", "askPrice", "bidPrice"])
 
@@ -233,7 +233,7 @@ def init_quotex_browser_ingest(app):
         html = response.get_data(as_text=True)
         if "QUOTEX_AUTO_MARKET_SYNC" in html:
             return response
-        script = """<script id=\"QUOTEX_AUTO_MARKET_SYNC\">(()=>{const mode=document.getElementById('mode'),pair=document.getElementById('pair');let lastSyncedPair='';async function sync(){if(!mode||!pair||mode.value!=='quotex_otc')return;try{const r=await fetch('/quotex/current-market',{cache:'no-store',credentials:'same-origin'}),d=await r.json();if(!d.ok||!d.pair)return;const changed=d.pair!==lastSyncedPair;if(changed){let o=Array.from(pair.options).find(x=>x.value===d.pair);if(!o){o=document.createElement('option');o.value=d.pair;o.textContent=d.pair;o.dataset.market='quotex_otc';pair.appendChild(o)}pair.value=d.pair;lastSyncedPair=d.pair;await fetch('/select-market',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},credentials:'same-origin',body:new URLSearchParams({mode:'quotex_otc',pair:d.pair})})}}catch(_){}}sync();setInterval(sync,3000);const s=document.createElement('script');s.src='/static/quotex_real_chart.js';s.defer=true;document.body.appendChild(s)})();</script>"""
+        script = """<script id=\"QUOTEX_AUTO_MARKET_SYNC\">(()=>{const mode=document.getElementById('mode'),pair=document.getElementById('pair');let lastSyncedPair='';async function sync(){if(!mode||!pair||mode.value!=='quotex_otc')return;try{const r=await fetch('/quotex/current-market',{cache:'no-store',credentials:'same-origin'}),d=await r.json();if(!d.ok||!d.pair)return;const changed=d.pair!==lastSyncedPair;if(changed){let o=Array.from(pair.options).find(x=>x.value===d.pair);if(!o){o=document.createElement('option');o.value=d.pair;o.textContent=d.pair;o.dataset.market='quotex_otc';pair.appendChild(o)}pair.value=d.pair;lastSyncedPair=d.pair;await fetch('/select-market',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},credentials:'same-origin',body:new URLSearchParams({mode:'quotex_otc',pair:d.pair})})}}catch(_){}}sync();setInterval(sync,3000);const s=document.createElement('script');s.src='/static/quotex_real_chart.js';s.defer=true;document.body.appendChild(s);const auto=document.getElementById('auto-toggle');if(auto&&typeof runAuto==='function'&&typeof state!=='undefined'){const schedule=()=>{clearTimeout(state.autoTimer);if(!state.auto)return;const now=Date.now(),next=Math.floor(now/60000+1)*60000;state.autoTimer=setTimeout(()=>{if(!state.auto)return;runAuto();schedule()},Math.max(50,next-now+50))};auto.onchange=()=>{state.auto=auto.checked;clearTimeout(state.autoTimer);if(state.auto){const st=document.getElementById('auto-status');if(st)st.textContent='AUTO SIGNAL চালু';schedule()}else{const st=document.getElementById('auto-status');if(st)st.textContent='AUTO SIGNAL বন্ধ'}};if(auto.checked)schedule()}})();</script>"""
         if "</body>" in html:
             response.set_data(html.replace("</body>", script + "</body>", 1))
         return response
