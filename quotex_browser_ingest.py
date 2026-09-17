@@ -1,5 +1,5 @@
 """Authenticated Quotex Real Market + OTC ingest and dynamic signal integration."""
-from __future__ import annotations
+from __future__ import annotations__
 
 import hmac
 import os
@@ -15,6 +15,16 @@ from performance import record_signal
 
 _REAL_MARKET_LOCK = threading.Lock()
 _REAL_MARKET: dict[str, dict] = {}
+
+
+def _record_signal_in_background(result):
+    """Keep auto-signal response fast; performance history is best-effort."""
+    def worker():
+        try:
+            record_signal(result)
+        except Exception:
+            pass
+    threading.Thread(target=worker, daemon=True, name="otc-signal-performance").start()
 
 
 def _collector_secret_valid() -> bool:
@@ -203,7 +213,7 @@ def init_quotex_browser_ingest(app):
             session["selected_pair"] = pair
             try:
                 result = get_signal(pair, "quotex_otc", automatic=True)
-                record_signal(result)
+                _record_signal_in_background(result)
                 return jsonify({"ok": True, "result": result})
             except Exception as exc:
                 return jsonify({"ok": False, "error": str(exc)}), 502
