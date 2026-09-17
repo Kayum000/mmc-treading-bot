@@ -33,6 +33,29 @@ _SETTLE_LOCK = threading.Lock()
 _SETTLE_RUNNING = False
 
 
+def _usage_view():
+    """Return the API/credit usage data used by the dashboard.
+
+    Keep this lightweight and cached because it is called while rendering the
+    main page. A usage-provider failure must not make the whole dashboard 500.
+    """
+    now = time.time()
+    if _USAGE_CACHE["data"] is not None and now - _USAGE_CACHE["at"] < 30:
+        return _USAGE_CACHE["data"]
+    try:
+        api_usage = fetch_api_usage() or {}
+    except Exception:
+        api_usage = {}
+    try:
+        credit_usage = get_credit_usage() or {}
+    except Exception:
+        credit_usage = {}
+    data = {"api": api_usage, "credits": credit_usage}
+    _USAGE_CACHE["data"] = data
+    _USAGE_CACHE["at"] = now
+    return data
+
+
 def _settle_in_background():
     global _SETTLE_RUNNING
     if _SETTLE_RUNNING or not _SETTLE_LOCK.acquire(blocking=False):
