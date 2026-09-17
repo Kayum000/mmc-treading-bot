@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const S = { canvas:null, poll:null, bars:[], quote:null, asset:'', lastW:0, lastH:0 };
+  const S = { canvas:null, poll:null, bars:[], quote:null, asset:'', lastW:0, lastH:0, loading:false };
   const modeEl = () => document.getElementById('mode');
   const pairEl = () => document.getElementById('pair');
   const chartEl = () => document.getElementById('live-market-chart');
@@ -58,33 +58,28 @@
     const title=chartEl()?.querySelector('.chart-title'); if(title) title.textContent=`QUOTEX LIVE — ${S.asset}`;
   }
 
-  function mergeCandle(row) {
-    const t=ts(row.timestamp||row.time||row.from); const o=num(row.open),h=num(row.high),l=num(row.low),c=num(row.close); if(!t||![o,h,l,c].every(Number.isFinite)) return;
-    const bucket=Math.floor(t/60000)*60000; const last=S.bars.at(-1);
-    if(!last||last.t!==bucket) S.bars.push({t:bucket,o,h,l,c}); else {last.h=Math.max(last.h,h);last.l=Math.min(last.l,l);last.c=c;}
-    if(S.bars.length>300) S.bars=S.bars.slice(-300);
-  }
-
-  function mergeQuote(q) {
-    const p=num(q.price), t=ts(q.timestamp||q.time); if(!Number.isFinite(p)||!t)return;
-    S.quote={price:p,timestamp:t}; const bucket=Math.floor(t/60000)*60000, last=S.bars.at(-1);
-    if(!last||last.t!==bucket) S.bars.push({t:bucket,o:p,h:p,l:p,c:p}); else {last.c=p;last.h=Math.max(last.h,p);last.l=Math.min(last.l,p);}
-    if(S.bars.length>300)S.bars=S.bars.slice(-300);
-  }
-
   async function load() {
-    if(!realMode()) return;
+    if(!realMode() || S.loading)return;
     const pair=pairEl()?.value||''; const asset=assetForPair(pair); if(!asset)return;
-    S.asset=asset;
+    S.asset=asset; S.loading=true;
     try{
       const r=await fetch(`/quotex/real-market?asset=${encodeURIComponent(asset)}`,{cache:'no-store',credentials:'same-origin'});
       if(!r.ok)return; const d=await r.json();
-      if(Array.isArray(d.bars)) S.bars=d.bars.map(b=>({t:ts(b.timestamp),o:num(b.open),h:num(b.high),l:num(b.low),c:num(b.close)})).filter(b=>b.t&&[b.o,b.h,b.l,b.c].every(Number.isFinite)).slice(-300);
-      if(d.quote) mergeQuote(d.quote); draw();
+      if(Array.isArray(d.bars)) S.bars=d.bars.map(b=>({t:ts(b.timestamp),o:num(b.open),h:num(b.high),l:num(b.low),c:num(b.close)})).filter(b=>b.t&&[b.o,b.h,b.l,b.c].every(Number.isFinite)).slice(-180);
+      if(d.quote) S.quote={price:num(d.quote.price),timestamp:ts(d.quote.timestamp||d.quote.time)};
+      draw();
     }catch(_){ draw(); }
+    finally{ S.loading=false; }
   }
 
-  function start() { clearInterval(S.poll); if(!realMode()){setLegacyVisible(false);return;} load(); S.poll=setInterval(load,1000); }
+  function start() {
+    clearInterval(S.poll);
+    if(!realMode()){setLegacyVisible(false);return;}
+    load();
+    // The collector already streams fresh market data; 2s polling keeps the UI responsive
+    // without creating a request every second or overlapping requests on slower networks.
+    S.poll=setInterval(load,2000);
+  }
   function watch(){
     const pair=pairEl(); if(!pair){setTimeout(watch,500);return;}
     const chart=chartEl(); if(!chart){setTimeout(watch,500);return;}
