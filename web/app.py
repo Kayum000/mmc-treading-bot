@@ -20,8 +20,6 @@ from auth import authenticate, create_user, ensure_env_admin, get_user, get_sett
 app = Flask(__name__)
 app.secret_key = os.getenv("APP_SECRET_KEY") or os.urandom(32)
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "1") == "1")
-AUTH_USERNAME = os.getenv("APP_USERNAME", "admin")
-AUTH_PASSWORD = os.getenv("APP_PASSWORD", "")
 
 REAL_PAIRS = [
     "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD",
@@ -67,26 +65,10 @@ def _current_user():
     return get_user(uid) if uid else None
 
 
-def _post_login_redirect(user):
-    # There is no separate admin application; every authenticated account
-    # enters the same Signal App. Keep the role field for DB compatibility.
-    return url_for("index")
-
-
-def _usage_view():
-    now = time.time()
-    if now - _USAGE_CACHE["at"] >= 60 or _USAGE_CACHE["data"] is None:
-        try:
-            _USAGE_CACHE["data"] = fetch_api_usage(); _USAGE_CACHE["at"] = now
-        except Exception: pass
-    minute = get_credit_usage()
-    return {"daily_left": None, "daily_limit": None, "minute_left": minute.get("left"), "minute_limit": minute.get("limit")}
-
-
 @app.route("/login", methods=["GET", "POST"])
 def login():
     current_user = _current_user()
-    if session.get("authenticated") and current_user: return redirect(_post_login_redirect(current_user))
+    if session.get("authenticated") and current_user: return redirect(url_for("index"))
     error = None
     if request.method == "POST":
         username = request.form.get("username", "")
@@ -99,19 +81,19 @@ def login():
                 user = None; error = f"Login service unavailable: {exc}"
             if user:
                 session.clear(); session["authenticated"] = True; session["user_id"] = user["id"]
-                session["username"] = user["username"]; session["role"] = user["role"]
-                return redirect(_post_login_redirect(user))
+                session["username"] = user["username"]
+                return redirect(url_for("index"))
             if error is None: error = "Invalid username/password, or your account is awaiting owner approval."
     return render_template("login.html", error=error)
 
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
-    if session.get("authenticated") and _current_user(): return redirect(_post_login_redirect(_current_user()))
+    if session.get("authenticated") and _current_user(): return redirect(url_for("index"))
     error = None
     if request.method == "POST":
         try:
-            user_id = create_user(request.form.get("username", ""), request.form.get("password", ""), request.form.get("email", ""), active=True)
+            create_user(request.form.get("username", ""), request.form.get("password", ""), request.form.get("email", ""), active=True)
             return render_template("register.html", success="Account created. You can now log in.")
         except Exception as exc: error = str(exc)
     return render_template("register.html", error=error)
