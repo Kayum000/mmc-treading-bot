@@ -144,6 +144,13 @@ def account():
     return jsonify({"ok": True, "user": _SINGLE_USER, "settings": _settings()})
 
 
+@app.route("/logout", methods=["GET", "POST"])
+def logout():
+    """Keep the legacy dashboard link safe after removing multi-user authentication."""
+    session.clear()
+    return redirect(url_for("index"))
+
+
 @app.route("/favicon.ico")
 def favicon():
     return redirect(url_for("static", filename="sk_bot_logo.svg"))
@@ -268,6 +275,10 @@ def news_direction():
     if mode == "quotex_otc":
         return jsonify({"ok": True, "needed": False, "pair": pair, "events": [], "source": "Quotex OTC"})
     try:
-        return jsonify(get_news_direction_for_pair(mode, REAL_PAIRS, pair))
+        return jsonify(get_news_direction_for_pair(mode, pair))
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "10000")), debug=False)
