@@ -4,6 +4,7 @@ from __future__ import annotations
 from performance import record_signal as _record_signal
 from performance import get_performance as _global_performance
 from performance import clear_performance_history as _global_clear
+from performance import settle_pending
 from performance import _connect, init_db
 
 
@@ -45,6 +46,9 @@ def get_performance(user_id=None):
     if not user_id:
         return _global_performance()
     try:
+        # Settle eligible PENDING entries before filtering the per-user view.
+        # Outcomes are calculated only from the real stored entry candle.
+        settle_pending()
         _init_links()
         with _connect() as conn:
             with conn.cursor() as cur:
