@@ -51,7 +51,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
     signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
     tick_time = last["timestamp"]
     if hasattr(tick_time, "to_pydatetime"):
-        tick_time = tick_time.to_pydatetime()
+        tick_time = tick_time.to_pydatetime(warn=False)
     tick_time = tick_time.astimezone(timezone.utc)
     is_entry = result.action in {"BUY", "SELL"}
     reason = f"[{regime} / {strategy_name}] {result.reason}"
@@ -115,7 +115,7 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
 
 
 def pd_timestamp_utc(value) -> str:
-    stamp = value.to_pydatetime() if hasattr(value, "to_pydatetime") else value
+    stamp = value.to_pydatetime(warn=False) if hasattr(value, "to_pydatetime") else value
     stamp = stamp.astimezone(timezone.utc)
     return stamp.isoformat(timespec="milliseconds")
 
