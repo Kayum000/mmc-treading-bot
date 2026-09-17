@@ -22,6 +22,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
     from strategy.adaptive_real import generate_adaptive_signal
 
     signal_at_utc = datetime.now(timezone.utc)
+    signal_candle = signal_at_utc.replace(second=0, microsecond=0)
     asset = "".join(ch for ch in pair.upper() if ch.isalnum() or ch in "._-")
     ticks = real_market_ticks(asset, count=1000)
     if ticks is None or ticks.empty:
@@ -47,27 +48,26 @@ def _real_signal(pair: str, automatic: bool) -> dict:
         strategy_name = result.strategy
 
     last = ticks.iloc[-1]
-    signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
+    signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
     tick_time = last["timestamp"]
     if hasattr(tick_time, "to_pydatetime"):
         tick_time = tick_time.to_pydatetime()
     tick_time = tick_time.astimezone(timezone.utc)
     is_entry = result.action in {"BUY", "SELL"}
-    candle = signal_at_utc.replace(second=0, microsecond=0)
     reason = f"[{regime} / {strategy_name}] {result.reason}"
     return {
         "pair": pair, "requested_pair": pair, "market_mode": "real", "source": "Quotex Real Market browser WebSocket",
         "signal": result.action, "market_bias": result.action, "entry_signal": result.action,
         "buy_score": 1 if result.action == "BUY" else 0, "sell_score": 1 if result.action == "SELL" else 0,
-        "reason": _bengali_reason(reason), "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"),
+        "reason": _bengali_reason(reason), "signal_time_utc": signal_candle.isoformat(timespec="seconds"),
         "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
-        "candle_time": candle.isoformat(timespec="seconds") if is_entry else None,
+        "candle_time": signal_candle.isoformat(timespec="seconds") if is_entry else None,
         "analysis_candle_time_utc": tick_time.isoformat(timespec="milliseconds"),
         "entry_price": float((last["askPrice"] + last["bidPrice"]) / 2), "entry_price_type": "latest_quotex_quote_reference",
-        "entry_time_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None,
+        "entry_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
         "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
-        "entry_candle_time_utc": candle.isoformat(timespec="seconds") if is_entry else None,
-        "entry_candle_time_bd": candle.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
+        "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
+        "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_delay_seconds": 0 if is_entry else None, "timeframe": timeframe,
         "entry_timeframe": "signal candle (current 1-minute candle)", "automatic": automatic,
         "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
@@ -89,25 +89,25 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
     # Keep the existing OTC candle-pressure strategy unchanged.
     # Only the data source/market selection is now dynamic.
     signal_at_utc = datetime.now(timezone.utc)
+    signal_candle = signal_at_utc.replace(second=0, microsecond=0)
     candles = fetch_quotex_candles(asset, count=240)
     result = generate_otc_signal(candles)
     last = candles.iloc[-1]
-    signal_bd = signal_at_utc.astimezone(timezone(timedelta(hours=6)))
+    signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
     is_entry = result.action in {"BUY", "SELL"}
-    signal_candle = signal_at_utc.replace(second=0, microsecond=0)
     return {
         "pair": pair, "requested_pair": requested_pair, "detected_asset": asset, "market_mode": "quotex_otc",
         "source": "Quotex OTC local Windows/Android screen collector", "signal": result.action, "market_bias": result.action,
         "entry_signal": result.action, "buy_score": 1 if result.action == "BUY" else 0,
         "sell_score": 1 if result.action == "SELL" else 0, "reason": _bengali_reason(result.reason),
-        "signal_time_utc": signal_at_utc.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
+        "signal_time_utc": signal_candle.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
         "candle_time": signal_candle.isoformat(timespec="seconds") if is_entry else None,
         "analysis_candle_time_utc": pd_timestamp_utc(last["timestamp"]),
         "entry_price": float(last["close"]), "entry_price_type": "latest_closed_otc_candle_reference",
-        "entry_time_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None,
+        "entry_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
         "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
-        "entry_candle_time_bd": signal_candle.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
+        "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_delay_seconds": 0 if is_entry else None,
         "timeframe": "1-minute OTC candle pressure", "entry_timeframe": "signal candle (current 1-minute candle)",
         "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
