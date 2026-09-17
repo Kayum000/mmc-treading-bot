@@ -17,9 +17,8 @@ from data.otc_markets import OTC_PAIRS
 PERIOD = 60
 # The collector publishes the closed-candle batch roughly once per minute.
 # Keep market identity and candle-cache freshness long enough to cover that
-# cadence plus normal network/deploy jitter. Candle selection below still
-# excludes the currently forming candle, so this does not change the signal
-# strategy or allow an incomplete candle into analysis.
+# cadence plus normal network/deploy jitter. The collector itself excludes
+# the currently forming candle before sending the batch.
 _LOCAL_TTL = 50
 _LOCAL_DATA_TTL = 75
 _LOCAL_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}
@@ -127,9 +126,11 @@ def _local_candles(asset: str, count: int) -> pd.DataFrame | None:
         df = cached[1].copy(deep=True)
     if df.empty:
         return None
-    boundary = pd.Timestamp((int(time.time()) // PERIOD) * PERIOD, unit="s", tz="UTC")
-    df = df.loc[df["timestamp"] < boundary].tail(count).reset_index(drop=True)
-    return df if len(df) >= 8 else None
+    # The local collector already sends only completed 1-minute candles.
+    # Do not apply another server-clock boundary here: a small clock skew
+    # between the user's machine and Render can otherwise hide valid candles
+    # and make Auto Signal fail exactly around the minute boundary.
+    return df.tail(count).reset_index(drop=True) if len(df) >= 8 else None
 
 
 def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> pd.DataFrame:
