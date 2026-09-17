@@ -68,7 +68,9 @@ def _current_user():
 
 
 def _post_login_redirect(user):
-    return url_for("admin_app") if user.get("role") == "owner" else url_for("index")
+    # There is no separate admin application; every authenticated account
+    # enters the same Signal App. Keep the role field for DB compatibility.
+    return url_for("index")
 
 
 def _usage_view():
@@ -109,8 +111,8 @@ def register():
     error = None
     if request.method == "POST":
         try:
-            user_id = create_user(request.form.get("username", ""), request.form.get("password", ""), request.form.get("email", ""))
-            return render_template("register.html", success="Account created. Your account is now waiting for owner approval. You can log in after the owner enables your account.")
+            user_id = create_user(request.form.get("username", ""), request.form.get("password", ""), request.form.get("email", ""), active=True)
+            return render_template("register.html", success="Account created. You can now log in.")
         except Exception as exc: error = str(exc)
     return render_template("register.html", error=error)
 
@@ -196,8 +198,6 @@ def auto_signal():
 def performance():
     uid = _user_id()
     if request.method == "POST": return jsonify(clear_performance_history(uid))
-    # Never block the dashboard on external candle fetching. Return the stored
-    # performance immediately and settle eligible pending entries in background.
     _settle_in_background()
     return jsonify(get_performance(uid))
 

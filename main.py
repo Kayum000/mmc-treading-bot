@@ -4,12 +4,6 @@ from flask import request, session
 from market_status import init_market_status
 from quotex_browser_ingest import init_quotex_browser_ingest
 
-from web.admin import init_admin_routes
-init_admin_routes(app)
-
-from web.admin_app import init_admin_app_routes
-init_admin_app_routes(app)
-
 from web.user_profile import init_user_profile_routes
 init_user_profile_routes(app)
 
