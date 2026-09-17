@@ -4,7 +4,6 @@ from __future__ import annotations
 from performance import record_signal as _record_signal
 from performance import get_performance as _global_performance
 from performance import clear_performance_history as _global_clear
-from performance import settle_pending
 from performance import _connect, init_db
 
 
@@ -57,9 +56,8 @@ def get_performance(user_id=None):
         if role_row and str(role_row[0]).lower() == "owner":
             return _global_performance()
 
-        # Settle eligible PENDING entries before filtering the per-user view.
-        # Outcomes are calculated only from the real stored entry candle.
-        settle_pending()
+        # Settlement runs in the background from the /performance route so
+        # this user-specific read never waits for external candle fetching.
         with _connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("""SELECT COUNT(*) FILTER (WHERE p.result IN ('WIN','LOSS')),
