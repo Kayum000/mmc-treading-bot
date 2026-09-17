@@ -1,36 +1,13 @@
 """Application entry point for Render/web deployment and local MMC server."""
 from web.app import app
-from flask import request, session
 from market_status import init_market_status
 from quotex_browser_ingest import init_quotex_browser_ingest
-
 from web.user_profile import init_user_profile_routes
-init_user_profile_routes(app)
-
-import web.app as web_app
-
-
-def _collector_request_authenticated_for_embedded() -> bool:
-    if request.path not in {"/quotex/ingest", "/quotex/real-ingest"}:
-        return False
-    expected = (os.getenv("QUOTEX_INGEST_SECRET") or "").strip()
-    supplied = (request.headers.get("X-MMC-Quotex-Key") or request.args.get("key") or "").strip()
-    return bool(expected and supplied and hmac.compare_digest(supplied, expected))
-
-
-import hmac
 import os
-web_app._collector_request_authenticated = _collector_request_authenticated_for_embedded
 
+init_user_profile_routes(app)
 init_market_status(app)
 init_quotex_browser_ingest(app)
-
-
-@app.before_request
-def allow_quotex_ingest_route():
-    if request.path in {"/quotex/ingest", "/quotex/real-ingest"}:
-        session["authenticated"] = True
-    return None
 
 
 def _start_embedded_quotex_collector() -> None:
