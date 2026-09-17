@@ -1,6 +1,7 @@
 """Persistent 1-minute signal performance for Real Forex and Quotex OTC."""
 from __future__ import annotations
 import os
+import threading
 from datetime import datetime, timezone, timedelta
 from data.biquote_forex import fetch_forex_candles
 from data.quotex_otc import fetch_quotex_candles
@@ -8,6 +9,8 @@ from data.otc_markets import asset_for_display
 
 RETENTION=timedelta(hours=24)
 BD_TZ=timezone(timedelta(hours=6))
+_DB_INIT_LOCK=threading.Lock()
+_DB_INITIALIZED=False
 
 def _db_url():
     value=os.getenv('DATABASE_URL','').strip()
@@ -30,19 +33,24 @@ def _market_time(value): return _utc(value).astimezone(BD_TZ).strftime('%d %b %Y
 def _otc_asset(pair): return asset_for_display(pair)
 
 def init_db():
-    with _connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""CREATE TABLE IF NOT EXISTS mmc_signal_performance (
-                id BIGSERIAL PRIMARY KEY, market_mode VARCHAR(16) NOT NULL, pair VARCHAR(32) NOT NULL,
-                signal VARCHAR(8) NOT NULL CHECK (signal IN ('BUY','SELL')), signal_time_utc TIMESTAMPTZ NOT NULL,
-                entry_time_utc TIMESTAMPTZ NOT NULL, entry_price_reference DOUBLE PRECISION,
-                entry_price_actual DOUBLE PRECISION, result_price DOUBLE PRECISION, result VARCHAR(16) NOT NULL DEFAULT 'PENDING',
-                reason TEXT, mmc_level_type VARCHAR(16), mmc_level_price DOUBLE PRECISION,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), resolved_at TIMESTAMPTZ,
-                UNIQUE (market_mode,pair,signal,entry_time_utc))""")
-            cur.execute("CREATE INDEX IF NOT EXISTS mmc_signal_performance_signal_time_idx ON mmc_signal_performance (signal_time_utc DESC)")
-            cur.execute("DELETE FROM mmc_signal_performance WHERE signal_time_utc < NOW() - INTERVAL '24 hours'")
-        conn.commit()
+    global _DB_INITIALIZED
+    if _DB_INITIALIZED: return
+    with _DB_INIT_LOCK:
+        if _DB_INITIALIZED: return
+        with _connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""CREATE TABLE IF NOT EXISTS mmc_signal_performance (
+                    id BIGSERIAL PRIMARY KEY, market_mode VARCHAR(16) NOT NULL, pair VARCHAR(32) NOT NULL,
+                    signal VARCHAR(8) NOT NULL CHECK (signal IN ('BUY','SELL')), signal_time_utc TIMESTAMPTZ NOT NULL,
+                    entry_time_utc TIMESTAMPTZ NOT NULL, entry_price_reference DOUBLE PRECISION,
+                    entry_price_actual DOUBLE PRECISION, result_price DOUBLE PRECISION, result VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+                    reason TEXT, mmc_level_type VARCHAR(16), mmc_level_price DOUBLE PRECISION,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), resolved_at TIMESTAMPTZ,
+                    UNIQUE (market_mode,pair,signal,entry_time_utc))""")
+                cur.execute("CREATE INDEX IF NOT EXISTS mmc_signal_performance_signal_time_idx ON mmc_signal_performance (signal_time_utc DESC)")
+                cur.execute("DELETE FROM mmc_signal_performance WHERE signal_time_utc < NOW() - INTERVAL '24 hours'")
+            conn.commit()
+        _DB_INITIALIZED=True
 
 def _reject_entry(result, reason):
     """Turn a rejected generated entry into an explicit NO_TRADE result for callers."""
