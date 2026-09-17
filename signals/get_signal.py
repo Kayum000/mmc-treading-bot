@@ -38,8 +38,6 @@ def _real_signal(pair: str, automatic: bool) -> dict:
     if not candles.empty:
         candles["timestamp"] = pd.to_datetime(candles["timestamp"], unit="s", utc=True, errors="coerce")
         candles = candles.dropna(subset=["timestamp"])
-        # The current minute may already be present in the browser collector.
-        # Exclude it so adaptive-real only sees completed candles.
         candles = candles[candles["timestamp"] < signal_candle].reset_index(drop=True)
 
     analysis_candle_time = None
@@ -93,10 +91,19 @@ def _real_signal(pair: str, automatic: bool) -> dict:
 def _otc_signal(pair: str, automatic: bool) -> dict:
     requested_pair = str(pair or "").strip().upper()
     detected_asset = local_active_asset()
-    if detected_asset:
-        pair = display_for_asset(detected_asset) or requested_pair
+    detected_pair = display_for_asset(detected_asset) if detected_asset else None
+
+    # The selected dashboard pair is authoritative for this request. The
+    # collector's active-asset cache is only used when no valid pair was
+    # supplied. This prevents a brief collector refresh gap at the minute
+    # boundary from changing the requested market or rejecting the signal.
+    if requested_pair in {display_for_asset(asset) for asset in OTC_PAIRS}:
+        pair = requested_pair
+    elif detected_pair:
+        pair = detected_pair
     else:
         pair = requested_pair
+
     asset = asset_for_display(pair)
     if not asset or asset not in OTC_PAIRS:
         raise RuntimeError("বর্তমান Quotex OTC মার্কেট শনাক্ত করা যায়নি। Quotex-এ একটি 1-minute OTC chart খোলা রাখুন।")
