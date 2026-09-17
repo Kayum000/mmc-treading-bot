@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hmac
+import logging
 import os
 import threading
 import time
@@ -12,6 +13,8 @@ from data.quotex_otc import ingest_local_candles, local_stream_status, local_act
 from data.otc_markets import display_for_asset, OTC_DISPLAY_PAIRS
 from signals.get_signal import get_signal
 from performance import record_signal
+
+logger = logging.getLogger(__name__)
 
 _REAL_MARKET_LOCK = threading.Lock()
 _REAL_MARKET: dict[str, dict] = {}
@@ -216,7 +219,8 @@ def init_quotex_browser_ingest(app):
                 _record_signal_in_background(result)
                 return jsonify({"ok": True, "result": result})
             except Exception as exc:
-                return jsonify({"ok": False, "error": str(exc)}), 502
+                logger.exception("AUTO_SIGNAL_OTC_FAILED pair=%s asset=%s", pair, asset)
+                return jsonify({"ok": False, "error": str(exc), "error_type": type(exc).__name__}), 502
         if original_auto_signal is not None:
             return original_auto_signal()
         return jsonify({"ok": False, "error": "Auto signal unavailable."}), 500
