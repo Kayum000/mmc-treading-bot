@@ -7,6 +7,7 @@ from data.quotex_otc import fetch_quotex_candles
 from data.otc_markets import asset_for_display
 
 RETENTION=timedelta(hours=24)
+BD_TZ=timezone(timedelta(hours=6))
 
 def _db_url():
     value=os.getenv('DATABASE_URL','').strip()
@@ -23,6 +24,8 @@ def _utc(value):
     return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
 
 def _minute_start(value): return _utc(value).replace(second=0,microsecond=0)
+
+def _market_time(value): return _utc(value).astimezone(BD_TZ).strftime('%d %b %Y, %I:%M:%S %p')
 
 def _otc_asset(pair): return asset_for_display(pair)
 
@@ -44,10 +47,7 @@ def init_db():
 def _reject_entry(result, reason):
     """Turn a rejected generated entry into an explicit NO_TRADE result for callers."""
     if isinstance(result,dict):
-        result['signal']='NO_TRADE'
-        result['is_entry']=False
-        result['entry_time_utc']=None
-        result['entry_price']=None
+        result['signal']='NO_TRADE'; result['is_entry']=False; result['entry_time_utc']=None; result['entry_price']=None
         result['reason']=((str(result.get('reason') or '').strip()+' ' + reason).strip())
     return False
 
@@ -64,12 +64,10 @@ def record_signal(result):
                 cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"mmc-entry:{mode}:{pair}",))
                 cur.execute("""SELECT 1 FROM mmc_signal_performance WHERE market_mode=%s AND pair=%s AND entry_time_utc=%s LIMIT 1""", (mode,pair,entry_time))
                 if cur.fetchone() is not None:
-                    conn.rollback()
-                    return _reject_entry(result,'Entry rejected: this candle already has an entry.')
+                    conn.rollback(); return _reject_entry(result,'Entry rejected: this candle already has an entry.')
                 cur.execute("""SELECT 1 FROM mmc_signal_performance WHERE market_mode=%s AND pair=%s AND result='PENDING' AND entry_time_utc + INTERVAL '1 minute' > NOW() LIMIT 1""", (mode,pair))
                 if cur.fetchone() is not None:
-                    conn.rollback()
-                    return _reject_entry(result,'Entry rejected: previous candle entry is still active.')
+                    conn.rollback(); return _reject_entry(result,'Entry rejected: previous candle entry is still active.')
                 cur.execute("""INSERT INTO mmc_signal_performance (market_mode,pair,signal,signal_time_utc,entry_time_utc,entry_price_reference,reason,mmc_level_type,mmc_level_price) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""", (mode,pair,signal,signal_time,entry_time,result.get('entry_price'),result.get('reason'),result.get('mmc_level_type'),result.get('mmc_level_price')))
             conn.commit()
         return True
@@ -104,8 +102,7 @@ def settle_pending():
                     try:
                         if mode=='real': frames[key]=fetch_forex_candles(pair,'1min',outputsize=200)
                         else:
-                            asset=_otc_asset(pair)
-                            frames[key]=fetch_quotex_candles(asset,'1m',240) if asset else None
+                            asset=_otc_asset(pair); frames[key]=fetch_quotex_candles(asset,'1m',240) if asset else None
                     except Exception: frames[key]=None
                 candle=_entry_candle(frames[key],entry_time); outcome=_outcome(signal,candle)
                 if outcome is None: continue
@@ -133,6 +130,6 @@ def get_performance():
                 cur.execute("""SELECT COUNT(*) FILTER (WHERE result IN ('WIN','LOSS')),COUNT(*) FILTER (WHERE result='WIN'),COUNT(*) FILTER (WHERE result='LOSS') FROM mmc_signal_performance WHERE market_mode IN ('real','quotex_otc') AND signal_time_utc >= NOW()-INTERVAL '24 hours'""")
                 total,wins,losses=[int(x or 0) for x in cur.fetchone()]; accuracy=wins/total*100.0 if total else 0.0
                 cur.execute("""SELECT id,market_mode,pair,signal,signal_time_utc,entry_time_utc,entry_price_actual,result_price,result FROM mmc_signal_performance WHERE market_mode IN ('real','quotex_otc') AND signal_time_utc >= NOW()-INTERVAL '24 hours' AND result IN ('WIN','LOSS') ORDER BY signal_time_utc DESC LIMIT 50""")
-                history=[{'id':int(r[0]),'market_mode':r[1],'pair':r[2],'signal':r[3],'signal_time_utc':r[4].isoformat(),'entry_time_utc':r[5].isoformat(),'entry_price':float(r[6]) if r[6] is not None else None,'result_price':float(r[7]) if r[7] is not None else None,'result':r[8]} for r in cur.fetchall()]
+                history=[{'id':int(r[0]),'market_mode':r[1],'pair':r[2],'signal':r[3],'signal_time_utc':_market_time(r[4]),'entry_time_utc':_market_time(r[5]),'entry_price':float(r[6]) if r[6] is not None else None,'result_price':float(r[7]) if r[7] is not None else None,'result':r[8]} for r in cur.fetchall()]
         return {'ok':True,'total':total,'wins':wins,'losses':losses,'accuracy':round(accuracy,2),'win_rate':round(accuracy,2),'history':history,'timeframe':'1m','evaluation':'signal entry candle','strategy':'tick_run_pressure + Quotex OTC candle pressure'}
     except Exception as exc:return {'ok':False,'error':str(exc)}
