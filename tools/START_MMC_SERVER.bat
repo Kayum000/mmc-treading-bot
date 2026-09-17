@@ -1,7 +1,6 @@
 @echo off
 setlocal EnableExtensions
 cd /d "%~dp0.."
-set "PYTHONPATH=%CD%;%PYTHONPATH%"
 set "MMC_LOCAL_SERVER=1"
 set "MMC_BOT_URL=http://127.0.0.1:5000"
 set "CHROME_CDP_URL=http://127.0.0.1:9222"
