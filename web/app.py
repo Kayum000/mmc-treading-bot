@@ -4,11 +4,9 @@ from __future__ import annotations
 import hmac
 import os
 import time
-import threading
 from flask import Flask, jsonify, render_template, request, redirect, url_for, session
 
 from signals.get_signal import get_signal
-from performance import record_signal, get_performance, clear_performance_history, settle_pending
 from data.biquote_forex import fetch_api_usage, get_credit_usage
 from data.news_direction import get_news_direction_for_pair
 from data.news_events import get_weekly_news_events_for_pair
@@ -43,8 +41,6 @@ _DEFAULT_SETTINGS = {
     "timezone": "Asia/Dhaka",
 }
 _USAGE_CACHE = {"data": None, "at": 0.0}
-_SETTLE_LOCK = threading.Lock()
-_SETTLE_RUNNING = False
 
 
 def _usage_view():
@@ -64,34 +60,6 @@ def _usage_view():
     _USAGE_CACHE["data"] = data
     _USAGE_CACHE["at"] = now
     return data
-
-
-def _settle_in_background():
-    global _SETTLE_RUNNING
-    if _SETTLE_RUNNING or not _SETTLE_LOCK.acquire(blocking=False):
-        return
-    _SETTLE_RUNNING = True
-
-    def worker():
-        global _SETTLE_RUNNING
-        try:
-            settle_pending()
-        except Exception:
-            pass
-        finally:
-            _SETTLE_RUNNING = False
-            _SETTLE_LOCK.release()
-
-    threading.Thread(target=worker, name="mmc-performance-settler", daemon=True).start()
-
-
-def _record_signal_in_background(result):
-    def worker():
-        try:
-            record_signal(result)
-        except Exception:
-            pass
-    threading.Thread(target=worker, name="mmc-signal-recorder", daemon=True).start()
 
 
 def _valid_pairs(mode: str):
@@ -171,7 +139,6 @@ def _collector_request_authenticated() -> bool:
 
 @app.before_request
 def require_dashboard():
-    # The dashboard is intentionally single-user; collector endpoints still require their secret.
     if _collector_request_authenticated():
         return None
     return None
@@ -209,7 +176,6 @@ def index():
             _save_settings(mode, pair)
             try:
                 result = get_signal(pair, mode)
-                _record_signal_in_background(result)
             except Exception as exc:
                 error = str(exc)
     return render_template(
@@ -235,18 +201,9 @@ def auto_signal():
         return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
     try:
         result = get_signal(pair, mode, automatic=True)
-        _record_signal_in_background(result)
         return jsonify({"ok": True, "result": result})
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
-
-
-@app.route("/performance", methods=["GET", "POST"])
-def performance():
-    if request.method == "POST":
-        return jsonify(clear_performance_history())
-    _settle_in_background()
-    return jsonify(get_performance())
 
 
 @app.route("/news-alert", methods=["GET"])
