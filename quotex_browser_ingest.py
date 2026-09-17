@@ -167,8 +167,15 @@ def init_quotex_browser_ingest(app):
             while not asset and time.monotonic() < deadline:
                 time.sleep(0.25)
                 asset = local_active_asset()
-            pair = display_for_asset(asset) if asset else None
-            if not pair: return jsonify({"ok": False, "error": "বর্তমান Quotex OTC মার্কেট শনাক্ত হয়নি।"}), 409
+
+            # Around the minute boundary the collector can briefly refresh its
+            # active-asset marker after the closed-candle batch is already in
+            # the cache. The selected session pair is therefore a safe
+            # fallback: get_signal() validates that pair by loading fresh
+            # closed candles before generating the signal.
+            pair = display_for_asset(asset) if asset else (session.get("selected_pair") or "").strip().upper()
+            if pair not in OTC_DISPLAY_PAIRS:
+                return jsonify({"ok": False, "error": "বর্তমান Quotex OTC মার্কেট শনাক্ত হয়নি।"}), 409
             session["selected_mode"] = "quotex_otc"; session["selected_pair"] = pair
             try:
                 result = get_signal(pair, "quotex_otc", automatic=True)
