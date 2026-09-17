@@ -102,7 +102,8 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
         raise RuntimeError("বর্তমান Quotex OTC মার্কেট শনাক্ত করা যায়নি। Quotex-এ একটি 1-minute OTC chart খোলা রাখুন।")
 
     # Keep the existing OTC candle-pressure strategy unchanged.
-    # Only the data source/market selection is now dynamic.
+    # The collector supplies completed candles; the latest one is therefore
+    # the candle analyzed, while the current minute is the entry candle.
     signal_at_utc = datetime.now(timezone.utc)
     signal_candle = signal_at_utc.replace(second=0, microsecond=0)
     candles = fetch_quotex_candles(asset, count=60)
@@ -124,7 +125,7 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
         "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
         "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_delay_seconds": 0 if is_entry else None,
-        "timeframe": "1-minute OTC candle pressure", "entry_timeframe": "signal candle (current 1-minute candle)",
+        "timeframe": "1-minute OTC candle pressure", "entry_timeframe": "next 1-minute candle after closed-candle analysis",
         "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
     }
 
