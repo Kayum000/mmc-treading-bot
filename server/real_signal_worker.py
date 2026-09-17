@@ -8,7 +8,6 @@ from __future__ import annotations
 import os
 import time
 
-from performance import record_signal
 from signals.get_signal import get_signal
 
 PAIRS = [p.strip().upper() for p in os.getenv("REAL_SIGNAL_PAIRS", "AUD/CAD").split(",") if p.strip()]
@@ -25,7 +24,6 @@ def run() -> None:
         for pair in PAIRS:
             try:
                 result = get_signal(pair, "real", automatic=True)
-                record_signal(result)
                 log(f"{pair}: {result.get('signal')} confidence={result.get('confidence')}")
             except Exception as exc:
                 log(f"{pair}: signal error: {exc}")
