@@ -54,13 +54,6 @@ def get_performance(user_id=None):
         _init_links()
         with _connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT role FROM mmc_users WHERE id=%s LIMIT 1", (int(user_id),))
-                role_row = cur.fetchone()
-        if role_row and str(role_row[0]).lower() == "owner":
-            return _global_performance()
-
-        with _connect() as conn:
-            with conn.cursor() as cur:
                 cur.execute("""SELECT COUNT(*) FILTER (WHERE p.result IN ('WIN','LOSS')),
                     COUNT(*) FILTER (WHERE p.result='WIN'), COUNT(*) FILTER (WHERE p.result='LOSS')
                     FROM mmc_signal_performance p JOIN mmc_user_signal_links l ON l.performance_id=p.id
