@@ -15,7 +15,12 @@ import pandas as pd
 from data.otc_markets import OTC_PAIRS
 
 PERIOD = 60
-_LOCAL_TTL = 15
+# Market identity is allowed to remain known slightly longer than the
+# candle-data freshness window. The collector can legitimately suppress
+# duplicate candle payloads, so a 15s identity TTL caused spurious 409s
+# even while the same market was still active.
+_LOCAL_TTL = 50
+_LOCAL_DATA_TTL = 15
 _LOCAL_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}
 _LOCAL_ACTIVE_ASSET: tuple[float, str] | None = None
 _LOCAL_LOCK = threading.Lock()
@@ -110,7 +115,7 @@ def local_stream_status(asset: str | None = None) -> dict:
             if not cached:
                 continue
             age = max(0.0, now - cached[0])
-            assets.append({"asset": name, "fresh": age <= _LOCAL_TTL, "age_seconds": round(age, 1), "candles": len(cached[1])})
+            assets.append({"asset": name, "fresh": age <= _LOCAL_DATA_TTL, "age_seconds": round(age, 1), "candles": len(cached[1])})
         active = _LOCAL_ACTIVE_ASSET[1] if _LOCAL_ACTIVE_ASSET and now - _LOCAL_ACTIVE_ASSET[0] <= _LOCAL_TTL else None
     return {"ok": bool(assets) and all(x["fresh"] for x in assets), "source": "Quotex local browser WebSocket collector", "active_asset": active, "assets": assets}
 
@@ -118,7 +123,7 @@ def local_stream_status(asset: str | None = None) -> dict:
 def _local_candles(asset: str, count: int) -> pd.DataFrame | None:
     with _LOCAL_LOCK:
         cached = _LOCAL_CACHE.get(asset)
-        if not cached or time.monotonic() - cached[0] > _LOCAL_TTL:
+        if not cached or time.monotonic() - cached[0] > _LOCAL_DATA_TTL:
             return None
         df = cached[1].copy(deep=True)
     if df.empty:
