@@ -21,6 +21,9 @@ def _real_signal(pair: str, automatic: bool) -> dict:
     from quotex_browser_ingest import real_market_ticks, _REAL_MARKET, _REAL_MARKET_LOCK
     from strategy.adaptive_real import generate_adaptive_signal
 
+    # A signal requested during minute N must analyze the last fully closed
+    # candle (N-1), then use minute N as the entry candle. This prevents the
+    # live/incomplete candle from changing the signal after it is issued.
     signal_at_utc = datetime.now(timezone.utc)
     signal_candle = signal_at_utc.replace(second=0, microsecond=0)
     asset = "".join(ch for ch in pair.upper() if ch.isalnum() or ch in "._-")
@@ -34,8 +37,14 @@ def _real_signal(pair: str, automatic: bool) -> dict:
     candles = pd.DataFrame(candle_rows)
     if not candles.empty:
         candles["timestamp"] = pd.to_datetime(candles["timestamp"], unit="s", utc=True, errors="coerce")
+        candles = candles.dropna(subset=["timestamp"])
+        # The current minute may already be present in the browser collector.
+        # Exclude it so adaptive-real only sees completed candles.
+        candles = candles[candles["timestamp"] < signal_candle].reset_index(drop=True)
 
+    analysis_candle_time = None
     if len(candles) >= 60:
+        analysis_candle_time = candles.iloc[-1]["timestamp"]
         result = generate_adaptive_signal(candles, ticks=ticks)
         timeframe = f"adaptive-real/{result.strategy.lower()}"
         regime = result.regime
@@ -53,6 +62,12 @@ def _real_signal(pair: str, automatic: bool) -> dict:
     if hasattr(tick_time, "to_pydatetime"):
         tick_time = tick_time.to_pydatetime(warn=False)
     tick_time = tick_time.astimezone(timezone.utc)
+    analysis_time = analysis_candle_time
+    if analysis_time is not None and hasattr(analysis_time, "to_pydatetime"):
+        analysis_time = analysis_time.to_pydatetime(warn=False)
+    if analysis_time is None:
+        analysis_time = tick_time
+    analysis_time = analysis_time.astimezone(timezone.utc)
     is_entry = result.action in {"BUY", "SELL"}
     reason = f"[{regime} / {strategy_name}] {result.reason}"
     return {
@@ -62,14 +77,14 @@ def _real_signal(pair: str, automatic: bool) -> dict:
         "reason": _bengali_reason(reason), "signal_time_utc": signal_candle.isoformat(timespec="seconds"),
         "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
         "candle_time": signal_candle.isoformat(timespec="seconds") if is_entry else None,
-        "analysis_candle_time_utc": tick_time.isoformat(timespec="milliseconds"),
+        "analysis_candle_time_utc": analysis_time.isoformat(timespec="milliseconds"),
         "entry_price": float((last["askPrice"] + last["bidPrice"]) / 2), "entry_price_type": "latest_quotex_quote_reference",
         "entry_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
         "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
         "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_delay_seconds": 0 if is_entry else None, "timeframe": timeframe,
-        "entry_timeframe": "signal candle (current 1-minute candle)", "automatic": automatic,
+        "entry_timeframe": "next 1-minute candle after closed-candle analysis", "automatic": automatic,
         "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
         "regime": regime, "strategy": strategy_name,
     }
