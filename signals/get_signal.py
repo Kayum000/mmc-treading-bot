@@ -24,13 +24,13 @@ def _real_signal(pair: str, automatic: bool) -> dict:
     signal_at_utc = datetime.now(timezone.utc)
     signal_candle = signal_at_utc.replace(second=0, microsecond=0)
     asset = "".join(ch for ch in pair.upper() if ch.isalnum() or ch in "._-")
-    ticks = real_market_ticks(asset, count=1000)
+    ticks = real_market_ticks(asset, count=200)
     if ticks is None or ticks.empty:
         raise RuntimeError("No live Quotex Real Market quote data is available")
 
     with _REAL_MARKET_LOCK:
         state = dict(_REAL_MARKET.get(asset) or {})
-        candle_rows = list(state.get("bars") or [])[-300:]
+        candle_rows = list(state.get("bars") or [])[-80:]
     candles = pd.DataFrame(candle_rows)
     if not candles.empty:
         candles["timestamp"] = pd.to_datetime(candles["timestamp"], unit="s", utc=True, errors="coerce")
@@ -90,7 +90,7 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
     # Only the data source/market selection is now dynamic.
     signal_at_utc = datetime.now(timezone.utc)
     signal_candle = signal_at_utc.replace(second=0, microsecond=0)
-    candles = fetch_quotex_candles(asset, count=240)
+    candles = fetch_quotex_candles(asset, count=60)
     result = generate_otc_signal(candles)
     last = candles.iloc[-1]
     signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
