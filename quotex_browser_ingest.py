@@ -4,7 +4,6 @@ from __future__ import annotations
 import hmac
 import logging
 import os
-import threading
 import time
 
 from flask import jsonify, request, session
@@ -12,22 +11,11 @@ from flask import jsonify, request, session
 from data.quotex_otc import ingest_local_candles, local_stream_status, local_active_asset
 from data.otc_markets import display_for_asset, OTC_DISPLAY_PAIRS
 from signals.get_signal import get_signal
-from performance import record_signal
 
 logger = logging.getLogger(__name__)
 
-_REAL_MARKET_LOCK = threading.Lock()
+_REAL_MARKET_LOCK = __import__('threading').Lock()
 _REAL_MARKET: dict[str, dict] = {}
-
-
-def _record_signal_in_background(result):
-    """Keep auto-signal response fast; performance history is best-effort."""
-    def worker():
-        try:
-            record_signal(result)
-        except Exception:
-            pass
-    threading.Thread(target=worker, daemon=True, name="otc-signal-performance").start()
 
 
 def _collector_secret_valid() -> bool:
@@ -158,14 +146,7 @@ def init_quotex_browser_ingest(app):
             asset = _real_asset(session.get("selected_pair", ""))
         with _REAL_MARKET_LOCK:
             state = _REAL_MARKET.get(asset, {"bars": [], "quote": None})
-            return jsonify({
-                "ok": bool(state.get("bars") or state.get("quote")),
-                "asset": asset,
-                "bars": list(state.get("bars") or []),
-                "quote": state.get("quote"),
-                "updated_at": state.get("updated_at"),
-                "source": "Quotex browser WebSocket",
-            })
+            return jsonify({"ok": bool(state.get("bars") or state.get("quote")), "asset": asset, "bars": list(state.get("bars") or []), "quote": state.get("quote"), "updated_at": state.get("updated_at"), "source": "Quotex browser WebSocket"})
 
     @app.route("/quotex/stream-status", methods=["GET"])
     def quotex_stream_status():
@@ -177,13 +158,7 @@ def init_quotex_browser_ingest(app):
     @app.route("/quotex/current-market", methods=["GET"])
     def quotex_current_market():
         asset = local_active_asset()
-        return jsonify({
-            "ok": bool(asset),
-            "market_mode": "quotex_otc",
-            "asset": asset,
-            "pair": display_for_asset(asset) if asset else None,
-            "source": "Quotex local browser WebSocket collector",
-        })
+        return jsonify({"ok": bool(asset), "market_mode": "quotex_otc", "asset": asset, "pair": display_for_asset(asset) if asset else None, "source": "Quotex local browser WebSocket collector"})
 
     original_select_market = app.view_functions.get("select_market")
     original_auto_signal = app.view_functions.get("auto_signal")
@@ -216,7 +191,6 @@ def init_quotex_browser_ingest(app):
             session["selected_pair"] = pair
             try:
                 result = get_signal(pair, "quotex_otc", automatic=True)
-                _record_signal_in_background(result)
                 return jsonify({"ok": True, "result": result})
             except Exception as exc:
                 logger.exception("AUTO_SIGNAL_OTC_FAILED pair=%s asset=%s", pair, asset)
