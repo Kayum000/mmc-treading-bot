@@ -2,10 +2,8 @@
 from web.app import app
 from market_status import init_market_status
 from quotex_browser_ingest import init_quotex_browser_ingest
-from web.user_profile import init_user_profile_routes
 import os
 
-init_user_profile_routes(app)
 init_market_status(app)
 init_quotex_browser_ingest(app)
 
