@@ -140,6 +140,18 @@ def init_quotex_browser_ingest(app):
         with _REAL_MARKET_LOCK: result["real_market_assets"] = sorted(_REAL_MARKET.keys())
         return jsonify(result)
 
+    @app.route("/quotex/floating-signal", methods=["GET"])
+    def quotex_floating_signal():
+        pair = request.args.get("pair", "").strip().upper()
+        if pair not in OTC_DISPLAY_PAIRS:
+            return jsonify({"ok": False, "error": "অসমর্থিত OTC মার্কেট।"}), 400
+        try:
+            result = get_signal(pair, "quotex_otc", automatic=True)
+            return jsonify({"ok": True, "result": result})
+        except Exception as exc:
+            logger.exception("FLOATING_OTC_SIGNAL_FAILED pair=%s", pair)
+            return jsonify({"ok": False, "error": str(exc), "error_type": type(exc).__name__}), 502
+
     @app.route("/quotex/current-market", methods=["GET"])
     def quotex_current_market():
         asset = local_active_asset()
@@ -199,6 +211,13 @@ def init_quotex_browser_ingest(app):
 
     if original_select_market is not None: app.view_functions["select_market"] = select_market_dynamic
     if original_auto_signal is not None: app.view_functions["auto_signal"] = auto_signal_dynamic
+
+    @app.after_request
+    def allow_floating_extension(response):
+        if request.path == "/quotex/floating-signal":
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.after_request
     def inject_otc_market_sync(response):
