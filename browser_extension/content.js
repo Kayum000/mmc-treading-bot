@@ -4,31 +4,24 @@
   window.__MMC_FLOATING_LOADED__ = true;
 
   const BOT_URL = "https://mmc-treading-bot.onrender.com";
-  const OTC_PAIRS = [
-    "EURUSD OTC","GBPUSD OTC","USDJPY OTC","AUDUSD OTC","GBPJPY OTC",
-    "EURJPY OTC","EURGBP OTC","EURCHF OTC","EURCAD OTC","EURAUD OTC",
-    "AUDJPY OTC","AUDCHF OTC","AUDCAD OTC","AUDNZD OTC","GBPAUD OTC",
-    "GBPCAD OTC","GBPCHF OTC","NZDUSD OTC","NZDJPY OTC","NZDCHF OTC",
-    "USDCAD OTC","USDCHF OTC","USDMXN OTC","USDINR OTC","USDARS OTC"
-  ];
-  const REAL_BASES = ["EUR/USD","GBP/USD","USD/JPY","AUD/USD","GBP/JPY","EUR/JPY","EUR/GBP","EUR/CHF","EUR/CAD","EUR/AUD","AUD/JPY","AUD/CHF","AUD/CAD","AUD/NZD","GBP/AUD","GBP/CAD","GBP/CHF","NZD/USD","NZD/JPY","NZD/CHF","USD/CAD","USD/CHF","USD/MXN","USD/INR","USD/ARS"];
+  const OTC_PAIRS = ["EURUSD OTC","GBPUSD OTC","USDJPY OTC","AUDUSD OTC","GBPJPY OTC","EURJPY OTC","EURGBP OTC","EURCHF OTC","EURCAD OTC","EURAUD OTC","AUDJPY OTC","AUDCHF OTC","AUDCAD OTC","AUDNZD OTC","GBPAUD OTC","GBPCAD OTC","GBPCHF OTC","NZDUSD OTC","NZDJPY OTC","NZDCHF OTC","USDCAD OTC","USDCHF OTC","USDMXN OTC","USDINR OTC","USDARS OTC"];
+  const REAL_PAIRS = ["EUR/USD","GBP/USD","USD/JPY","AUD/USD","GBP/JPY","EUR/JPY","EUR/GBP","EUR/CHF","EUR/CAD","EUR/AUD","AUD/JPY","AUD/CHF","AUD/CAD","AUD/NZD","GBP/AUD","GBP/CAD","GBP/CHF","NZD/USD","NZD/JPY","NZD/CHF","USD/CAD","USD/CHF","USD/MXN","USD/INR","USD/ARS"];
 
-  const normalizeMarket = (text) => {
-    const raw=String(text||"").toUpperCase();
-    const compact=raw.replace(/[^A-Z0-9]/g,"");
-    for(const pair of OTC_PAIRS){
-      const base=pair.replace(/[^A-Z]/g,"").replace(/OTC$/,"");
-      if(compact.includes(base) && compact.includes("OTC")) return {mode:"quotex_otc",pair};
+  function normalizeMarket(text) {
+    const raw = String(text || "").toUpperCase();
+    const compact = raw.replace(/[^A-Z0-9]/g, "");
+    for (const pair of OTC_PAIRS) {
+      const base = pair.replace(/[^A-Z]/g, "").replace(/OTC$/, "");
+      if (compact.includes(base) && compact.includes("OTC")) return {mode:"quotex_otc", pair};
     }
-    for(const base of REAL_BASES){
-      const b=base.replace(/[^A-Z]/g,"");
-      if(compact.includes(b)) return {mode:"real",pair:base};
+    for (const pair of REAL_PAIRS) {
+      const base = pair.replace(/[^A-Z]/g, "");
+      if (compact.includes(base)) return {mode:"real", pair};
     }
     return null;
-  };
-  let currentMarket = null;
-  let auto = false;
-  let timer = null;
+  }
+
+  let currentMarket = null, auto = false, timer = null;
 
   const box = document.createElement("div");
   box.id = "mmc-floating-signal";
@@ -45,65 +38,46 @@
   Object.assign(box.style,{position:"fixed",right:"14px",bottom:"90px",zIndex:"2147483647",fontFamily:"Arial,sans-serif"});
   document.documentElement.appendChild(box);
 
-  const main=box.querySelector("#mmc-fs-main");
-  const panel=box.querySelector("#mmc-fs-panel");
-  const marketEl=box.querySelector("#mmc-fs-market");
-  const scan=box.querySelector("#mmc-fs-scan");
-  const autoEl=box.querySelector("#mmc-fs-auto");
-  const status=box.querySelector("#mmc-fs-status");
-  const resultEl=box.querySelector("#mmc-fs-result");
-
+  const main=box.querySelector("#mmc-fs-main"), panel=box.querySelector("#mmc-fs-panel");
+  const marketEl=box.querySelector("#mmc-fs-market"), scan=box.querySelector("#mmc-fs-scan");
+  const autoEl=box.querySelector("#mmc-fs-auto"), status=box.querySelector("#mmc-fs-status"), resultEl=box.querySelector("#mmc-fs-result");
   Object.assign(main.style,{border:"0",borderRadius:"999px",padding:"11px 15px",fontWeight:"800",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,0,0,.35)"});
   Object.assign(panel.style,{display:"none",marginTop:"8px",padding:"12px",width:"210px",borderRadius:"12px",background:"#111827",color:"#fff",boxShadow:"0 6px 22px rgba(0,0,0,.4)",fontSize:"12px"});
   Object.assign(scan.style,{margin:"9px 0",padding:"7px 12px",cursor:"pointer"});
-  Object.assign(status.style,{marginTop:"7px"});
-  Object.assign(resultEl.style,{marginTop:"8px",lineHeight:"1.5"});
-
+  Object.assign(status.style,{marginTop:"7px"}); Object.assign(resultEl.style,{marginTop:"8px",lineHeight:"1.5"});
   main.onclick=()=>panel.style.display=panel.style.display==="none"?"block":"none";
 
-  function detectPair() {
-    const body = document.body ? document.body.innerText : "";
-    const detected = normalizeMarket(document.title) || normalizeMarket(body.slice(0,30000));
+  function detectMarket() {
+    const text = (document.title || "") + "\n" + (document.body ? document.body.innerText : "");
+    const detected = normalizeMarket(text.slice(0,50000));
     if (detected) currentMarket = detected;
     marketEl.textContent = "মার্কেট: " + (currentMarket ? currentMarket.pair : "শনাক্ত হয়নি");
     return currentMarket;
   }
 
   async function getSignal() {
-    const market = detectPair();
+    const market = detectMarket();
     if (!market) { status.textContent="মার্কেট শনাক্ত হয়নি"; return; }
     status.textContent="Signal স্ক্যান হচ্ছে...";
     try {
-      const r=await fetch(BOT_URL+"/floating-signal?mode="+encodeURIComponent(market.mode)+"&pair="+encodeURIComponent(market.pair),{cache:"no-store"});
-      const d=await r.json();
+      const url = BOT_URL + "/floating-signal?mode=" + encodeURIComponent(market.mode) + "&pair=" + encodeURIComponent(market.pair);
+      const r = await fetch(url,{cache:"no-store"});
+      const d = await r.json();
       if(!r.ok || !d.ok) throw new Error(d.error || "Signal পাওয়া যায়নি");
       const x=d.result||{};
       resultEl.innerHTML="<b>"+(x.signal||"WAIT")+"</b><br>Score: "+(x.score ?? "—")+"/100";
       status.textContent="Signal প্রস্তুত";
     } catch(e) {
-      status.textContent="Signal অপেক্ষমাণ";
+      status.textContent="Signal পাওয়া যায়নি";
       resultEl.textContent=e.message||"সংযোগ সমস্যা";
     }
   }
 
-  async function disableExistingAuto() {
-    try {
-      await fetch(BOT_URL+"/floating-auto-exclusive",{method:"POST",credentials:"include",cache:"no-store"});
-    } catch(_) {}
-  }
-    const pair = detectPair();
-    if (!pair) { status.textContent="মার্কেট শনাক্ত হয়নি"; return; }
-    status.textContent="Signal স্ক্যান হচ্ছে...";
-    try {
-      const r=await fetch(BOT_URL+"/quotex/floating-signal?pair="+encodeURIComponent(pair),{cache:"no-store"});
-      const d=await r.json();
-      if(!r.ok || !d.ok) throw new Error(d.error || "Signal পাওয়া যায়নি");
-      const x=d.result||{};
-      resultEl.innerHTML="<b>"+(x.signal||"WAIT")+"</b><br>Score: "+(x.score ?? "—")+"/100";
-      status.textContent="Signal প্রস্তুত";
-    } catch(e) {
-      status.textContent="Signal অপেক্ষমাণ";
-      resultEl.textContent=e.message||"সংযোগ সমস্যা";
+  function disablePageAuto() {
+    const existing=document.getElementById("auto-toggle");
+    if(existing && existing.checked){
+      existing.checked=false;
+      existing.dispatchEvent(new Event("change",{bubbles:true}));
     }
   }
 
@@ -111,27 +85,17 @@
     clearTimeout(timer);
     if(!auto) return;
     const now=Date.now(), next=Math.floor(now/60000+1)*60000;
-    timer=setTimeout(async()=>{ if(!auto)return; await getSignal(); schedule(); },Math.max(50,next-now+100));
+    timer=setTimeout(async()=>{ if(auto){ await getSignal(); schedule(); } },Math.max(50,next-now+100));
   }
 
   scan.onclick=getSignal;
   autoEl.onchange=()=>{
-    auto=autoEl.checked;
-    clearTimeout(timer);
-    if(auto){
-      const existing=document.getElementById("auto-toggle");
-      if(existing && existing.checked){
-        existing.checked=false;
-        existing.dispatchEvent(new Event("change",{bubbles:true}));
-      }
-      status.textContent="Floating Auto চালু • Existing Auto বন্ধ";
-      schedule();
-    } else {
-      status.textContent="Floating Auto বন্ধ";
-    }
+    auto=autoEl.checked; clearTimeout(timer);
+    if(auto){ disablePageAuto(); status.textContent="Floating Auto চালু • Existing Auto বন্ধ"; schedule(); }
+    else status.textContent="Floating Auto বন্ধ";
   };
 
-  detectPair();
-  setInterval(detectPair,1000);
-  new MutationObserver(detectPair).observe(document.documentElement,{subtree:true,childList:true,characterData:true});
+  detectMarket();
+  setInterval(detectMarket,1000);
+  new MutationObserver(detectMarket).observe(document.documentElement,{subtree:true,childList:true,characterData:true});
 })();
