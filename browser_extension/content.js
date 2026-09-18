@@ -2,7 +2,7 @@
   "use strict";
   if (window.__MMC_FLOATING_LOADED__) return;
   const host = location.hostname.toLowerCase();
-  if (!/(^|\\.)quotex\\.(com|io)$/.test(host) && !/(^|\\.)qxbroker\\.com$/.test(host)) return;
+  if (!/(^|\\.)quotex\\.(com|io)$/.test(host) && !/(^|\\.)qxbroker\\.com$/.test(host) && !/(^|\\.)market-qx\\.(trade|pro)$/.test(host)) return;
   window.__MMC_FLOATING_LOADED__ = true;
 
   const BOT_URL = "https://mmc-treading-bot.onrender.com";
