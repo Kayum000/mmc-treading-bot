@@ -119,7 +119,12 @@
     auto=autoEl.checked;
     clearTimeout(timer);
     if(auto){
-      status.textContent="Floating Auto চালু";
+      const existing=document.getElementById("auto-toggle");
+      if(existing && existing.checked){
+        existing.checked=false;
+        existing.dispatchEvent(new Event("change",{bubbles:true}));
+      }
+      status.textContent="Floating Auto চালু • Existing Auto বন্ধ";
       schedule();
     } else {
       status.textContent="Floating Auto বন্ধ";
