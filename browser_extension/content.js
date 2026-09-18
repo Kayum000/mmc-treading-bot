@@ -1,5 +1,6 @@
 (() => {
   "use strict";
+  if (window.top !== window.self) return;
   if (window.__MMC_FLOATING_LOADED__) return;
   const host = location.hostname.toLowerCase();
   if (!/(^|\\.)quotex\\.(com|io)$/.test(host) && !/(^|\\.)qxbroker\\.com$/.test(host) && !/(^|\\.)market-qx\\.(info|trade|pro)$/.test(host)) return;
@@ -38,12 +39,17 @@
       <div id="mmc-fs-result"></div>
     </div>`;
   Object.assign(box.style,{position:"fixed",right:"14px",bottom:"90px",zIndex:"2147483647",fontFamily:"Arial,sans-serif"});
-  (document.documentElement || document.body).appendChild(box);
+  function mount(){
+    if (!document.documentElement) return;
+    if (!document.getElementById("mmc-floating-signal")) document.documentElement.appendChild(box);
+  }
+  mount();
+  if (!document.body) document.addEventListener("DOMContentLoaded", mount, {once:true});
 
   const main=box.querySelector("#mmc-fs-main"), panel=box.querySelector("#mmc-fs-panel");
   const marketEl=box.querySelector("#mmc-fs-market"), scan=box.querySelector("#mmc-fs-scan");
   const autoEl=box.querySelector("#mmc-fs-auto"), status=box.querySelector("#mmc-fs-status"), resultEl=box.querySelector("#mmc-fs-result");
-  Object.assign(main.style,{border:"0",borderRadius:"999px",padding:"11px 15px",fontWeight:"800",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,0,0,.35)"});
+  Object.assign(main.style,{position:"fixed",right:"14px",bottom:"90px",display:"block",width:"58px",height:"58px",border:"2px solid #fff",borderRadius:"999px",padding:"0",fontWeight:"800",fontSize:"16px",cursor:"pointer",background:"#111827",color:"#fff",boxShadow:"0 4px 16px rgba(0,0,0,.35)",zIndex:"2147483647"});
   Object.assign(panel.style,{display:"none",marginTop:"8px",padding:"12px",width:"210px",borderRadius:"12px",background:"#111827",color:"#fff",boxShadow:"0 6px 22px rgba(0,0,0,.4)",fontSize:"12px"});
   Object.assign(scan.style,{margin:"9px 0",padding:"7px 12px",cursor:"pointer"});
   Object.assign(status.style,{marginTop:"7px"}); Object.assign(resultEl.style,{marginTop:"8px",lineHeight:"1.5"});
