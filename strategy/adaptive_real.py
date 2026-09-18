@@ -1,20 +1,18 @@
-"""Regime-adaptive strategy layer for Quotex Real Market only.
+"""Three-strategy closed-candle Real Market signal engine.
 
-Keeps the existing tick-pressure engine intact and adds candle-based engines:
-- trend: EMA20/EMA50 + trend strength
-- breakout: rolling 20-bar high/low
-- range: Bollinger mean reversion + RSI
+Flow:
+    closed 1-minute candle -> market regime -> TREND/BREAKOUT/RANGE
+    -> strategy signal + score -> next 1-minute candle entry.
 
-The selector uses only data available up to the signal candle, so the backtest
-can be run without look-ahead from future candles. OTC code is not imported.
+This module intentionally does not use tick-pressure fallback. If none of the
+three candle setups is confirmed, the result is HOLD rather than a fallback
+signal, which keeps the entry flow aligned with the closed-candle model.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 import numpy as np
 import pandas as pd
-
-from strategy.tick_run_pressure import generate_signal as tick_signal
 
 
 @dataclass
@@ -67,20 +65,18 @@ def _features(x: pd.DataFrame) -> pd.DataFrame:
 
 
 def detect_regime(row: pd.Series) -> str:
-    """Conservative regime classifier; thresholds are intentionally broad."""
+    """Classify the closed candle market into one of three strategies."""
     if pd.isna(row.get("atr_pct")) or pd.isna(row.get("bb_width")) or pd.isna(row.get("ema_gap_pct")):
         return "UNKNOWN"
     vol = float(row["atr_pct"])
     trend = float(row["ema_gap_pct"])
     slope = float(row.get("ema_slope_pct", 0.0) or 0.0)
     width = float(row["bb_width"])
-    if vol >= 0.0025:
-        return "HIGH_VOLATILITY"
-    if trend >= 0.00055 and slope >= 0.00020:
+    if trend >= 0.00055 and slope >= 0.00020 and vol < 0.0025:
         return "TREND"
     if width <= 0.0018 and vol <= 0.0012:
         return "RANGE"
-    if width >= 0.0030 or slope >= 0.00035:
+    if width >= 0.0030 or slope >= 0.00035 or vol >= 0.0025:
         return "BREAKOUT"
     return "UNCLEAR"
 
@@ -109,18 +105,11 @@ def _range(row: pd.Series) -> tuple[str, float, str]:
     return "HOLD", 0.0, "mean-reversion setup absent"
 
 
-def _tick_adapter(ticks: pd.DataFrame) -> AdaptiveSignal:
-    result = tick_signal(ticks, run_length=3, microprice_threshold=0.40)
-    return AdaptiveSignal(result.action, result.confidence, result.reason, "MICRO_MOVE", "TICK_PRESSURE")
-
-
 def generate_adaptive_signal(candles: pd.DataFrame, ticks: pd.DataFrame | None = None) -> AdaptiveSignal:
-    """Choose one Real-Market strategy from the current market regime."""
+    """Analyze only the supplied closed candles using the three candle strategies."""
     x = _features(_prep(candles))
     if len(x) < 60:
-        if ticks is not None and not ticks.empty:
-            return _tick_adapter(ticks)
-        return AdaptiveSignal("HOLD", 0.0, "insufficient candle history", "UNKNOWN", "NONE")
+        return AdaptiveSignal("HOLD", 0.0, "insufficient closed-candle history", "UNKNOWN", "NONE")
     row = x.iloc[-1]
     regime = detect_regime(row)
     if regime == "TREND":
@@ -132,14 +121,7 @@ def generate_adaptive_signal(candles: pd.DataFrame, ticks: pd.DataFrame | None =
     if regime == "RANGE":
         action, conf, reason = _range(row)
         return AdaptiveSignal(action, conf, reason, regime, "MEAN_REVERSION_BB_RSI")
-    if regime == "HIGH_VOLATILITY":
-        action, conf, reason = _breakout(row)
-        if action != "HOLD":
-            return AdaptiveSignal(action, conf, reason + "; high-volatility filter", regime, "BREAKOUT_20")
-        return AdaptiveSignal("HOLD", 0.0, "high volatility without clean breakout", regime, "VOLATILITY_FILTER")
-    if ticks is not None and not ticks.empty:
-        return _tick_adapter(ticks)
-    return AdaptiveSignal("HOLD", 0.0, "market regime unclear", regime, "NO_TRADE")
+    return AdaptiveSignal("HOLD", 0.0, "market regime unclear; no candle setup confirmed", regime, "NO_TRADE")
 
 
 def backtest_adaptive(candles: pd.DataFrame, min_history: int = 60) -> dict:
@@ -156,11 +138,6 @@ def backtest_adaptive(candles: pd.DataFrame, min_history: int = 60) -> dict:
             action, conf, reason = _breakout(row); strategy = "BREAKOUT_20"
         elif regime == "RANGE":
             action, conf, reason = _range(row); strategy = "MEAN_REVERSION_BB_RSI"
-        elif regime == "HIGH_VOLATILITY":
-            action, conf, reason = _breakout(row); strategy = "BREAKOUT_20"
-            if action == "HOLD": strategy = "VOLATILITY_FILTER"
-        else:
-            strategy = "NO_TRADE"
         if action == "HOLD":
             continue
         next_move = float(x.iloc[i+1]["close"] - x.iloc[i]["close"])
