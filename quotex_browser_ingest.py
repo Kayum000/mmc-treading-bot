@@ -162,27 +162,38 @@ def init_quotex_browser_ingest(app):
     def auto_signal_dynamic():
         mode = session.get("selected_mode", "").strip().lower()
         if mode == "quotex_otc":
-            deadline = time.monotonic() + 2.5
+            # At the exact minute boundary the browser collector can update
+            # its active-asset marker a little later than the closed-candle
+            # cache. Use the live asset when available, otherwise keep the
+            # user's selected pair. Do not block the boundary on this marker.
             asset = local_active_asset()
-            while not asset and time.monotonic() < deadline:
-                time.sleep(0.25)
-                asset = local_active_asset()
-
-            # Around the minute boundary the collector can briefly refresh its
-            # active-asset marker after the closed-candle batch is already in
-            # the cache. The selected session pair is therefore a safe
-            # fallback: get_signal() validates that pair by loading fresh
-            # closed candles before generating the signal.
             pair = display_for_asset(asset) if asset else (session.get("selected_pair") or "").strip().upper()
             if pair not in OTC_DISPLAY_PAIRS:
                 return jsonify({"ok": False, "error": "বর্তমান Quotex OTC মার্কেট শনাক্ত হয়নি।"}), 409
             session["selected_mode"] = "quotex_otc"; session["selected_pair"] = pair
-            try:
-                result = get_signal(pair, "quotex_otc", automatic=True)
-                return jsonify({"ok": True, "result": result})
-            except Exception as exc:
-                logger.exception("AUTO_SIGNAL_OTC_FAILED pair=%s asset=%s", pair, asset)
-                return jsonify({"ok": False, "error": str(exc), "error_type": type(exc).__name__}), 502
+
+            # Try immediately at the candle boundary. If the closed candle
+            # has not reached the server yet, retry briefly without changing
+            # market/strategy logic. This prevents a transient collector race
+            # from becoming a 502 while keeping the first attempt on time.
+            last_exc = None
+            for attempt in range(9):
+                try:
+                    result = get_signal(pair, "quotex_otc", automatic=True)
+                    return jsonify({"ok": True, "result": result})
+                except RuntimeError as exc:
+                    last_exc = exc
+                    if "local WebSocket collector" not in str(exc):
+                        break
+                    if attempt < 8:
+                        time.sleep(0.25)
+                except Exception as exc:
+                    last_exc = exc
+                    break
+
+            exc = last_exc or RuntimeError("OTC signal generation failed.")
+            logger.exception("AUTO_SIGNAL_OTC_FAILED pair=%s asset=%s", pair, asset)
+            return jsonify({"ok": False, "error": str(exc), "error_type": type(exc).__name__}), 502
         if original_auto_signal is not None: return original_auto_signal()
         return jsonify({"ok": False, "error": "Auto signal unavailable."}), 500
 
