@@ -4,26 +4,29 @@
   window.__MMC_FLOATING_LOADED__ = true;
 
   const BOT_URL = "https://mmc-treading-bot.onrender.com";
-  const PAIRS = [
+  const OTC_PAIRS = [
     "EURUSD OTC","GBPUSD OTC","USDJPY OTC","AUDUSD OTC","GBPJPY OTC",
     "EURJPY OTC","EURGBP OTC","EURCHF OTC","EURCAD OTC","EURAUD OTC",
     "AUDJPY OTC","AUDCHF OTC","AUDCAD OTC","AUDNZD OTC","GBPAUD OTC",
     "GBPCAD OTC","GBPCHF OTC","NZDUSD OTC","NZDJPY OTC","NZDCHF OTC",
     "USDCAD OTC","USDCHF OTC","USDMXN OTC","USDINR OTC","USDARS OTC"
   ];
+  const REAL_BASES = ["EUR/USD","GBP/USD","USD/JPY","AUD/USD","GBP/JPY","EUR/JPY","EUR/GBP","EUR/CHF","EUR/CAD","EUR/AUD","AUD/JPY","AUD/CHF","AUD/CAD","AUD/NZD","GBP/AUD","GBP/CAD","GBP/CHF","NZD/USD","NZD/JPY","NZD/CHF","USD/CAD","USD/CHF","USD/MXN","USD/INR","USD/ARS"];
 
-  const normalize = (text) => {
-    const raw = String(text || "").toUpperCase();
-    const compact = raw.replace(/[^A-Z0-9]/g, "");
-    if (!compact.includes("OTC")) return null;
-    for (const pair of PAIRS) {
-      const base = pair.replace(/[^A-Z]/g, "");
-      if (compact.includes(base) && compact.includes("OTC")) return pair;
+  const normalizeMarket = (text) => {
+    const raw=String(text||"").toUpperCase();
+    const compact=raw.replace(/[^A-Z0-9]/g,"");
+    for(const pair of OTC_PAIRS){
+      const base=pair.replace(/[^A-Z]/g,"").replace(/OTC$/,"");
+      if(compact.includes(base) && compact.includes("OTC")) return {mode:"quotex_otc",pair};
+    }
+    for(const base of REAL_BASES){
+      const b=base.replace(/[^A-Z]/g,"");
+      if(compact.includes(b)) return {mode:"real",pair:base};
     }
     return null;
   };
-
-  let currentPair = null;
+  let currentMarket = null;
   let auto = false;
   let timer = null;
 
@@ -60,13 +63,34 @@
 
   function detectPair() {
     const body = document.body ? document.body.innerText : "";
-    let pair = normalize(document.title) || normalize(body.slice(0,30000));
-    if (pair) currentPair = pair;
-    marketEl.textContent = "মার্কেট: " + (currentPair || "শনাক্ত হয়নি");
-    return currentPair;
+    const detected = normalizeMarket(document.title) || normalizeMarket(body.slice(0,30000));
+    if (detected) currentMarket = detected;
+    marketEl.textContent = "মার্কেট: " + (currentMarket ? currentMarket.pair : "শনাক্ত হয়নি");
+    return currentMarket;
   }
 
   async function getSignal() {
+    const market = detectPair();
+    if (!market) { status.textContent="মার্কেট শনাক্ত হয়নি"; return; }
+    status.textContent="Signal স্ক্যান হচ্ছে...";
+    try {
+      const r=await fetch(BOT_URL+"/floating-signal?mode="+encodeURIComponent(market.mode)+"&pair="+encodeURIComponent(market.pair),{cache:"no-store"});
+      const d=await r.json();
+      if(!r.ok || !d.ok) throw new Error(d.error || "Signal পাওয়া যায়নি");
+      const x=d.result||{};
+      resultEl.innerHTML="<b>"+(x.signal||"WAIT")+"</b><br>Score: "+(x.score ?? "—")+"/100";
+      status.textContent="Signal প্রস্তুত";
+    } catch(e) {
+      status.textContent="Signal অপেক্ষমাণ";
+      resultEl.textContent=e.message||"সংযোগ সমস্যা";
+    }
+  }
+
+  async function disableExistingAuto() {
+    try {
+      await fetch(BOT_URL+"/floating-auto-exclusive",{method:"POST",credentials:"include",cache:"no-store"});
+    } catch(_) {}
+  }
     const pair = detectPair();
     if (!pair) { status.textContent="মার্কেট শনাক্ত হয়নি"; return; }
     status.textContent="Signal স্ক্যান হচ্ছে...";
