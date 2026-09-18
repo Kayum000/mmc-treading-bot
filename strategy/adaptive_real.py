@@ -7,6 +7,11 @@ Keeps the existing tick-pressure engine intact and adds candle-based engines:
 
 The selector uses only data available up to the signal candle, so the backtest
 can be run without look-ahead from future candles. OTC code is not imported.
+
+The Real selector uses a balanced regime policy: the market regime thresholds
+are slightly more permissive than the original conservative version, while
+each entry still requires directional setup alignment. This avoids suppressing
+too many valid signals without turning weak/conflicting setups into entries.
 """
 from __future__ import annotations
 
@@ -63,49 +68,98 @@ def _features(x: pd.DataFrame) -> pd.DataFrame:
     y["rsi14"] = 100 - (100 / (1 + rs))
     y["range_high20"] = high.shift(1).rolling(20).max()
     y["range_low20"] = low.shift(1).rolling(20).min()
+    y["body"] = y["close"] - y["open"]
+    y["body_pct"] = y["body"].abs() / y["close"].replace(0, np.nan)
     return y
 
 
 def detect_regime(row: pd.Series) -> str:
-    """Conservative regime classifier; thresholds are intentionally broad."""
+    """Balanced regime classifier.
+
+    The thresholds are intentionally a little more permissive than the
+    original conservative classifier. Entry engines still require their own
+    directional confirmation before emitting BUY/SELL.
+    """
     if pd.isna(row.get("atr_pct")) or pd.isna(row.get("bb_width")) or pd.isna(row.get("ema_gap_pct")):
         return "UNKNOWN"
+
     vol = float(row["atr_pct"])
     trend = float(row["ema_gap_pct"])
     slope = float(row.get("ema_slope_pct", 0.0) or 0.0)
     width = float(row["bb_width"])
+
     if vol >= 0.0025:
         return "HIGH_VOLATILITY"
-    if trend >= 0.00055 and slope >= 0.00020:
+    if trend >= 0.00045 and slope >= 0.00012:
         return "TREND"
-    if width <= 0.0018 and vol <= 0.0012:
+    if width <= 0.0022 and vol <= 0.0015:
         return "RANGE"
-    if width >= 0.0030 or slope >= 0.00035:
+    if width >= 0.0025 or slope >= 0.00025:
         return "BREAKOUT"
     return "UNCLEAR"
 
 
 def _trend(row: pd.Series) -> tuple[str, float, str]:
     if row["ema20"] > row["ema50"] and row["close"] > row["ema20"]:
-        return "BUY", 0.72, "EMA20 above EMA50 with price above EMA20"
+        score = 72.0
+        confirmations = []
+        if float(row.get("ema_slope_pct", 0.0) or 0.0) >= 0.00020:
+            score += 5.0
+            confirmations.append("trend slope aligned")
+        if pd.notna(row.get("rsi14")) and 50.0 <= float(row["rsi14"]) <= 70.0:
+            score += 3.0
+            confirmations.append("RSI supports momentum")
+        reason = "EMA20 above EMA50 with price above EMA20"
+        if confirmations:
+            reason += "; " + ", ".join(confirmations)
+        return "BUY", min(score, 80.0) / 100.0, reason
+
     if row["ema20"] < row["ema50"] and row["close"] < row["ema20"]:
-        return "SELL", 0.72, "EMA20 below EMA50 with price below EMA20"
+        score = 72.0
+        confirmations = []
+        if float(row.get("ema_slope_pct", 0.0) or 0.0) >= 0.00020:
+            score += 5.0
+            confirmations.append("trend slope aligned")
+        if pd.notna(row.get("rsi14")) and 30.0 <= float(row["rsi14"]) <= 50.0:
+            score += 3.0
+            confirmations.append("RSI supports momentum")
+        reason = "EMA20 below EMA50 with price below EMA20"
+        if confirmations:
+            reason += "; " + ", ".join(confirmations)
+        return "SELL", min(score, 80.0) / 100.0, reason
+
     return "HOLD", 0.0, "trend alignment absent"
 
 
 def _breakout(row: pd.Series) -> tuple[str, float, str]:
     if pd.notna(row["range_high20"]) and row["close"] > row["range_high20"]:
-        return "BUY", 0.75, "20-bar high breakout"
+        score = 75.0
+        if pd.notna(row.get("body_pct")) and float(row["body_pct"]) >= 0.00015:
+            score += 3.0
+        return "BUY", min(score, 82.0) / 100.0, "20-bar high breakout"
+
     if pd.notna(row["range_low20"]) and row["close"] < row["range_low20"]:
-        return "SELL", 0.75, "20-bar low breakout"
+        score = 75.0
+        if pd.notna(row.get("body_pct")) and float(row["body_pct"]) >= 0.00015:
+            score += 3.0
+        return "SELL", min(score, 82.0) / 100.0, "20-bar low breakout"
+
     return "HOLD", 0.0, "breakout not confirmed"
 
 
 def _range(row: pd.Series) -> tuple[str, float, str]:
     if row["close"] <= row["bb_lower"] and row["rsi14"] <= 35:
-        return "BUY", 0.68, "lower Bollinger touch + oversold RSI"
+        score = 68.0
+        if float(row["rsi14"]) <= 30:
+            score += 4.0
+        return "BUY", min(score, 75.0) / 100.0, "lower Bollinger touch + oversold RSI"
+
     if row["close"] >= row["bb_upper"] and row["rsi14"] >= 65:
-        return "SELL", 0.68, "upper Bollinger touch + overbought RSI"
+        score = 68.0
+        if float(row["rsi14"]) >= 70:
+            score += 4.0
+        return "SELL", min(score, 75.0) / 100.0, "upper Bollinger touch + overbought RSI"
+
     return "HOLD", 0.0, "mean-reversion setup absent"
 
 
@@ -121,24 +175,31 @@ def generate_adaptive_signal(candles: pd.DataFrame, ticks: pd.DataFrame | None =
         if ticks is not None and not ticks.empty:
             return _tick_adapter(ticks)
         return AdaptiveSignal("HOLD", 0.0, "insufficient candle history", "UNKNOWN", "NONE")
+
     row = x.iloc[-1]
     regime = detect_regime(row)
+
     if regime == "TREND":
         action, conf, reason = _trend(row)
         return AdaptiveSignal(action, conf, reason, regime, "TREND_EMA")
+
     if regime == "BREAKOUT":
         action, conf, reason = _breakout(row)
         return AdaptiveSignal(action, conf, reason, regime, "BREAKOUT_20")
+
     if regime == "RANGE":
         action, conf, reason = _range(row)
         return AdaptiveSignal(action, conf, reason, regime, "MEAN_REVERSION_BB_RSI")
+
     if regime == "HIGH_VOLATILITY":
         action, conf, reason = _breakout(row)
         if action != "HOLD":
             return AdaptiveSignal(action, conf, reason + "; high-volatility filter", regime, "BREAKOUT_20")
         return AdaptiveSignal("HOLD", 0.0, "high volatility without clean breakout", regime, "VOLATILITY_FILTER")
+
     if ticks is not None and not ticks.empty:
         return _tick_adapter(ticks)
+
     return AdaptiveSignal("HOLD", 0.0, "market regime unclear", regime, "NO_TRADE")
 
 
@@ -150,26 +211,57 @@ def backtest_adaptive(candles: pd.DataFrame, min_history: int = 60) -> dict:
         row = x.iloc[i]
         regime = detect_regime(row)
         action, conf, strategy, reason = "HOLD", 0.0, "NONE", ""
+
         if regime == "TREND":
-            action, conf, reason = _trend(row); strategy = "TREND_EMA"
+            action, conf, reason = _trend(row)
+            strategy = "TREND_EMA"
         elif regime == "BREAKOUT":
-            action, conf, reason = _breakout(row); strategy = "BREAKOUT_20"
+            action, conf, reason = _breakout(row)
+            strategy = "BREAKOUT_20"
         elif regime == "RANGE":
-            action, conf, reason = _range(row); strategy = "MEAN_REVERSION_BB_RSI"
+            action, conf, reason = _range(row)
+            strategy = "MEAN_REVERSION_BB_RSI"
         elif regime == "HIGH_VOLATILITY":
-            action, conf, reason = _breakout(row); strategy = "BREAKOUT_20"
-            if action == "HOLD": strategy = "VOLATILITY_FILTER"
+            action, conf, reason = _breakout(row)
+            strategy = "BREAKOUT_20"
+            if action == "HOLD":
+                strategy = "VOLATILITY_FILTER"
         else:
             strategy = "NO_TRADE"
+
         if action == "HOLD":
             continue
+
         next_move = float(x.iloc[i+1]["close"] - x.iloc[i]["close"])
         correct = (action == "BUY" and next_move > 0) or (action == "SELL" and next_move < 0)
-        trades.append({"timestamp": x.iloc[i]["timestamp"], "regime": regime, "strategy": strategy, "action": action, "confidence": conf, "correct": bool(correct), "move": next_move, "reason": reason})
+        trades.append({
+            "timestamp": x.iloc[i]["timestamp"],
+            "regime": regime,
+            "strategy": strategy,
+            "action": action,
+            "confidence": conf,
+            "correct": bool(correct),
+            "move": next_move,
+            "reason": reason,
+        })
+
     df = pd.DataFrame(trades)
     if df.empty:
         return {"trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "by_regime": {}, "trades_df": df}
+
     by_regime = {}
     for regime, g in df.groupby("regime"):
-        by_regime[regime] = {"trades": int(len(g)), "wins": int(g.correct.sum()), "win_rate": round(float(g.correct.mean())*100, 2)}
-    return {"trades": int(len(df)), "wins": int(df.correct.sum()), "losses": int((~df.correct).sum()), "win_rate": round(float(df.correct.mean())*100, 2), "by_regime": by_regime, "trades_df": df}
+        by_regime[regime] = {
+            "trades": int(len(g)),
+            "wins": int(g.correct.sum()),
+            "win_rate": round(float(g.correct.mean())*100, 2),
+        }
+
+    return {
+        "trades": int(len(df)),
+        "wins": int(df.correct.sum()),
+        "losses": int((~df.correct).sum()),
+        "win_rate": round(float(df.correct.mean())*100, 2),
+        "by_regime": by_regime,
+        "trades_df": df,
+    }
