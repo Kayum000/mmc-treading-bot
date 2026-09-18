@@ -25,7 +25,9 @@ def _real_signal(pair: str, automatic: bool) -> dict:
     # candle (N-1), then use minute N as the entry candle. This prevents the
     # live/incomplete candle from changing the signal after it is issued.
     signal_at_utc = datetime.now(timezone.utc)
-    signal_candle = signal_at_utc.replace(second=0, microsecond=0)
+    # Always target the NEXT minute boundary. The signal is based only on
+    # candles that are fully closed before that entry minute.
+    signal_candle = (signal_at_utc.replace(second=0, microsecond=0) + timedelta(minutes=1))
     asset = "".join(ch for ch in pair.upper() if ch.isalnum() or ch in "._-")
     ticks = real_market_ticks(asset, count=200)
     if ticks is None or ticks.empty:
@@ -114,6 +116,16 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
     signal_at_utc = datetime.now(timezone.utc)
     signal_candle = signal_at_utc.replace(second=0, microsecond=0)
     candles = fetch_quotex_candles(asset, count=60)
+    # The entry belongs to the next minute boundary. Exclude any candle that
+    # is still inside/at the entry minute so an incomplete candle cannot alter
+    # the signal after it has been generated.
+    try:
+        candle_ts = pd.to_datetime(candles["timestamp"], utc=True, errors="coerce")
+        closed = candles.loc[candle_ts < signal_candle].copy()
+        if len(closed) >= 1:
+            candles = closed.reset_index(drop=True)
+    except Exception:
+        pass
     result = generate_otc_signal(candles)
     last = candles.iloc[-1]
     signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
