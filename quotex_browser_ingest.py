@@ -140,6 +140,24 @@ def init_quotex_browser_ingest(app):
         with _REAL_MARKET_LOCK: result["real_market_assets"] = sorted(_REAL_MARKET.keys())
         return jsonify(result)
 
+    @app.route("/floating-signal", methods=["GET"])
+    def floating_signal():
+        mode = request.args.get("mode", "").strip().lower()
+        pair = request.args.get("pair", "").strip().upper()
+        try:
+            if mode == "quotex_otc":
+                if pair not in OTC_DISPLAY_PAIRS:
+                    return jsonify({"ok": False, "error": "অসমর্থিত OTC মার্কেট।"}), 400
+                result = get_signal(pair, "quotex_otc", automatic=True)
+            elif mode == "real":
+                result = get_signal(pair, "real", automatic=True)
+            else:
+                return jsonify({"ok": False, "error": "অসমর্থিত মার্কেট মোড।"}), 400
+            return jsonify({"ok": True, "result": result})
+        except Exception as exc:
+            logger.exception("FLOATING_SIGNAL_FAILED mode=%s pair=%s", mode, pair)
+            return jsonify({"ok": False, "error": str(exc), "error_type": type(exc).__name__}), 502
+
     @app.route("/quotex/floating-signal", methods=["GET"])
     def quotex_floating_signal():
         pair = request.args.get("pair", "").strip().upper()
