@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 
+import pandas as pd
+
 from data.quotex_otc import fetch_quotex_candles, OTC_PAIRS, local_active_asset
 from data.otc_markets import display_for_asset, asset_for_display
 from strategy.otc_candle_pressure import generate_signal as generate_otc_signal
@@ -16,7 +18,6 @@ def _bengali_reason(reason: str) -> str:
 
 
 def _real_signal(pair: str, automatic: bool) -> dict:
-    import pandas as pd
     from quotex_browser_ingest import _REAL_MARKET, _REAL_MARKET_LOCK
     from strategy.adaptive_real import generate_adaptive_signal
 
@@ -37,6 +38,11 @@ def _real_signal(pair: str, automatic: bool) -> dict:
         candles = candles[candles["timestamp"] < signal_candle].reset_index(drop=True)
 
     if len(candles) < 60:
+        result = generate_adaptive_signal(candles, ticks=ticks)
+        if result.action in {"BUY", "SELL"}:
+            score = int(round(float(result.confidence) * 100))
+            signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
+            return {"pair": pair, "requested_pair": pair, "market_mode": "real", "source": "Quotex Real Market browser WebSocket", "signal": result.action, "market_bias": result.action, "entry_signal": result.action, "buy_score": score if result.action == "BUY" else 0, "sell_score": score if result.action == "SELL" else 0, "reason": _bengali_reason(f"[{result.regime} / {result.strategy}] {result.reason}"), "signal_time_utc": signal_candle.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": signal_candle.isoformat(timespec="seconds"), "analysis_candle_time_utc": None, "entry_price": None, "entry_price_type": "closed_candle_model", "entry_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_delay_seconds": 0, "timeframe": "1-minute closed-candle adaptive", "entry_timeframe": "next 1-minute candle after closed-candle analysis", "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None, "regime": result.regime, "strategy": result.strategy}
         return {
             "pair": pair, "requested_pair": pair, "market_mode": "real",
             "source": "Quotex Real Market browser WebSocket", "signal": "HOLD",
@@ -54,7 +60,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
         }
 
     analysis_candle_time = candles.iloc[-1]["timestamp"]
-    result = generate_adaptive_signal(candles)
+    result = generate_adaptive_signal(candles, ticks=ticks)
     timeframe = f"1-minute/{result.strategy.lower()}"
     regime = result.regime
     strategy_name = result.strategy
