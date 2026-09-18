@@ -232,7 +232,7 @@ def init_quotex_browser_ingest(app):
 
     @app.after_request
     def allow_floating_extension(response):
-        if request.path == "/quotex/floating-signal":
+        if request.path in {"/quotex/floating-signal", "/floating-signal"}:
             response.headers["Access-Control-Allow-Origin"] = "*"
             response.headers["Cache-Control"] = "no-store"
         return response
