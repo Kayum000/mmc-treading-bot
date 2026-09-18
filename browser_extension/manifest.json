@@ -1,12 +1,19 @@
 {
   "manifest_version": 3,
   "name": "MMC Floating Signal",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "MMC floating signal overlay for Quotex",
   "content_scripts": [
     {
       "matches": [
-        "https://*/*"
+        "https://market-qx.info/*",
+        "https://*.market-qx.info/*",
+        "https://quotex.com/*",
+        "https://*.quotex.com/*",
+        "https://quotex.io/*",
+        "https://*.quotex.io/*",
+        "https://qxbroker.com/*",
+        "https://*.qxbroker.com/*"
       ],
       "js": [
         "content.js"
@@ -15,7 +22,9 @@
     }
   ],
   "host_permissions": [
-    "https://mmc-treading-bot.onrender.com/*"
+    "https://mmc-treading-bot.onrender.com/*",
+    "https://market-qx.info/*",
+    "https://*.market-qx.info/*"
   ],
   "permissions": [
     "storage"
