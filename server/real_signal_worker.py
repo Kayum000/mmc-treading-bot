@@ -11,7 +11,10 @@ import time
 from signals.get_signal import get_signal
 
 PAIRS = [p.strip().upper() for p in os.getenv("REAL_SIGNAL_PAIRS", "AUD/CAD").split(",") if p.strip()]
-INTERVAL = max(15, int(os.getenv("REAL_SIGNAL_INTERVAL_SECONDS", "60")))
+
+def seconds_to_next_minute() -> float:
+    now = time.time()
+    return max(0.01, 60.0 - (now % 60.0))
 
 
 def log(message: str) -> None:
@@ -19,15 +22,17 @@ def log(message: str) -> None:
 
 
 def run() -> None:
-    log(f"started; pairs={PAIRS}; interval={INTERVAL}s")
+    log(f"started; pairs={PAIRS}; synchronized to 1-minute boundaries")
     while True:
+        # Run as close as possible to each minute boundary instead of using
+        # a free-running 60-second interval that drifts into the candle.
+        time.sleep(seconds_to_next_minute())
         for pair in PAIRS:
             try:
                 result = get_signal(pair, "real", automatic=True)
-                log(f"{pair}: {result.get('signal')} confidence={result.get('confidence')}")
+                log(f"{pair}: {result.get('signal')} confidence={result.get('confidence')} entry={result.get('entry_time_utc')}")
             except Exception as exc:
                 log(f"{pair}: signal error: {exc}")
-        time.sleep(INTERVAL)
 
 
 if __name__ == "__main__":
