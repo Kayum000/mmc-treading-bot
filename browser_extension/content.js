@@ -1,6 +1,8 @@
 (() => {
   "use strict";
   if (window.__MMC_FLOATING_LOADED__) return;
+  const host = location.hostname.toLowerCase();
+  if (!/(^|\\.)quotex\\.(com|io)$/.test(host) && !/(^|\\.)qxbroker\\.com$/.test(host)) return;
   window.__MMC_FLOATING_LOADED__ = true;
 
   const BOT_URL = "https://mmc-treading-bot.onrender.com";
@@ -36,7 +38,7 @@
       <div id="mmc-fs-result"></div>
     </div>`;
   Object.assign(box.style,{position:"fixed",right:"14px",bottom:"90px",zIndex:"2147483647",fontFamily:"Arial,sans-serif"});
-  document.documentElement.appendChild(box);
+  (document.documentElement || document.body).appendChild(box);
 
   const main=box.querySelector("#mmc-fs-main"), panel=box.querySelector("#mmc-fs-panel");
   const marketEl=box.querySelector("#mmc-fs-market"), scan=box.querySelector("#mmc-fs-scan");
