@@ -130,8 +130,8 @@ function renderPerformanceSummary(){
 function performanceTable(){
   const rows=performanceHistory();
   if(!rows.length)return '<div class="performance-empty">এখনও কোনো signal history নেই। নতুন signal তৈরি করলে এখানে দেখা যাবে।</div>';
-  return '<div class="performance-table-wrap"><table class="performance-table"><thead><tr><th>সময়</th><th>Pair</th><th>Signal</th><th>Entry Price</th><th>Candle</th><th>Result</th></tr></thead><tbody>'+
-    rows.map(x=>{const rc=x.result==='লাভ'?'perf-win':x.result==='লস'?'perf-loss':'perf-hold';const cc=String(x.candle_color).toLowerCase()==='green'?'candle-bull':String(x.candle_color).toLowerCase()==='red'?'candle-bear':'';return '<tr><td>'+esc(x.time)+'</td><td>'+esc(x.pair)+'</td><td>'+esc(x.signal)+'</td><td>'+(x.entry_price==null?'—':esc(x.entry_price))+'</td><td class="'+cc+'">'+(x.candle_color==='green'?'🟢 Green':x.candle_color==='red'?'🔴 Red':'—')+'</td><td class="'+rc+'">'+esc(x.result)+'</td></tr>'}).join('')+
+  return '<div class="performance-table-wrap"><table class="performance-table"><thead><tr><th>সময়</th><th>Pair</th><th>Signal</th><th>Entry Price</th><th>Result</th></tr></thead><tbody>'+
+    rows.map(x=>{const rc=x.result==='লাভ'?'perf-win':x.result==='লস'?'perf-loss':'perf-hold';const cc=String(x.candle_color).toLowerCase()==='green'?'candle-bull':String(x.candle_color).toLowerCase()==='red'?'candle-bear':'';return '<tr><td>'+esc(x.time)+'</td><td>'+esc(x.pair)+'</td><td>'+esc(x.signal)+'</td><td>'+(x.entry_price==null?'—':esc(x.entry_price))+'</td><td class="'+rc+'">'+esc(x.result)+'</td></tr>'}).join('')+
     '</tbody></table></div>';
 }
 function openPerformance(){
