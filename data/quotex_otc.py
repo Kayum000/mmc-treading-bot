@@ -12,7 +12,7 @@ from typing import Any
 
 import pandas as pd
 
-from data.otc_markets import OTC_PAIRS
+from data.otc_markets import OTC_PAIRS, normalize_detected_market
 
 PERIOD = 60
 # The collector publishes a candle batch roughly once per minute. Keep market
@@ -74,35 +74,50 @@ def ingest_local_candles(payload: Any) -> int:
     rows = _normalise_rows(payload, str(payload.get("asset") if isinstance(payload, dict) else ""))
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        asset = str(row["asset"])
+        raw_asset = str(row["asset"]).strip()
+        asset = raw_asset if raw_asset in OTC_PAIRS else normalize_detected_market(raw_asset)
         if asset in OTC_PAIRS:
+            row["asset"] = asset
             grouped.setdefault(asset, []).append(row)
     if not grouped:
         return 0
-    active_asset = str(payload.get("active_asset") or "").strip() if isinstance(payload, dict) else ""
+    active_raw = str(payload.get("active_asset") or "").strip() if isinstance(payload, dict) else ""
+    active_asset = active_raw if active_raw in OTC_PAIRS else normalize_detected_market(active_raw)
+    sent_at = payload.get("sent_at") if isinstance(payload, dict) else None
+    try:
+        sent_at_utc = pd.to_datetime(float(sent_at), unit="s", utc=True) if sent_at is not None else None
+    except (TypeError, ValueError, OverflowError):
+        sent_at_utc = None
     with _LOCAL_LOCK:
-        # Never cache a candle that belongs to the currently forming minute.
-        # Candle timestamps are minute-start timestamps throughout this adapter.
-        closed_before = pd.Timestamp.now(tz="UTC").floor("min")
+        # A candle is closed only after its full 60-second period has elapsed.
+        # Prefer the collector's sent_at clock so a small Render/collector clock
+        # skew cannot accidentally admit the current running candle.
+        server_closed_before = pd.Timestamp.now(tz="UTC").floor("min")
+        closed_before = sent_at_utc if sent_at_utc is not None else server_closed_before
+        accepted = 0
         for asset, asset_rows in grouped.items():
             frame = (
                 pd.DataFrame(asset_rows)
                 .drop_duplicates("timestamp")
                 .sort_values("timestamp")
             )
-            frame = frame[frame["timestamp"] < closed_before].reset_index(drop=True)
+            frame = frame[frame["timestamp"] + pd.Timedelta(seconds=PERIOD) <= closed_before].reset_index(drop=True)
             if frame.empty:
                 continue
+            accepted += len(frame)
             old = _LOCAL_CACHE.get(asset)
             if old and time.monotonic() - old[0] < 3600:
                 frame = pd.concat([old[1], frame], ignore_index=True).drop_duplicates("timestamp").sort_values("timestamp")
             _LOCAL_CACHE[asset] = (time.monotonic(), frame.tail(2000).reset_index(drop=True))
-        if active_asset in OTC_PAIRS:
+        if active_asset in OTC_PAIRS and active_asset in _LOCAL_CACHE:
             _LOCAL_ACTIVE_ASSET = (time.monotonic(), active_asset)
-        else:
-            newest = max(grouped, key=lambda name: max(row["timestamp"] for row in grouped[name]))
+        elif accepted:
+            newest = max(
+                (name for name in grouped if name in _LOCAL_CACHE),
+                key=lambda name: _LOCAL_CACHE[name][1]["timestamp"].iloc[-1],
+            )
             _LOCAL_ACTIVE_ASSET = (time.monotonic(), newest)
-    return sum(len(v) for v in grouped.values())
+    return accepted
 
 
 def local_active_asset() -> str | None:
@@ -136,11 +151,11 @@ def _local_candles(asset: str, count: int) -> pd.DataFrame | None:
         df = cached[1].copy(deep=True)
     if df.empty:
         return None
-    # Enforce the boundary again at read time. This protects against any
-    # collector/source that sends the current minute as well as stale cache
-    # contents created before the ingest-side guard was added.
+    # Enforce the full candle-age boundary again at read time. This protects
+    # against stale cache contents or a collector/source that sends a running
+    # candle after ingest.
     closed_before = pd.Timestamp.now(tz="UTC").floor("min")
-    df = df[df["timestamp"] < closed_before].reset_index(drop=True)
+    df = df[df["timestamp"] + pd.Timedelta(seconds=PERIOD) <= closed_before].reset_index(drop=True)
     return df.tail(count).reset_index(drop=True) if len(df) >= 8 else None
 
 
