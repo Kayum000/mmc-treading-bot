@@ -25,14 +25,7 @@ REAL_PAIRS = [
 ]
 QUOTEX_OTC_PAIRS = list(OTC_DISPLAY_PAIRS)
 
-_SINGLE_USER = {
-    "id": 1,
-    "username": "owner",
-    "email": "",
-    "role": "owner",
-    "full_name": "MMC Owner",
-    "active": True,
-}
+
 _DEFAULT_SETTINGS = {
     "market_mode": "",
     "pair": None,
@@ -93,30 +86,6 @@ def _save_settings(mode: str, pair: str, auto_signal=None, min_confidence=None, 
     session["selected_pair"] = pair
     return current
 
-
-@app.route("/account", methods=["GET", "POST"])
-def account():
-    if request.method == "POST":
-        mode = request.form.get("market_mode", "real").strip().lower()
-        pair = request.form.get("pair", "").strip().upper()
-        if pair not in _valid_pairs(mode):
-            return jsonify({"ok": False, "error": "অবৈধ মার্কেট।"}), 400
-        settings = _save_settings(
-            mode,
-            pair,
-            request.form.get("auto_signal") == "1",
-            float(request.form.get("min_confidence", "0") or 0),
-            request.form.get("timezone", "Asia/Dhaka"),
-        )
-        return jsonify({"ok": True, "user": _SINGLE_USER, "settings": settings})
-    return jsonify({"ok": True, "user": _SINGLE_USER, "settings": _settings()})
-
-
-@app.route("/logout", methods=["GET", "POST"])
-def logout():
-    """Keep the legacy dashboard link safe after removing multi-user authentication."""
-    session.clear()
-    return redirect(url_for("index"))
 
 
 @app.route("/favicon.ico")
@@ -187,8 +156,6 @@ def index():
         error=error,
         result=result,
         usage=_usage_view(),
-        user=_SINGLE_USER,
-        user_settings=saved,
     )
 
 
