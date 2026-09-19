@@ -98,7 +98,7 @@ function newsHtml(events){if(!events?.length)return '<div class="empty">No sched
 async function loadNews(){if(!state.pair){$('news-items').innerHTML='<div class="empty">Select a market to load news & events.</div>';return}$('news-items').innerHTML='<div class="empty">Loading news…</div>';try{const r=await fetch('/news-alert',{credentials:'same-origin',cache:'no-store'});const d=await r.json();if(!r.ok||d.ok===false)throw Error(d.error||'News unavailable');state.news=d.events||d.alert_events||[];$('news-items').innerHTML=newsHtml(state.news);$('news-source').textContent=d.source||'MMC News Engine'}catch(e){$('news-items').innerHTML=`<div class="empty">${esc(e.message)}</div>`;$('news-source').textContent='Unavailable'}}
 $('news-refresh').onclick=loadNews;$('news-more').onclick=()=>modalOpen('News & Events',state.news.length?state.news.map(e=>`${e.title||e.name||'Event'} — ${e.description||e.impact||''}`).join('\n'):'No scheduled news for this market.');
 const PERF_KEY='mmc_performance_history_v2';
-function performanceHistory(){try{const rows=JSON.parse(localStorage.getItem(PERF_KEY)||'[]');return Array.isArray(rows)?rows:[]}catch(_){return[]}}
+function performanceHistory(){try{const rows=JSON.parse(localStorage.getItem(PERF_KEY)||'[]');return Array.isArray(rows)?rows.filter(x=>String(x?.signal||'').toUpperCase()==='BUY'||String(x?.signal||'').toUpperCase()==='SELL'):[]}catch(_){return[]}}
 function performanceResult(r){
   const signal=String(r?.signal||'HOLD').toUpperCase();
   if(signal==='HOLD') return 'HOLD';
