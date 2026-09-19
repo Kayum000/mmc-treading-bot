@@ -112,15 +112,14 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
     signal_at_utc = datetime.now(timezone.utc)
     signal_candle = signal_at_utc.replace(second=0, microsecond=0)
 
-    # Fetch extra candles because the current in-progress candle is removed below.
+    # The OTC collector already publishes only fully completed 1-minute candles.
+    # Match Real-Market timing: analyze the latest closed candle and use the
+    # current/next 1-minute candle as the entry candle.
+    # Do not apply a second server-clock filter here; small clock skew between
+    # the local collector and Render can otherwise hide the newest valid candle
+    # exactly at the minute boundary.
     # The adaptive Real strategy requires at least 60 closed candles.
     candles = fetch_quotex_candles(asset, count=80)
-    try:
-        candle_ts = pd.to_datetime(candles["timestamp"], utc=True, errors="coerce")
-        closed = candles.loc[candle_ts < signal_candle].copy()
-        candles = closed.reset_index(drop=True)
-    except Exception:
-        pass
 
     result = generate_otc_signal(candles)
     last = candles.iloc[-1] if not candles.empty else None
