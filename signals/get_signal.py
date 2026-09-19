@@ -111,13 +111,17 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
 
     signal_at_utc = datetime.now(timezone.utc)
     signal_candle = signal_at_utc.replace(second=0, microsecond=0)
-    candles = fetch_quotex_candles(asset, count=60)
+
+    # Fetch extra candles because the current in-progress candle is removed below.
+    # The adaptive Real strategy requires at least 60 closed candles.
+    candles = fetch_quotex_candles(asset, count=80)
     try:
         candle_ts = pd.to_datetime(candles["timestamp"], utc=True, errors="coerce")
         closed = candles.loc[candle_ts < signal_candle].copy()
         candles = closed.reset_index(drop=True)
     except Exception:
         pass
+
     result = generate_otc_signal(candles)
     last = candles.iloc[-1] if not candles.empty else None
     signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
@@ -125,9 +129,10 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
     score = int(round(float(result.confidence) * 100)) if is_entry else 0
     return {
         "pair": pair, "requested_pair": requested_pair, "detected_asset": asset, "market_mode": "quotex_otc",
-        "source": "Quotex OTC local Windows/Android screen collector", "signal": result.action, "market_bias": result.action,
+        "source": "Quotex OTC local Windows/Android screen collector + Real adaptive strategy",
+        "signal": result.action, "market_bias": result.action,
         "entry_signal": result.action, "buy_score": score if result.action == "BUY" else 0,
-        "sell_score": score if result.action == "SELL" else 0, "reason": _bengali_reason(result.reason),
+        "sell_score": score if result.action == "SELL" else 0, "reason": _bengali_reason(f"[{result.regime} / {result.strategy}] {result.reason}"),
         "signal_time_utc": signal_candle.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
         "candle_time": signal_candle.isoformat(timespec="seconds") if is_entry else None,
         "analysis_candle_time_utc": pd_timestamp_utc(last["timestamp"]) if last is not None else None,
@@ -137,8 +142,10 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
         "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
         "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_delay_seconds": 0 if is_entry else None,
-        "timeframe": "1-minute OTC candle pressure", "entry_timeframe": "next 1-minute candle after closed-candle analysis",
+        "timeframe": f"1-minute/{result.strategy.lower()}",
+        "entry_timeframe": "next 1-minute candle after closed-candle analysis",
         "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
+        "regime": result.regime, "strategy": result.strategy,
     }
 
 
