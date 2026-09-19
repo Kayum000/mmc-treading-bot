@@ -273,7 +273,7 @@ class Collector:
             return
         accepted = 0
         if otc_rows:
-            data = self._post("/quotex/ingest", {"sent_at": time.time(), "candles": otc_rows})
+            data = self._post("/quotex/ingest", {"sent_at": time.time(), "active_asset": otc_rows[-1].get("asset"), "candles": otc_rows})
             accepted += int(data.get("accepted", 0) or 0)
         if real_rows:
             data = self._post("/quotex/real-ingest", {"sent_at": time.time(), "candles": real_rows})
