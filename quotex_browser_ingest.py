@@ -230,7 +230,7 @@ def init_quotex_browser_ingest(app):
                 str(exc),
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
-                        return jsonify({"ok": False, "error": str(exc), "error_type": type(exc).__name__}), 502
+            return jsonify({"ok": False, "error": str(exc), "error_type": type(exc).__name__}), 502
         if original_auto_signal is not None: return original_auto_signal()
         return jsonify({"ok": False, "error": "Auto signal unavailable."}), 500
 
