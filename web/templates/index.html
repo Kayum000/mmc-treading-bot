@@ -144,6 +144,16 @@ function openPerformance(){
 $('performance-card').onclick=openPerformance;
 document.addEventListener('click',e=>{const card=e.target.closest?.('#performance-card');if(card){e.preventDefault();e.stopPropagation();openPerformance()}});
 function loadPerformance(){renderPerformanceSummary()}
+function ensurePerformanceCard(){
+  const section=$('performance');
+  if(!section||$('performance-card'))return;
+  section.innerHTML='<button type="button" class="performance-panel performance-compact-card" id="performance-card" aria-label="Open Performance"><div class="performance-card-main"><span class="round-icon">▥</span><div><h2>Performance</h2><p>Signal results & history</p></div></div><div class="performance-summary"><span>লাভ <b id="perf-win-count">0</b></span><span>লস <b id="perf-loss-count">0</b></span><span>HOLD <b id="perf-hold-count">0</b></span></div><span class="performance-open">View ›</span></button>';
+  $('performance-card').onclick=openPerformance;
+  renderPerformanceSummary();
+}
+const performanceDomGuard=new MutationObserver(()=>{if(!$('performance-card'))ensurePerformanceCard()});
+performanceDomGuard.observe(document.body,{childList:true,subtree:true});
+ensurePerformanceCard();
 document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{const a=b.dataset.action,s=b.dataset.scroll;if(a==='auto'){$('auto-toggle').click();$('signal-section').scrollIntoView({behavior:'smooth'})}else if(a==='signal'){$('signal-section').scrollIntoView({behavior:'smooth'});$('get-signal').focus()}else if(a==='market'){$('pair').focus();$('signal-section').scrollIntoView({behavior:'smooth'})}else if(a==='settings')modalOpen('Settings','Dashboard settings are kept in this browser. Use the controls below to customize the display.',`<label class="setting-row">Compact sidebar <input type="checkbox" id="compact-setting"></label><label class="setting-row">Auto refresh news <input type="checkbox" id="news-setting"></label>`);else if(s==='performance'){openPerformance()}else if(s)$(s)?.scrollIntoView({behavior:'smooth'});$('sidebar').classList.remove('open');document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active')});
 $('notify-btn').onclick=()=>modalOpen('Notifications','No new critical notifications. Signal alerts can be enabled with the 🔔 Enable Alerts button.');$('theme-btn').onclick=()=>toast('MMC dark dashboard is optimized for trading visibility');
 function updateChartSelection(){window.dispatchEvent(new Event('mmc-market-changed'))}
