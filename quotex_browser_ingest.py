@@ -222,7 +222,7 @@ def init_quotex_browser_ingest(app):
                     break
 
             exc = last_exc or RuntimeError("OTC signal generation failed.")
-            logger.exception("AUTO_SIGNAL_OTC_FAILED pair=%s asset=%s", pair, asset)
+            logger.error(\n                "AUTO_SIGNAL_OTC_FAILED pair=%s asset=%s error_type=%s error=%s",\n                pair,\n                asset,\n                type(exc).__name__,\n                str(exc),\n                exc_info=(type(exc), exc, exc.__traceback__),\n            )
             return jsonify({"ok": False, "error": str(exc), "error_type": type(exc).__name__}), 502
         if original_auto_signal is not None: return original_auto_signal()
         return jsonify({"ok": False, "error": "Auto signal unavailable."}), 500
