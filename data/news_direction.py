@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import datetime,timezone,timedelta
 from data.news_events import get_weekly_news_events_for_pair,get_news_direction_for_pair as get_cached_news_direction_for_pair
 
-def _pair_currencies(pair):
-    return tuple(pair.upper().split("/",1))
 def _entry_window(event_time_iso):
     event_time=datetime.fromisoformat(event_time_iso.replace("Z","+00:00"));event_time=event_time.replace(tzinfo=timezone.utc) if event_time.tzinfo is None else event_time.astimezone(timezone.utc);minute_start=event_time.replace(second=0,microsecond=0)+timedelta(minutes=1);minute_end=minute_start+timedelta(minutes=1);return minute_start.isoformat(timespec="seconds"),f"{minute_start.strftime('%H:%M')}–{minute_end.strftime('%H:%M')} UTC"
 def get_weekly_news_overview_for_pair(market_mode,real_pairs,selected_pair):
