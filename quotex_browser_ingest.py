@@ -113,8 +113,15 @@ def init_quotex_browser_ingest(app):
             if sent_at is not None and abs(time.time() - float(sent_at)) > 30: return jsonify({"ok": False, "error": "Stale collector payload."}), 408
         except (TypeError, ValueError): return jsonify({"ok": False, "error": "Invalid sent_at."}), 400
         accepted = ingest_local_candles(payload)
+        status = local_stream_status()
+        logger.info(
+            "QUOTEX_INGEST accepted=%s assets=%s active=%s",
+            accepted,
+            status.get("assets"),
+            status.get("active_asset"),
+        )
         if not accepted: return jsonify({"ok": False, "error": "No supported closed candle data found."}), 422
-        return jsonify({"ok": True, "accepted": accepted, "status": local_stream_status()})
+        return jsonify({"ok": True, "accepted": accepted, "status": status})
 
     @app.route("/quotex/real-ingest", methods=["POST"])
     def quotex_real_ingest():
