@@ -149,7 +149,16 @@ def local_stream_status(asset: str | None = None) -> dict:
             if not cached:
                 continue
             age = max(0.0, now - cached[0])
-            assets.append({"asset": name, "fresh": age <= _LOCAL_DATA_TTL, "age_seconds": round(age, 1), "candles": len(cached[1])})
+            latest_closed = None
+            if not cached[1].empty:
+                latest_closed = cached[1]["timestamp"].iloc[-1].isoformat()
+            assets.append({
+                "asset": name,
+                "fresh": age <= _LOCAL_DATA_TTL,
+                "age_seconds": round(age, 1),
+                "candles": len(cached[1]),
+                "latest_closed": latest_closed,
+            })
         active = _LOCAL_ACTIVE_ASSET[1] if _LOCAL_ACTIVE_ASSET and now - _LOCAL_ACTIVE_ASSET[0] <= _LOCAL_TTL else None
     return {"ok": bool(assets) and all(x["fresh"] for x in assets), "source": "Quotex local browser WebSocket collector", "active_asset": active, "assets": assets}
 
