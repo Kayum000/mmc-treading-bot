@@ -98,12 +98,36 @@ $('news-refresh').onclick=loadNews;$('news-more').onclick=()=>modalOpen('News & 
 const PERF_KEY='mmc_performance_history_v2';
 function performanceHistory(){try{const rows=JSON.parse(localStorage.getItem(PERF_KEY)||'[]');return Array.isArray(rows)?rows.filter(x=>String(x?.signal||'').toUpperCase()==='BUY'||String(x?.signal||'').toUpperCase()==='SELL'):[]}catch(_){return[]}}
 function performanceResult(r){
-  const signal=String(r?.signal||'HOLD').toUpperCase();
-  if(signal==='HOLD') return 'HOLD';
-  const color=String(r?.signal_candle_color||'').toLowerCase();
-  if((signal==='BUY'&&color==='green')||(signal==='SELL'&&color==='red')) return 'লাভ';
-  if((signal==='BUY'&&color==='red')||(signal==='SELL'&&color==='green')) return 'লস';
-  return 'HOLD';
+  const signal=String(r?.signal||'').toUpperCase();
+  if(signal!=='BUY'&&signal!=='SELL') return 'HOLD';
+  const result=String(r?.result||'').toUpperCase();
+  return result==='লাভ'||result==='লস'||result==='HOLD'?r.result:'অপেক্ষমাণ';
+}
+function resolvePerformanceResults(){
+  const rows=performanceHistory();
+  const bars=Array.isArray(window.__mmcChartBars)?window.__mmcChartBars:[];
+  if(!rows.length||!bars.length)return;
+  let changed=false;
+  const now=Number(window.__mmcChartMarketNow||Date.now());
+  for(const row of rows){
+    if(row.result!=='অপেক্ষমাণ')continue;
+    const signalMs=Date.parse(row.signal_time_utc||'');
+    if(!Number.isFinite(signalMs))continue;
+    const bar=bars.find(b=>Number(b?.t)===signalMs);
+    if(!bar||now < signalMs+60000)continue;
+    const entry=Number(row.entry_price);
+    const close=Number(bar.c);
+    const open=Number(bar.o);
+    const base=Number.isFinite(entry)?entry:open;
+    if(!Number.isFinite(close)||!Number.isFinite(base))continue;
+    const move=close-base;
+    row.result=move>0?(row.signal==='BUY'?'লাভ':'লস'):move<0?(row.signal==='SELL'?'লাভ':'লস'):'HOLD';
+    row.outcome_price=close;
+    row.outcome_candle_time_utc=new Date(signalMs).toISOString();
+    changed=true;
+  }
+  if(changed){try{localStorage.setItem(PERF_KEY,JSON.stringify(rows.slice(0,200)))}catch(_){}}
+  renderPerformanceSummary();
 }
 function recordPerformance(r){
   if(!r||!r.signal)return;
@@ -114,7 +138,7 @@ function recordPerformance(r){
     signal:String(r.signal).toUpperCase(),
     entry_price:r.entry_price??null,
     candle_color:r.signal_candle_color||'—',
-    result:performanceResult(r)
+    result:(r.result==='লাভ'||r.result==='লস'||r.result==='HOLD')?r.result:'অপেক্ষমাণ'
   };
   const rows=performanceHistory().filter(x=>x.id!==row.id);
   rows.unshift(row);
@@ -122,7 +146,7 @@ function recordPerformance(r){
   renderPerformanceSummary();
 }
 function renderPerformanceSummary(){
-  const rows=performanceHistory(), win=rows.filter(x=>x.result==='লাভ').length, loss=rows.filter(x=>x.result==='লস').length, hold=rows.filter(x=>x.result==='HOLD').length;
+  resolvePerformanceResults(); const rows=performanceHistory(), win=rows.filter(x=>x.result==='লাভ').length, loss=rows.filter(x=>x.result==='লস').length, hold=rows.filter(x=>x.result==='HOLD'||x.result==='অপেক্ষমাণ').length;
   $('perf-win-count').textContent=win;$('perf-loss-count').textContent=loss;$('perf-hold-count').textContent=hold;
 }
 function performanceTable(){
@@ -141,7 +165,7 @@ function openPerformance(){
 }
 $('performance-card').onclick=openPerformance;
 document.addEventListener('click',e=>{const card=e.target.closest?.('#performance-card');if(card){e.preventDefault();e.stopPropagation();openPerformance()}});
-function loadPerformance(){renderPerformanceSummary()}
+function loadPerformance(){resolvePerformanceResults();renderPerformanceSummary();}
 function ensurePerformanceCard(){
   const section=$('performance');
   if(!section||$('performance-card'))return;
@@ -149,6 +173,7 @@ function ensurePerformanceCard(){
   $('performance-card').onclick=openPerformance;
   renderPerformanceSummary();
 }
+setInterval(resolvePerformanceResults,2000);
 const performanceDomGuard=new MutationObserver(()=>{if(!$('performance-card'))ensurePerformanceCard()});
 performanceDomGuard.observe(document.body,{childList:true,subtree:true});
 ensurePerformanceCard();
