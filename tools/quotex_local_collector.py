@@ -210,6 +210,9 @@ def _price_from_payload(payload: Any) -> tuple[str | None, float | None, float |
 class Collector:
     def __init__(self) -> None:
         self.partial: dict[str, dict[str, Any]] = {}
+        # Keep a rolling closed-candle history locally so every ingest can
+        # refresh Render with enough historical bars.
+        self.closed_history: dict[str, dict[int, dict[str, Any]]] = {}
         self.session = requests.Session()
         self.last_signature = ""
         self.last_send = 0.0
@@ -238,9 +241,31 @@ class Collector:
             raise RuntimeError(f"Render rejected market data: {data.get('error', 'unknown error')}")
         return data
 
+    def _remember_closed(self, rows: list[dict[str, Any]]) -> None:
+        boundary = int(time.time() // PERIOD) * PERIOD
+        for row in rows:
+            try:
+                asset = str(row.get("asset") or "")
+                ts = float(row["timestamp"])
+                bucket = int(ts // PERIOD) * PERIOD
+            except (TypeError, ValueError, KeyError):
+                continue
+            if not asset or bucket >= boundary:
+                continue
+            history = self.closed_history.setdefault(asset, {})
+            history[bucket] = {k: v for k, v in row.items() if k != "bucket"}
+            if len(history) > 2000:
+                for old_bucket in sorted(history)[:-2000]:
+                    history.pop(old_bucket, None)
+
     def _send(self, rows: list[dict[str, Any]]) -> None:
         if not rows:
             return
+        self._remember_closed(rows)
+        expanded: list[dict[str, Any]] = []
+        for asset in sorted({str(r.get("asset") or "") for r in rows if r.get("asset")}):
+            expanded.extend(self.closed_history.get(asset, {}).values())
+        rows = expanded or rows
         otc_rows = [r for r in rows if r.get("asset") in OTC_PAIRS]
         real_rows = [r for r in rows if r.get("asset") not in OTC_PAIRS]
         signature = "|".join(f"{r['asset']}:{r['timestamp']}:{r['close']}" for r in rows[-5:])
@@ -255,7 +280,7 @@ class Collector:
             accepted += int(data.get("accepted", 0) or 0)
         self.last_signature = signature
         self.last_send = time.monotonic()
-        log(f"sent {accepted} candle rows to MMC ({len(otc_rows)} OTC, {len(real_rows)} real-market)")
+        log(f"sent {accepted} closed candle rows to MMC ({len(otc_rows)} OTC, {len(real_rows)} real-market)")
 
     def _send_quote(self, asset: str, price: float, ts: float) -> None:
         if asset in OTC_PAIRS:
