@@ -15,10 +15,10 @@ import pandas as pd
 from data.otc_markets import OTC_PAIRS
 
 PERIOD = 60
-# The collector publishes the closed-candle batch roughly once per minute.
-# Keep market identity and candle-cache freshness long enough to cover that
-# cadence plus normal network/deploy jitter. The collector itself excludes
-# the currently forming candle before sending the batch.
+# The collector publishes a candle batch roughly once per minute. Keep market
+# identity and candle-cache freshness long enough to cover that cadence plus
+# normal network/deploy jitter. The adapter also enforces the closed-candle
+# boundary so a running candle can never reach the signal engine.
 _LOCAL_TTL = 50
 _LOCAL_DATA_TTL = 75
 _LOCAL_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}
@@ -81,8 +81,18 @@ def ingest_local_candles(payload: Any) -> int:
         return 0
     active_asset = str(payload.get("active_asset") or "").strip() if isinstance(payload, dict) else ""
     with _LOCAL_LOCK:
+        # Never cache a candle that belongs to the currently forming minute.
+        # Candle timestamps are minute-start timestamps throughout this adapter.
+        closed_before = pd.Timestamp.now(tz="UTC").floor("min")
         for asset, asset_rows in grouped.items():
-            frame = pd.DataFrame(asset_rows).drop_duplicates("timestamp").sort_values("timestamp")
+            frame = (
+                pd.DataFrame(asset_rows)
+                .drop_duplicates("timestamp")
+                .sort_values("timestamp")
+            )
+            frame = frame[frame["timestamp"] < closed_before].reset_index(drop=True)
+            if frame.empty:
+                continue
             old = _LOCAL_CACHE.get(asset)
             if old and time.monotonic() - old[0] < 3600:
                 frame = pd.concat([old[1], frame], ignore_index=True).drop_duplicates("timestamp").sort_values("timestamp")
@@ -126,10 +136,11 @@ def _local_candles(asset: str, count: int) -> pd.DataFrame | None:
         df = cached[1].copy(deep=True)
     if df.empty:
         return None
-    # The local collector already sends only completed 1-minute candles.
-    # Do not apply another server-clock boundary here: a small clock skew
-    # between the user's machine and Render can otherwise hide valid candles
-    # and make Auto Signal fail exactly around the minute boundary.
+    # Enforce the boundary again at read time. This protects against any
+    # collector/source that sends the current minute as well as stale cache
+    # contents created before the ingest-side guard was added.
+    closed_before = pd.Timestamp.now(tz="UTC").floor("min")
+    df = df[df["timestamp"] < closed_before].reset_index(drop=True)
     return df.tail(count).reset_index(drop=True) if len(df) >= 8 else None
 
 
