@@ -95,6 +95,17 @@ def ingest_local_candles(payload: Any) -> int:
         server_closed_before = pd.Timestamp.now(tz="UTC").floor("min")
         closed_before = sent_at_utc if sent_at_utc is not None else server_closed_before
         accepted = 0
+        # Refresh the selected/visible OTC market as soon as a valid market
+        # identity arrives. The collector may send a still-forming candle;
+        # that candle must be rejected, but it must NOT make the active market
+        # disappear while we still have a fresh closed-candle cache for it.
+        active_candidates = [name for name in grouped if name in OTC_PAIRS]
+        for candidate in active_candidates:
+            cached = _LOCAL_CACHE.get(candidate)
+            if cached and time.monotonic() - cached[0] <= _LOCAL_DATA_TTL:
+                _LOCAL_ACTIVE_ASSET = (time.monotonic(), candidate)
+                break
+
         for asset, asset_rows in grouped.items():
             frame = (
                 pd.DataFrame(asset_rows)
@@ -111,7 +122,7 @@ def ingest_local_candles(payload: Any) -> int:
             _LOCAL_CACHE[asset] = (time.monotonic(), frame.tail(2000).reset_index(drop=True))
         if active_asset in OTC_PAIRS and active_asset in _LOCAL_CACHE:
             _LOCAL_ACTIVE_ASSET = (time.monotonic(), active_asset)
-        elif accepted:
+        elif not active_candidates and accepted:
             newest = max(
                 (name for name in grouped if name in _LOCAL_CACHE),
                 key=lambda name: _LOCAL_CACHE[name][1]["timestamp"].iloc[-1],
