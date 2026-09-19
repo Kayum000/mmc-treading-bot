@@ -146,7 +146,7 @@ function recordPerformance(r){
   renderPerformanceSummary();
 }
 function renderPerformanceSummary(){
-  resolvePerformanceResults(); const rows=performanceHistory(), win=rows.filter(x=>x.result==='লাভ').length, loss=rows.filter(x=>x.result==='লস').length, hold=rows.filter(x=>x.result==='HOLD'||x.result==='অপেক্ষমাণ').length;
+  const rows=performanceHistory(), win=rows.filter(x=>x.result==='লাভ').length, loss=rows.filter(x=>x.result==='লস').length, hold=rows.filter(x=>x.result==='HOLD'||x.result==='অপেক্ষমাণ').length;
   $('perf-win-count').textContent=win;$('perf-loss-count').textContent=loss;$('perf-hold-count').textContent=hold;
 }
 function performanceTable(){
