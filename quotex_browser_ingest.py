@@ -215,6 +215,21 @@ def init_quotex_browser_ingest(app):
             # from becoming a 502 while keeping the first attempt on time.
             last_exc = None
             for attempt in range(9):
+                cache_status = local_stream_status(asset) if asset else local_stream_status()
+                cache_asset = next(
+                    (item for item in cache_status.get("assets", []) if item.get("asset") == asset),
+                    None,
+                ) if asset else None
+                logger.info(
+                    "AUTO_SIGNAL_OTC_ATTEMPT pair=%s asset=%s attempt=%s cache_age=%s closed_candles=%s latest_closed=%s fresh=%s",
+                    pair,
+                    asset,
+                    attempt + 1,
+                    cache_asset.get("age_seconds") if cache_asset else None,
+                    cache_asset.get("candles") if cache_asset else None,
+                    cache_asset.get("latest_closed") if cache_asset else None,
+                    cache_asset.get("fresh") if cache_asset else False,
+                )
                 try:
                     result = get_signal(pair, "quotex_otc", automatic=True)
                     return jsonify({"ok": True, "result": result})
