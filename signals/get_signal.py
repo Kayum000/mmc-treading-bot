@@ -24,7 +24,10 @@ def _real_signal(pair: str, automatic: bool) -> dict:
     # During minute N, analyze only the fully closed candle N-1.
     # Minute N is the next 1-minute candle and therefore the entry candle.
     signal_at_utc = datetime.now(timezone.utc)
-    signal_candle = signal_at_utc.replace(second=0, microsecond=0)
+    current_minute = signal_at_utc.replace(second=0, microsecond=0)
+    # When AUTO requests a few seconds before the minute boundary, prepare the
+    # signal for the upcoming candle instead of waiting for that candle to start.
+    signal_candle = current_minute + timedelta(minutes=1) if signal_at_utc.second >= 55 else current_minute
     asset = "".join(ch for ch in pair.upper() if ch.isalnum() or ch in "._-")
 
     with _REAL_MARKET_LOCK:
