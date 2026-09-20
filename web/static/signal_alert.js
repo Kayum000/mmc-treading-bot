@@ -47,6 +47,92 @@
     const autoNews=()=>{if(localStorage.getItem('mmc_auto_news')==='0')return;const btn=document.getElementById('news-refresh');if(btn)btn.click()};
     if(localStorage.getItem('mmc_auto_news')!=='0')setInterval(autoNews,30000);
   }
+  const MMC_HISTORY_KEY='mmc_signal_history_v1';
+  function historyRows(){
+    try{const a=JSON.parse(localStorage.getItem(MMC_HISTORY_KEY)||'[]');return Array.isArray(a)?a:[]}catch(_){return[]}
+  }
+  function saveHistoryRow(r){
+    if(!r||!r.signal)return;
+    const signal=String(r.signal).toUpperCase();
+    if(signal!=='BUY'&&signal!=='SELL'&&signal!=='HOLD')return;
+    const row={
+      id:[r.pair||'',signal,r.signal_time_utc||r.entry_time_utc||''].join('|'),
+      pair:r.pair||document.getElementById('pair')?.value||'—',
+      mode:r.mode||((String(r.pair||'').toLowerCase().endsWith('_otc'))?'quotex_otc':(document.querySelector('.mode-btn.active')?.dataset.mode||'real')),
+      signal,
+      score:signal==='BUY'?(r.buy_score??null):(signal==='SELL'?(r.sell_score??null):null),
+      buy_score:r.buy_score??null,
+      sell_score:r.sell_score??null,
+      created:r.signal_created_bd||r.signal_created_utc||null,
+      signal_time:r.signal_time_bd||r.signal_time_utc||r.entry_time_bd||r.entry_time_utc||null,
+      signal_time_utc:r.signal_time_utc||r.entry_time_utc||null,
+      entry_price:r.entry_price??null,
+      result:r.result||'অপেক্ষমাণ',
+      outcome_price:r.outcome_price??null,
+      reason:r.reason||'—'
+    };
+    const rows=historyRows().filter(x=>x.id!==row.id);
+    rows.unshift(row);
+    try{localStorage.setItem(MMC_HISTORY_KEY,JSON.stringify(rows.slice(0,200)))}catch(_){}
+  }
+  function syncHistoryFromPerformance(){
+    const rows=historyRows();
+    try{
+      const perf=JSON.parse(localStorage.getItem('mmc_performance_history_v2')||'[]');
+      if(Array.isArray(perf)) perf.forEach(x=>{
+        const id=x.id||[x.pair||'',x.signal||'',x.signal_time_utc||''].join('|');
+        if(!rows.some(h=>h.id===id)) rows.push({id,pair:x.pair||'—',mode:String(x.pair||'').toLowerCase().endsWith('_otc')?'quotex_otc':'real',signal:x.signal||'—',score:null,buy_score:null,sell_score:null,created:null,signal_time:x.signal_time_utc||x.time||null,signal_time_utc:x.signal_time_utc||null,entry_price:x.entry_price??null,result:x.result||'অপেক্ষমাণ',outcome_price:x.outcome_price??null,reason:'—'});
+      });
+      rows.sort((a,b)=>Date.parse(b.signal_time_utc||b.created||'')-Date.parse(a.signal_time_utc||a.created||''));
+      localStorage.setItem(MMC_HISTORY_KEY,JSON.stringify(rows.slice(0,200)));
+    }catch(_){}
+    return rows;
+  }
+  function historyHtml(){
+    const rows=syncHistoryFromPerformance();
+    if(!rows.length)return '<div class="performance-empty">এখনও কোনো signal history নেই। নতুন signal তৈরি করলে এখানে দেখা যাবে।</div>';
+    const total=rows.length,win=rows.filter(x=>x.result==='লাভ').length,loss=rows.filter(x=>x.result==='লস').length,pending=rows.filter(x=>x.result==='অপেক্ষমাণ'||x.result==='HOLD').length;
+    return '<div class="history-summary"><span>মোট <b>'+total+'</b></span><span>লাভ <b class="perf-win">'+win+'</b></span><span>লস <b class="perf-loss">'+loss+'</b></span><span>অপেক্ষমাণ <b>'+pending+'</b></span></div><div class="history-toolbar"><select id="mmc-history-filter"><option value="all">সব</option><option value="real">REAL</option><option value="quotex_otc">OTC</option><option value="BUY">BUY</option><option value="SELL">SELL</option><option value="লাভ">লাভ</option><option value="লস">লস</option><option value="অপেক্ষমাণ">অপেক্ষমাণ</option></select><button type="button" class="mini-btn" id="mmc-history-clear">Clear</button></div><div id="mmc-history-list" class="history-list">'+rows.map(historyRowHtml).join('')+'</div>';
+  }
+  function historyRowHtml(x){
+    const rc=x.result==='লাভ'?'perf-win':x.result==='লস'?'perf-loss':'perf-hold';
+    const mode=String(x.mode||'real').toLowerCase()==='quotex_otc'?'OTC':'REAL';
+    const score=x.score==null?'—':String(x.score)+'/100';
+    return '<div class="history-item" data-mode="'+escapeHtml(x.mode||'real')+'" data-signal="'+escapeHtml(x.signal||'')+'" data-result="'+escapeHtml(x.result||'')+'"><div class="history-main"><div><b>'+escapeHtml(x.pair||'—')+'</b><span class="history-chip">'+mode+'</span><span class="history-chip">'+escapeHtml(x.signal||'—')+' '+score+'</span></div><div class="history-time">Signal Time: '+escapeHtml(formatMarketTime(x.signal_time||x.signal_time_utc||'—'))+'</div></div><div class="history-meta"><span>Created: '+escapeHtml(x.created?formatMarketTime(x.created):'—')+'</span><span>Entry: '+escapeHtml(x.entry_price==null?'—':x.entry_price)+'</span><span class="'+rc+'">Result: '+escapeHtml(x.result||'অপেক্ষমাণ')+'</span><span>Outcome: '+escapeHtml(x.outcome_price==null?'—':x.outcome_price)+'</span></div><div class="history-reason">Reason: '+escapeHtml(x.reason||'—')+'</div></div>';
+  }
+  function installHistoryStyles(){
+    if(document.getElementById('mmc-history-style'))return;
+    const s=document.createElement('style');s.id='mmc-history-style';s.textContent=`.history-summary{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px}.history-summary span{border:1px solid #123d65;background:#061a31;border-radius:7px;padding:7px 9px;color:#8fa8c0;font-size:10px}.history-summary b{color:#fff;margin-left:3px}.history-toolbar{display:flex;justify-content:flex-end;gap:7px;margin-bottom:10px}.history-toolbar select{height:30px;background:#0a2440;color:#d9e8f8;border:1px solid #244b73;border-radius:6px;padding:0 8px;font-size:10px}.history-list{display:grid;gap:7px}.history-item{border:1px solid #123d65;border-radius:8px;background:#061a31;padding:9px;color:#9fb5ca;font-size:10px}.history-main{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}.history-main b{color:#eaf3fc;font-size:12px}.history-chip{display:inline-block;margin-left:5px;padding:3px 5px;border-radius:5px;background:#0a2440;border:1px solid #244b73;color:#b9cadb;font-size:9px}.history-time{color:#7fa5c7;font-size:9px;text-align:right}.history-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:7px}.history-reason{margin-top:7px;padding-top:6px;border-top:1px solid #123453;color:#8fa8c0;line-height:1.4}.perf-win{color:#00d88a!important;font-weight:900}.perf-loss{color:#ff5264!important;font-weight:900}.perf-hold{color:#c3d0dc!important;font-weight:900}@media(max-width:760px){.history-main{display:block}.history-time{text-align:left;margin-top:4px}.history-meta{display:grid;grid-template-columns:1fr 1fr;gap:5px}}`;
+    document.head.appendChild(s);
+  }
+  function openHistory(){
+    installHistoryStyles();
+    openModernModal('Signal History','সকল REAL ও OTC signal-এর ইতিহাস',historyHtml());
+    const modal=document.getElementById('modal');
+    const card=modal?.querySelector('.modal-card');
+    if(card){card.style.width='min(980px,100%)';card.style.maxHeight='90vh';card.style.overflow='auto'}
+    const filter=document.getElementById('mmc-history-filter');
+    const list=document.getElementById('mmc-history-list');
+    filter?.addEventListener('change',()=>{
+      const v=filter.value;
+      list?.querySelectorAll('.history-item').forEach(x=>{x.style.display=(v==='all'||x.dataset.mode===v||x.dataset.signal===v||x.dataset.result===v)?'block':'none'});
+    });
+    document.getElementById('mmc-history-clear')?.addEventListener('click',()=>{
+      if(!historyRows().length){return}
+      if(confirm('সব Signal History মুছে ফেলবেন?')){localStorage.removeItem(MMC_HISTORY_KEY);openHistory()}
+    });
+  }
+  function installHistoryNav(){
+    const nav=document.querySelector('.nav');if(!nav||nav.querySelector('[data-action="history"]'))return;
+    const b=document.createElement('button');b.type='button';b.dataset.action='history';b.textContent='▤  History';nav.insertBefore(b,nav.querySelector('[data-scroll="performance"]')?.nextSibling||null);
+    b.addEventListener('click',e=>{e.preventDefault();openHistory()});
+  }
+  function watchSignalHistory(){
+    const r=document.getElementById('result-container');if(!r||!window.MutationObserver)return;
+    const emit=()=>{try{const raw=window.__mmcLastResult;if(raw&&raw.signal)saveHistoryRow(raw)}catch(_){}};
+    new MutationObserver(()=>setTimeout(emit,0)).observe(r,{childList:true,subtree:true,characterData:true});
+    emit();
+  }
   document.addEventListener('DOMContentLoaded',()=>{configureDownloadApp();installQuotexLabels();cleanUnwantedAutoStatus();watchEntryTitle();watchRenderedSignal();stabilizeModernChart();bindDashboardChartControls();bindRealFunctionality();bindReplacementWatchers();const a=document.getElementById('auto-status');if(a&&window.MutationObserver)new MutationObserver(cleanUnwantedAutoStatus).observe(a,{childList:true,characterData:true,subtree:true})});
   document.addEventListener('click',e=>{if(!e.target?.closest?.('.primary,.secondary,#auto-toggle,#enable-alerts'))window.enableSignalAudio()},{capture:true});
 })();
