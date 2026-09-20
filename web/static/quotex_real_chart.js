@@ -67,6 +67,11 @@
       if(!r.ok)return; const d=await r.json();
       if(Array.isArray(d.bars)) S.bars=d.bars.map(b=>({t:ts(b.timestamp),o:num(b.open),h:num(b.high),l:num(b.low),c:num(b.close)})).filter(b=>b.t&&[b.o,b.h,b.l,b.c].every(Number.isFinite)).slice(-180);
       if(d.quote) S.quote={price:num(d.quote.price),timestamp:ts(d.quote.timestamp||d.quote.time)};
+      // Expose the same live Real-Market candles to the Performance resolver.
+      // The resolver uses the signal candle timestamp to score the completed
+      // entry candle, so it must not depend on the chart's private S.bars state.
+      window.__mmcChartBars=S.bars.slice();
+      window.__mmcChartMarketNow=Date.now();
       draw();
     }catch(_){ draw(); }
     finally{ S.loading=false; }
