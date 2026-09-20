@@ -245,9 +245,27 @@ function performanceResult(r){
   const result=String(r?.result||'').toUpperCase();
   return result==='লাভ'||result==='লস'||result==='HOLD'?r.result:'অপেক্ষমাণ';
 }
+let otcPerformanceBars=[];
+let otcPerformanceLoading=false;
+async function loadOtcPerformanceBars(){
+  if(otcPerformanceLoading||String(state.mode||'').toLowerCase()!=='quotex_otc')return;
+  otcPerformanceLoading=true;
+  try{
+    const r=await fetch('/quotex/otc-market?count=240',{credentials:'same-origin',cache:'no-store'});
+    const d=await r.json();
+    if(r.ok&&d.ok&&Array.isArray(d.candles)){
+      otcPerformanceBars=d.candles.map(b=>({t:Date.parse(b.timestamp),o:Number(b.open),h:Number(b.high),l:Number(b.low),c:Number(b.close)}))
+        .filter(b=>Number.isFinite(b.t)&&[b.o,b.h,b.l,b.c].every(Number.isFinite));
+    }
+  }catch(_){}
+  finally{otcPerformanceLoading=false;}
+}
 function resolvePerformanceResults(){
   const rows=performanceHistory();
-  const bars=Array.isArray(window.__mmcChartBars)?window.__mmcChartBars:[];
+  if(String(state.mode||'').toLowerCase()==='quotex_otc')loadOtcPerformanceBars();
+  const bars=String(state.mode||'').toLowerCase()==='quotex_otc'
+    ? otcPerformanceBars
+    : (Array.isArray(window.__mmcChartBars)?window.__mmcChartBars:[]);
   if(!rows.length||!bars.length)return;
   let changed=false;
   const now=Number(window.__mmcChartMarketNow||Date.now());
@@ -256,8 +274,9 @@ function resolvePerformanceResults(){
     const signalMs=Date.parse(row.signal_time_utc||'');
     if(!Number.isFinite(signalMs))continue;
 
-    // The signal is generated from the already-closed candle. The result must
-    // be measured on the NEXT completed 1-minute candle, not the signal candle.
+    // Real Market and OTC use the same performance rule: the signal is generated
+    // from a closed 1-minute candle, and the result is measured on the NEXT completed
+    // 1-minute candle. OTC bars come from the authenticated local collector cache.
     const nextBar=bars
       .filter(b=>Number.isFinite(Number(b?.t)) && Number(b.t)>signalMs)
       .sort((a,b)=>Number(a.t)-Number(b.t))[0];
