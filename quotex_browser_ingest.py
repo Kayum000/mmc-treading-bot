@@ -9,7 +9,7 @@ import time
 
 from flask import jsonify, request, session
 
-from data.quotex_otc import ingest_local_candles, local_stream_status, local_active_asset, local_candles_payload
+from data.quotex_otc import ingest_local_candles, ingest_local_ticks, local_stream_status, local_active_asset, local_candles_payload
 from data.otc_markets import display_for_asset, OTC_DISPLAY_PAIRS
 from signals.get_signal import get_signal
 
@@ -98,7 +98,7 @@ def real_market_ticks(asset: str, count: int = 1000):
 
 def init_quotex_browser_ingest(app):
     def allow_collector_endpoint():
-        if request.endpoint in {"quotex_ingest", "quotex_real_ingest", "quotex_stream_status", "quotex_current_market"} and _collector_secret_valid():
+        if request.endpoint in {"quotex_ingest", "quotex_tick_ingest", "quotex_real_ingest", "quotex_stream_status", "quotex_current_market"} and _collector_secret_valid():
             session["authenticated"] = True
         return None
     app.before_request_funcs.setdefault(None, []).insert(0, allow_collector_endpoint)
@@ -122,6 +122,20 @@ def init_quotex_browser_ingest(app):
         )
         if not accepted: return jsonify({"ok": False, "error": "No supported closed candle data found."}), 422
         return jsonify({"ok": True, "accepted": accepted, "status": status})
+
+    @app.route("/quotex/tick-ingest", methods=["POST"])
+    def quotex_tick_ingest():
+        if not _collector_secret_valid(): return jsonify({"ok": False, "error": "Invalid ingest key."}), 401
+        if not request.is_json: return jsonify({"ok": False, "error": "JSON body required."}), 415
+        payload = request.get_json(silent=True) or {}
+        try:
+            sent_at = payload.get("sent_at")
+            if sent_at is not None and abs(time.time() - float(sent_at)) > 30:
+                return jsonify({"ok": False, "error": "Stale collector payload."}), 408
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "Invalid sent_at."}), 400
+        accepted = ingest_local_ticks(payload)
+        return jsonify({"ok": True, "accepted": accepted})
 
     @app.route("/quotex/real-ingest", methods=["POST"])
     def quotex_real_ingest():
