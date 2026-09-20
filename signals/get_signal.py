@@ -115,7 +115,10 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
         raise RuntimeError("বর্তমান Quotex OTC মার্কেট শনাক্ত করা যায়নি। Quotex-এ একটি 1-minute OTC chart খোলা রাখুন।")
 
     signal_at_utc = datetime.now(timezone.utc)
-    signal_candle = signal_at_utc.replace(second=0, microsecond=0)
+    current_minute = signal_at_utc.replace(second=0, microsecond=0)
+    # AUTO is scheduled a few seconds before the boundary so the signal is
+    # prepared for the upcoming entry candle before that candle starts.
+    signal_candle = current_minute + timedelta(minutes=1) if signal_at_utc.second >= 55 else current_minute
 
     # The OTC collector already publishes only fully completed 1-minute candles.
     # Match Real-Market timing: analyze the latest closed candle and use the
