@@ -13,10 +13,11 @@ from signals.get_signal import get_signal
 PAIRS = [p.strip().upper() for p in os.getenv("REAL_SIGNAL_PAIRS", "AUD/CAD").split(",") if p.strip()]
 
 def seconds_to_signal_window() -> float:
-    # Run AUTO about 3 seconds before the minute boundary so the next
-    # 1-minute entry candle can be announced before it starts.
+    # Run AUTO just after the minute boundary. The signal engine analyzes
+    # the just-closed candle and announces the upcoming 1-minute entry candle,
+    # giving roughly one minute of lead time.
     now = time.time()
-    return max(0.01, 57.0 - (now % 60.0))
+    return max(0.05, 1.0 - (now % 60.0))
 
 
 def log(message: str) -> None:
@@ -26,8 +27,8 @@ def log(message: str) -> None:
 def run() -> None:
     log(f"started; pairs={PAIRS}; synchronized to 1-minute boundaries")
     while True:
-        # Run as close as possible to each minute boundary instead of using
-        # a free-running 60-second interval that drifts into the candle.
+        # Run just after each minute boundary so Real AUTO uses the same
+        # next-candle timing as the dashboard AUTO/Get Signal flow.
         time.sleep(seconds_to_signal_window())
         for pair in PAIRS:
             try:
