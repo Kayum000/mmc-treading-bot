@@ -1,32 +1,38 @@
-# EURUSD Tick-Run Signal Bot
+# MMC Trading Bot
 
-A rule-based BUY / SELL / NO_TRADE signal engine using the new **Tick-Run Pressure** strategy. The live signal path no longer uses the previous MMC, MTF, sweep, MSS, support/resistance, ORB, candle-pattern, EMA, RSI, MACD, TickFlow, or Liquidity-Response strategies.
+A market-signal engine for selected Real Forex and Quotex OTC 1-minute markets.
 
-## Live market data
+## Live signal pipeline
 
-- **REAL_MARKET:** BiQuote historical tick endpoint for the selected Forex pair.
-- The strategy uses the most recent 1,000 quote ticks.
-- BiQuote's public FX tick feed exposes bid/ask/mid but does not expose consolidated bid/ask traded volume, so live mode does not fabricate volume data.
+- **Real Market:** uses the selected Forex pair's browser WebSocket candle/quote data.
+- **Quotex OTC:** uses the selected OTC market from the authenticated local Quotex collector.
+- Both paths use the adaptive strategy in `strategy/adaptive_real.py`.
+- The adaptive engine selects its logic from the detected market regime (for example TREND, BREAKOUT, RANGE, or HIGH_VOLATILITY).
+- **Tick Pressure** remains available as a fallback when the adaptive engine has suitable fresh tick data; it is not the primary strategy.
 
-## New entry rule
+## Entry timing
 
-1. Build the latest midpoint from bid/ask quotes.
-2. Detect an **8-tick consecutive directional run**.
-3. Reject signals when the current spread is too wide.
-4. When bid/ask volume fields are available in research data, require strong same-side volume imbalance (0.60 threshold).
-5. With the live BiQuote FX feed, use only observable quote direction because consolidated quote volume is unavailable.
-6. Upward run → BUY; downward run → SELL; otherwise NO_TRADE.
+Signals are prepared for the upcoming 1-minute entry candle. The latest fully closed candle is used for analysis, and AUTO scheduling attempts to generate the signal a few seconds before the next minute boundary.
+
+## Performance
+
+Performance is based on the signal/entry candle's completed 1-minute candle:
+
+- BUY + green/bullish candle close → লাভ
+- BUY + red/bearish candle close → লস
+- SELL + red/bearish candle close → লাভ
+- SELL + green/bullish candle close → লস
 
 ## Strategy boundary
 
-`strategy/tick_run_pressure.py` is the only live entry strategy.
+`strategy/otc_candle_pressure.py` is the OTC adapter around the adaptive strategy.
 
-`signals/get_signal.py` no longer imports or calls the previous strategy engines.
+`strategy/tick_run_pressure.py` is retained as a tick-pressure fallback and is not the sole live entry strategy.
 
 ## Validation
 
-The tick-run rule was discovered from the supplied tick dataset. A single-day result is not treated as proof of a robust 70% accuracy rate. Multi-day, unseen-data walk-forward validation is required before claiming 70%+ accuracy.
+Signal generation and performance tracking are software rules, not guarantees of trading profitability. Out-of-sample testing is required before treating any accuracy figure as reliable.
 
 ## Important
 
-This repository generates signals only; it does not guarantee trading profitability and should not be treated as a validated live trading system until out-of-sample testing is completed.
+This repository generates trading signals only. It does not guarantee profitability and should not be treated as a validated trading system without appropriate testing and risk controls.
