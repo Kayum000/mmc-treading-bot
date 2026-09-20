@@ -15,7 +15,11 @@ from data.otc_markets import OTC_DISPLAY_PAIRS
 
 app = Flask(__name__)
 app.secret_key = os.getenv("APP_SECRET_KEY") or os.urandom(32)
-app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "1") == "1")
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "1") == "1",
+)
 
 REAL_PAIRS = [
     "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD",
@@ -25,7 +29,6 @@ REAL_PAIRS = [
 ]
 QUOTEX_OTC_PAIRS = list(OTC_DISPLAY_PAIRS)
 
-
 _DEFAULT_SETTINGS = {
     "market_mode": "",
     "pair": None,
@@ -34,6 +37,20 @@ _DEFAULT_SETTINGS = {
     "timezone": "Asia/Dhaka",
 }
 _USAGE_CACHE = {"data": None, "at": 0.0}
+
+
+def _login_configured() -> bool:
+    return bool((os.getenv("APP_LOGIN_USERNAME") or "admin").strip() and (os.getenv("APP_LOGIN_PASSWORD") or "").strip())
+
+
+def _valid_login(username: str, password: str) -> bool:
+    expected_user = (os.getenv("APP_LOGIN_USERNAME") or "admin").strip()
+    expected_password = os.getenv("APP_LOGIN_PASSWORD") or ""
+    return bool(
+        expected_password
+        and hmac.compare_digest((username or "").strip(), expected_user)
+        and hmac.compare_digest(password or "", expected_password)
+    )
 
 
 def _usage_view():
@@ -87,6 +104,29 @@ def _save_settings(mode: str, pair: str, auto_signal=None, min_confidence=None, 
     return current
 
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if session.get("authenticated"):
+        return redirect(url_for("index"))
+    error = None
+    if not _login_configured():
+        error = "লগইন চালু করতে Render Environment-এ APP_LOGIN_PASSWORD সেট করুন।"
+    elif request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        if _valid_login(username, password):
+            session.clear()
+            session["authenticated"] = True
+            return redirect(url_for("index"))
+        error = "Username অথবা Password ভুল।"
+    return render_template("login.html", error=error)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
 
 @app.route("/favicon.ico")
 def favicon():
@@ -110,6 +150,12 @@ def _collector_request_authenticated() -> bool:
 def require_dashboard():
     if _collector_request_authenticated():
         return None
+    if request.endpoint in {"login", "logout", "favicon", "privacy", "static"}:
+        return None
+    if not session.get("authenticated"):
+        if request.path.startswith("/api/") or request.path.startswith("/quotex/") or request.path in {"/select-market", "/auto-signal", "/news-alert", "/news-direction"}:
+            return jsonify({"ok": False, "error": "লগইন প্রয়োজন।"}), 401
+        return redirect(url_for("login"))
     return None
 
 
