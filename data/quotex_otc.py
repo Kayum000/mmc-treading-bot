@@ -192,6 +192,23 @@ def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> 
     return local
 
 
+def local_candles_payload(asset: str | None = None, count: int = 240) -> dict:
+    """Return fresh closed OTC candles for the authenticated chart/performance UI."""
+    chosen = asset or local_active_asset()
+    if not chosen or chosen not in OTC_PAIRS:
+        return {"ok": False, "asset": chosen, "candles": []}
+    frame = _local_candles(chosen, max(8, min(int(count), 300)))
+    if frame is None:
+        return {"ok": False, "asset": chosen, "candles": []}
+    candles = []
+    for _, row in frame.iterrows():
+        candles.append({
+            "timestamp": row["timestamp"].isoformat(),
+            "open": float(row["open"]), "high": float(row["high"]),
+            "low": float(row["low"]), "close": float(row["close"]),
+        })
+    return {"ok": True, "asset": chosen, "candles": candles, "source": "Quotex local browser WebSocket collector"}
+
 def quotex_status(asset: str) -> dict:
     started = time.time()
     local = local_stream_status(asset)
