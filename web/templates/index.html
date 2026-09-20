@@ -300,6 +300,8 @@ function resolvePerformanceResults(){
   }
   if(changed){try{localStorage.setItem(PERF_KEY,JSON.stringify(rows.slice(0,200)))}catch(_){}}
   renderPerformanceSummary();
+  const performanceBody=$('performance-modal-body');
+  if(changed&&performanceBody)performanceBody.innerHTML=performanceTable();
 }
 function recordPerformance(r){
   if(!r||!r.signal)return;
