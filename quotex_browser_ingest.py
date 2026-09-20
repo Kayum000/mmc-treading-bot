@@ -197,6 +197,48 @@ def init_quotex_browser_ingest(app):
             logger.exception("FLOATING_OTC_SIGNAL_FAILED pair=%s", pair)
             return jsonify({"ok": False, "error": str(exc), "error_type": type(exc).__name__}), 502
 
+    @app.route("/quotex/android-ingest", methods=["POST"])
+    def quotex_android_ingest():
+        """Receive structured candle/tick data from the optional Android Quotex bridge.
+
+        This endpoint deliberately reuses the existing authenticated collector
+        adapters, so the Android path cannot bypass the existing strategy or
+        change the current Windows/browser collector behavior.
+        """
+        if not _collector_secret_valid():
+            return jsonify({"ok": False, "error": "Invalid ingest key."}), 401
+        if not request.is_json:
+            return jsonify({"ok": False, "error": "JSON body required."}), 415
+        payload = request.get_json(silent=True) or {}
+        try:
+            sent_at = payload.get("sent_at")
+            if sent_at is not None and abs(time.time() - float(sent_at)) > 30:
+                return jsonify({"ok": False, "error": "Stale collector payload."}), 408
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "Invalid sent_at."}), 400
+
+        # The Android bridge is an additional source only. It feeds the same
+        # normalized OTC cache used by the current signal engine.
+        accepted_candles = ingest_local_candles(payload)
+        accepted_ticks = ingest_local_ticks(payload)
+        status = local_stream_status()
+        logger.info(
+            "QUOTEX_ANDROID_INGEST candles=%s ticks=%s assets=%s active=%s",
+            accepted_candles,
+            accepted_ticks,
+            status.get("assets"),
+            status.get("active_asset"),
+        )
+        if not accepted_candles and not accepted_ticks:
+            return jsonify({"ok": False, "error": "No supported candle or tick data found."}), 422
+        return jsonify({
+            "ok": True,
+            "source": "android_bridge",
+            "accepted_candles": accepted_candles,
+            "accepted_ticks": accepted_ticks,
+            "status": status,
+        })
+
     @app.route("/quotex/current-market", methods=["GET"])
     def quotex_current_market():
         asset = local_active_asset()
