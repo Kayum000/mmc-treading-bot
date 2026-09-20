@@ -341,12 +341,32 @@ function openPerformance(){
   $('performance-clear').onclick=()=>{if(!performanceHistory().length){toast('Performance history already empty');return}if(confirm('সব Performance history মুছে ফেলবেন?')){localStorage.removeItem(PERF_KEY);renderPerformanceSummary();$('performance-modal-body').innerHTML=performanceTable();toast('Performance history cleared')}};
 }
 $('performance-card').onclick=openPerformance;
-document.addEventListener('click',e=>{const card=e.target.closest?.('#performance-card');if(card){e.preventDefault();e.stopPropagation();openPerformance()}});
+document.addEventListener('click',e=>{const card=e.target.closest?.('#performance-card');if(card){e.preventDefault();e.stopPropagation();if(e.target.closest?.('#performance-refresh-card'))return;openPerformance()}});
+const perfRefreshCard=$('performance-refresh-card');
+if(perfRefreshCard)perfRefreshCard.onclick=async e=>{
+  e.preventDefault();e.stopPropagation();
+  const btn=e.currentTarget,label=$('performance-refresh-label'),status=$('performance-refresh-status');
+  btn.disabled=true;btn.textContent='⟳ Refresh হচ্ছে…';
+  if(label)label.textContent='ডেটা আপডেট হচ্ছে…';
+  if(status)status.textContent='Performance ডেটা রিফ্রেশ হচ্ছে';
+  try{
+    loadPerformance();
+    await new Promise(r=>setTimeout(r,250));
+    if(label)label.textContent='✓ সর্বশেষ আপডেট: '+new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    if(status)status.textContent='✓ Performance আপডেট হয়েছে';
+    btn.textContent='✓ Done';
+    setTimeout(()=>{btn.disabled=false;btn.textContent='↻ Refresh'},1200);
+  }catch(_){
+    if(label)label.textContent='✕ আপডেট হয়নি — আবার চেষ্টা করুন';
+    if(status)status.textContent='✕ Performance আপডেট ব্যর্থ';
+    btn.disabled=false;btn.textContent='↻ Refresh';
+  }
+};
 function loadPerformance(){resolvePerformanceResults();renderPerformanceSummary();}
 function ensurePerformanceCard(){
   const section=$('performance');
   if(!section||$('performance-card'))return;
-  section.innerHTML='<button type="button" class="performance-panel performance-compact-card" id="performance-card" aria-label="Open Performance"><div class="performance-card-main"><span class="round-icon">▥</span><div><h2>Performance</h2><p>Signal results & history</p></div></div><div class="performance-summary"><span>লাভ <b id="perf-win-count">0</b></span><span>লস <b id="perf-loss-count">0</b></span><span>HOLD <b id="perf-hold-count">0</b></span></div><span class="performance-open">View ›</span></button>';
+  section.innerHTML='<div class="performance-panel performance-compact-card" id="performance-card" role="button" tabindex="0" aria-label="Open Performance"><div class="performance-card-main"><span class="round-icon">▥</span><div><h2>Performance</h2><p id="performance-refresh-label">Signal results & history</p><small id="performance-refresh-status" style="display:block;margin-top:3px;color:#8fb1cf;font-size:10px">Ready to refresh</small></div></div><div class="performance-summary"><span>লাভ <b id="perf-win-count">0</b></span><span>লস <b id="perf-loss-count">0</b></span><span>HOLD <b id="perf-hold-count">0</b></span></div><div class="perf-actions" style="display:flex;align-items:center;gap:8px"><button type="button" class="mini-btn" id="performance-refresh-card" aria-label="Refresh Performance">↻ Refresh</button><span class="performance-open">View ›</span></div></div>';
   $('performance-card').onclick=openPerformance;
   renderPerformanceSummary();
 }
