@@ -9,7 +9,7 @@ import time
 
 from flask import jsonify, request, session
 
-from data.quotex_otc import ingest_local_candles, local_stream_status, local_active_asset
+from data.quotex_otc import ingest_local_candles, local_stream_status, local_active_asset, local_candles_payload
 from data.otc_markets import display_for_asset, OTC_DISPLAY_PAIRS
 from signals.get_signal import get_signal
 
@@ -140,6 +140,12 @@ def init_quotex_browser_ingest(app):
         with _REAL_MARKET_LOCK:
             state = _REAL_MARKET.get(asset, {"bars": [], "quote": None})
             return jsonify({"ok": bool(state.get("bars") or state.get("quote")), "asset": asset, "bars": list(state.get("bars") or []), "quote": state.get("quote"), "updated_at": state.get("updated_at"), "source": "Quotex browser WebSocket"})
+
+    @app.route("/quotex/otc-market", methods=["GET"])
+    def quotex_otc_market():
+        asset = request.args.get("asset", "").strip()
+        result = local_candles_payload(asset or None, count=240)
+        return jsonify(result)
 
     @app.route("/quotex/stream-status", methods=["GET"])
     def quotex_stream_status():
