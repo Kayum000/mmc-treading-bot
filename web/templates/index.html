@@ -78,6 +78,57 @@ function modalOpen(title,body,extra=''){ $('modal-title').textContent=title;$('m
 function closeModal(){modal.classList.remove('open')}
 $('modal-close').onclick=closeModal;modal.onclick=e=>{if(e.target===modal)closeModal()};
 $('menu').onclick=()=>{$('sidebar').classList.toggle('open')};
+
+function handleSidebarNav(e){
+  const btn=e.target.closest?.('.nav button');
+  if(!btn)return;
+  e.preventDefault();
+  const action=btn.dataset.action;
+  const target=btn.dataset.scroll;
+  const closeMobile=()=>{if(window.innerWidth<=760)$('sidebar').classList.remove('open')};
+  if(target==='top'){
+    $('top')?.scrollIntoView({behavior:'smooth',block:'start'});
+    closeMobile();
+    return;
+  }
+  if(target==='performance'){
+    $('performance')?.scrollIntoView({behavior:'smooth',block:'start'});
+    setTimeout(()=>openPerformance(),180);
+    closeMobile();
+    return;
+  }
+  if(target==='news'){
+    $('news')?.scrollIntoView({behavior:'smooth',block:'start'});
+    closeMobile();
+    return;
+  }
+  if(target==='chart'){
+    $('chart')?.scrollIntoView({behavior:'smooth',block:'start'});
+    closeMobile();
+    return;
+  }
+  if(action==='signal'){
+    closeMobile();
+    $('get-signal')?.click();
+    return;
+  }
+  if(action==='auto'){
+    closeMobile();
+    $('auto-signal')?.click();
+    return;
+  }
+  if(action==='market'){
+    closeMobile();
+    $('signal-section')?.scrollIntoView({behavior:'smooth',block:'start'});
+    setTimeout(()=>pair?.focus(),250);
+    return;
+  }
+  if(action==='settings'){
+    closeMobile();
+    modalOpen('Settings','এখান থেকে Dashboard-এর display settings নিয়ন্ত্রণ করা যাবে।');
+  }
+}
+document.addEventListener('click',handleSidebarNav);
 function activeMode(m){document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));}
 function setMode(m){state.mode=m;activeMode(m);const opts=[...pair.options];opts.forEach(o=>{if(o.value)o.hidden=o.dataset.mode!==m});const current=opts.find(o=>o.value===state.pair&&!o.hidden);if(!current){const first=opts.find(o=>o.value&&!o.hidden);state.pair=first?.value||'';pair.value=state.pair}else pair.value=state.pair;syncMarket();updateStatus();loadNews();updateChartSelection();}
 async function syncMarket(){if(!state.mode||!state.pair)return false;try{const r=await fetch('/select-market',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'},credentials:'same-origin',body:new URLSearchParams({mode:state.mode,pair:state.pair}),cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Unable to select market');return true}catch(e){toast(e.message);return false}}
