@@ -6,6 +6,12 @@ import logging
 import os
 import threading
 import time
+from io import BytesIO
+
+try:
+    from PIL import Image
+except ImportError:  # pragma: no cover - pinned deployment dependency
+    Image = None
 
 from flask import jsonify, request, session
 
@@ -238,6 +244,61 @@ def init_quotex_browser_ingest(app):
             "accepted_ticks": accepted_ticks,
             "status": status,
         })
+
+    @app.route("/quotex/android-frame", methods=["POST"])
+    def quotex_android_frame():
+        """Receive a bounded JPEG frame for Android chart calibration."""
+        if not _collector_secret_valid():
+            return jsonify({"ok": False, "error": "Invalid ingest key."}), 401
+        if not request.data:
+            return jsonify({"ok": False, "error": "JPEG body required."}), 415
+        if len(request.data) > 220_000:
+            return jsonify({"ok": False, "error": "Frame too large."}), 413
+        try:
+            sent_at = float(request.headers.get("X-MMC-Frame-Time", ""))
+            if abs(time.time() - sent_at) > 30:
+                return jsonify({"ok": False, "error": "Stale frame."}), 408
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "Invalid frame timestamp."}), 400
+        if Image is None:
+            return jsonify({"ok": False, "error": "Image probe dependency unavailable."}), 503
+        try:
+            image = Image.open(BytesIO(request.data)).convert("RGB")
+            width, height = image.size
+            sample = image.resize((max(1, min(360, width)), max(1, min(640, height))))
+            pixels = sample.load()
+            sw, sh = sample.size
+            green_cols = 0
+            red_cols = 0
+            for x in range(sw):
+                green_hits = 0
+                red_hits = 0
+                for y in range(int(sh * 0.08), int(sh * 0.78)):
+                    rr, gg, bb = pixels[x, y]
+                    if gg > rr * 1.18 and gg > bb * 1.08 and gg > 70:
+                        green_hits += 1
+                    if rr > gg * 1.18 and rr > bb * 1.08 and rr > 70:
+                        red_hits += 1
+                if green_hits >= 2:
+                    green_cols += 1
+                if red_hits >= 2:
+                    red_cols += 1
+            return jsonify({
+                "ok": True,
+                "source": "android_bridge_frame_probe",
+                "frame": {"width": width, "height": height, "bytes": len(request.data)},
+                "chart_probe": {
+                    "green_columns": green_cols,
+                    "red_columns": red_cols,
+                    "sample_width": sw,
+                    "sample_height": sh,
+                    "status": "color-evidence-detected" if (green_cols or red_cols) else "no-candle-color-evidence",
+                },
+                "note": "Pixel probe only; no OHLC or BUY/SELL signal is generated from this frame.",
+            })
+        except Exception as exc:
+            logger.exception("QUOTEX_ANDROID_FRAME_FAILED")
+            return jsonify({"ok": False, "error": str(exc), "error_type": type(exc).__name__}), 422
 
     @app.route("/quotex/current-market", methods=["GET"])
     def quotex_current_market():
