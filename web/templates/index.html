@@ -255,17 +255,28 @@ function resolvePerformanceResults(){
     if(row.result!=='অপেক্ষমাণ')continue;
     const signalMs=Date.parse(row.signal_time_utc||'');
     if(!Number.isFinite(signalMs))continue;
-    const bar=bars.find(b=>Number(b?.t)===signalMs);
-    if(!bar||now < signalMs+60000)continue;
+
+    // The signal is generated from the already-closed candle. The result must
+    // be measured on the NEXT completed 1-minute candle, not the signal candle.
+    const nextBar=bars
+      .filter(b=>Number.isFinite(Number(b?.t)) && Number(b.t)>signalMs)
+      .sort((a,b)=>Number(a.t)-Number(b.t))[0];
+    if(!nextBar)continue;
+
+    const nextBarMs=Number(nextBar.t);
+    if(now < nextBarMs+60000)continue;
+
     const entry=Number(row.entry_price);
-    const close=Number(bar.c);
-    const open=Number(bar.o);
+    const close=Number(nextBar.c);
+    const open=Number(nextBar.o);
     const base=Number.isFinite(entry)?entry:open;
     if(!Number.isFinite(close)||!Number.isFinite(base))continue;
+
     const move=close-base;
     row.result=move>0?(row.signal==='BUY'?'লাভ':'লস'):move<0?(row.signal==='SELL'?'লাভ':'লস'):'HOLD';
     row.outcome_price=close;
-    row.outcome_candle_time_utc=new Date(signalMs).toISOString();
+    row.outcome_candle_time_utc=new Date(nextBarMs).toISOString();
+    row.outcome_basis='পরের সম্পূর্ণ ১-মিনিট candle-এর close';
     changed=true;
   }
   if(changed){try{localStorage.setItem(PERF_KEY,JSON.stringify(rows.slice(0,200)))}catch(_){}}
