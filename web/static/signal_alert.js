@@ -133,6 +133,6 @@
     new MutationObserver(()=>setTimeout(emit,0)).observe(r,{childList:true,subtree:true,characterData:true});
     emit();
   }
-  document.addEventListener('DOMContentLoaded',()=>{configureDownloadApp();installQuotexLabels();cleanUnwantedAutoStatus();watchEntryTitle();watchRenderedSignal();stabilizeModernChart();bindDashboardChartControls();bindRealFunctionality();bindReplacementWatchers();const a=document.getElementById('auto-status');if(a&&window.MutationObserver)new MutationObserver(cleanUnwantedAutoStatus).observe(a,{childList:true,characterData:true,subtree:true})});
+  document.addEventListener('DOMContentLoaded',()=>{configureDownloadApp();installQuotexLabels();cleanUnwantedAutoStatus();watchEntryTitle();watchRenderedSignal();stabilizeModernChart();bindDashboardChartControls();bindRealFunctionality();bindReplacementWatchers();installHistoryNav();watchSignalHistory();const a=document.getElementById('auto-status');if(a&&window.MutationObserver)new MutationObserver(cleanUnwantedAutoStatus).observe(a,{childList:true,characterData:true,subtree:true})});
   document.addEventListener('click',e=>{if(!e.target?.closest?.('.primary,.secondary,#auto-toggle,#enable-alerts'))window.enableSignalAudio()},{capture:true});
 })();
