@@ -280,6 +280,8 @@ function recordPerformance(r){
     signal:String(r.signal).toUpperCase(),
     entry_price:r.entry_price??null,
     candle_color:r.signal_candle_color||'—',
+    signal_time_utc:r.signal_time_utc||new Date().toISOString(),
+    analysis_candle_time_utc:r.analysis_candle_time_utc||null,
     result:(r.result==='লাভ'||r.result==='লস'||r.result==='HOLD')?r.result:'অপেক্ষমাণ'
   };
   const rows=performanceHistory().filter(x=>x.id!==row.id);
