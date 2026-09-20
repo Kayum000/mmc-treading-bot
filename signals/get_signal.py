@@ -5,7 +5,7 @@ from datetime import datetime, timezone, timedelta
 
 import pandas as pd
 
-from data.quotex_otc import fetch_quotex_candles, OTC_PAIRS, local_active_asset
+from data.quotex_otc import fetch_quotex_candles, OTC_PAIRS, local_active_asset, local_ticks
 from data.otc_markets import display_for_asset, asset_for_display
 from strategy.otc_candle_pressure import generate_signal as generate_otc_signal
 
@@ -123,7 +123,8 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
     # The adaptive Real strategy requires at least 60 closed candles.
     candles = fetch_quotex_candles(asset, count=80)
 
-    result = generate_otc_signal(candles)
+    ticks = local_ticks(asset)
+    result = generate_otc_signal(candles, ticks=ticks)
     last = candles.iloc[-1] if not candles.empty else None
     signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
     is_entry = result.action in {"BUY", "SELL"}
