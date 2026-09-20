@@ -337,7 +337,24 @@ function openPerformance(){
   const extra='<div class="performance-toolbar"><button type="button" class="mini-btn" id="performance-refresh">↻ Refresh</button><button type="button" class="mini-btn" id="performance-clear">Clear</button></div><div id="performance-modal-body">'+performanceTable()+'</div>';
   modalOpen('Performance','',extra);
   $('modal').querySelector('.modal-card')?.classList.add('performance-modal');
-  $('performance-refresh').onclick=()=>{$('performance-modal-body').innerHTML=performanceTable();renderPerformanceSummary()};
+  $('performance-refresh').onclick=async e=>{
+    e.preventDefault();e.stopPropagation();
+    const btn=e.currentTarget,body=$('performance-modal-body');
+    btn.disabled=true;btn.textContent='⟳ Refresh হচ্ছে…';
+    if(body)body.innerHTML='<div class="performance-empty">ডেটা আপডেট হচ্ছে…</div>';
+    try{
+      loadPerformance();
+      await new Promise(r=>setTimeout(r,300));
+      if(body)body.innerHTML=performanceTable();
+      btn.textContent='✓ আপডেট হয়েছে';
+      toast('Performance ডেটা আপডেট হয়েছে');
+      setTimeout(()=>{btn.disabled=false;btn.textContent='↻ Refresh'},1000);
+    }catch(_){
+      if(body)body.innerHTML=performanceTable();
+      btn.disabled=false;btn.textContent='↻ Refresh';
+      toast('Performance আপডেট হয়নি');
+    }
+  };
   $('performance-clear').onclick=()=>{if(!performanceHistory().length){toast('Performance history already empty');return}if(confirm('সব Performance history মুছে ফেলবেন?')){localStorage.removeItem(PERF_KEY);renderPerformanceSummary();$('performance-modal-body').innerHTML=performanceTable();toast('Performance history cleared')}};
 }
 $('performance-card').onclick=openPerformance;
