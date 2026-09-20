@@ -27,7 +27,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
     current_minute = signal_at_utc.replace(second=0, microsecond=0)
     # When AUTO requests a few seconds before the minute boundary, prepare the
     # signal for the upcoming candle instead of waiting for that candle to start.
-    signal_candle = current_minute + timedelta(minutes=1) if signal_at_utc.second >= 55 else current_minute
+    signal_candle = current_minute + timedelta(minutes=1)
     asset = "".join(ch for ch in pair.upper() if ch.isalnum() or ch in "._-")
 
     with _REAL_MARKET_LOCK:
@@ -38,7 +38,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
     if not candles.empty:
         candles["timestamp"] = pd.to_datetime(candles["timestamp"], unit="s", utc=True, errors="coerce")
         candles = candles.dropna(subset=["timestamp"])
-        candles = candles[candles["timestamp"] < signal_candle].reset_index(drop=True)
+        candles = candles[candles["timestamp"] < current_minute].reset_index(drop=True)
 
     if len(candles) < 60:
         result = generate_adaptive_signal(candles, ticks=ticks)
@@ -118,7 +118,7 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
     current_minute = signal_at_utc.replace(second=0, microsecond=0)
     # AUTO is scheduled a few seconds before the boundary so the signal is
     # prepared for the upcoming entry candle before that candle starts.
-    signal_candle = current_minute + timedelta(minutes=1) if signal_at_utc.second >= 55 else current_minute
+    signal_candle = current_minute + timedelta(minutes=1)
 
     # The OTC collector already publishes only fully completed 1-minute candles.
     # Match Real-Market timing: analyze the latest closed candle and use the
