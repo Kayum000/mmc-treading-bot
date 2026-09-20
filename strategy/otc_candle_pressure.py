@@ -22,9 +22,9 @@ class OTCSignal:
     strategy: str
 
 
-def generate_signal(candles: pd.DataFrame) -> OTCSignal:
-    """Generate an OTC signal with the exact same adaptive logic as Real."""
-    result = generate_adaptive_signal(candles)
+def generate_signal(candles: pd.DataFrame, ticks: pd.DataFrame | None = None) -> OTCSignal:
+    """Use the same adaptive candle logic, with OTC Tick Pressure as fallback."""
+    result = generate_adaptive_signal(candles, ticks=ticks)
 
     return OTCSignal(
         action=result.action,
