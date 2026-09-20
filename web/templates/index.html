@@ -162,7 +162,9 @@ body{background:var(--mmc-bg)!important;color:var(--mmc-text)!important}
 (()=>{
 'use strict';
 const $=id=>document.getElementById(id), pair=$('pair'), modal=$('modal'), toastEl=$('toast');
-const state={mode:{{ mode|tojson }},pair:{{ pair|tojson }},auto:false,autoTimer:null,news:[]};
+const AUTO_SIGNAL_KEY='mmc_auto_signal_enabled_v1';
+let savedAutoSignal=false;try{savedAutoSignal=localStorage.getItem(AUTO_SIGNAL_KEY)==='1'}catch(_){}
+const state={mode:{{ mode|tojson }},pair:{{ pair|tojson }},auto:savedAutoSignal,autoTimer:null,news:[]};
 const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(m){toastEl.textContent=m;toastEl.classList.add('show');clearTimeout(toastEl._t);toastEl._t=setTimeout(()=>toastEl.classList.remove('show'),2600)}
 function modalOpen(title,body,extra=''){ $('modal-title').textContent=title;$('modal-body').textContent=body;$('modal-extra').innerHTML=extra;modal.classList.add('open') }
@@ -229,7 +231,7 @@ async function getSignal(){if(!state.pair){toast('প্রথমে একট�
 $('get-signal').onclick=getSignal;$('auto-signal').onclick=async()=>{if(!state.pair){toast('প্রথমে একটি মার্কেট নির্বাচন করুন।');return}if(!(await syncMarket()))return;const btn=$('auto-signal');btn.disabled=true;btn.textContent='Running…';try{const r=await fetch('/auto-signal',{credentials:'same-origin',cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Auto signal failed');renderResult(d.result);if(window.alertForSignal)window.alertForSignal(d.result);recordPerformance(d.result);toast('Auto signal generated');loadPerformance()}catch(e){toast(e.message)}finally{btn.disabled=false;btn.textContent='◉ Auto Signal'}};
 function renderResult(r){if(!r)return;$('result-container').innerHTML=`<div class="signal-card"><div class="signal-top"><span class="signal-badge ${String(r.signal).toUpperCase()==='BUY'?'buy':String(r.signal).toUpperCase()==='SELL'?'sell':'hold'}">${esc(r.signal)}</span><div><div class="signal-pair">${esc(r.pair||state.pair)}</div><div class="signal-side">${esc(r.signal||'HOLD')}</div></div><div class="signal-time">${esc(r.signal_time_utc||r.entry_time_utc||'—')}</div></div><div class="signal-fields"><span>Entry Price</span><b>${r.entry_price==null?'N/A':esc(r.entry_price)}</b><span>Target 1</span><b>${esc(r.target_1??r.target1)}</b><span>Target 2</span><b>${esc(r.target_2??r.target2)}</b><span>Stop Loss</span><b>${esc(r.stop_loss)}</b></div><button type="button" class="signal-button" id="view-signal">View All Signals →</button><div class="details" style="margin-top:10px;color:#9eb7cf;font-size:10px"><div>Signal Created: ${esc(r.signal_created_bd||r.signal_created_utc||'—')}</div><div>Signal Time: ${esc(r.signal_time_bd||r.signal_time_utc||'—')}</div><div>Timeframe: ${esc(r.timeframe)}</div><div>Entry TF: ${esc(r.entry_timeframe||'1m')}</div><div>Buy score: ${esc(r.buy_score)}</div><div>Sell score: ${esc(r.sell_score)}</div><div>Reason: ${esc(r.reason)}</div></div></div>`;bindResult()}
 function bindResult(){$('view-signal')?.addEventListener('click',()=>modalOpen('Latest Signal','The latest generated signal is shown here. Generate another signal to update it.'))}
-$('auto-toggle').onchange=e=>{state.auto=e.target.checked;clearTimeout(state.autoTimer);if(state.auto){$('auto-status').textContent='AUTO SIGNAL চালু • পরের 1-minute entry-এর জন্য অপেক্ষা';scheduleAuto()}else $('auto-status').textContent='AUTO SIGNAL বন্ধ'};
+$('auto-toggle').onchange=e=>{state.auto=e.target.checked;clearTimeout(state.autoTimer);if(state.auto){$('auto-status').textContent='AUTO SIGNAL চালু • পরের 1-minute entry-এর জন্য অপেক্ষা';scheduleAuto()}else $('auto-status').textContent='AUTO SIGNAL বন্ধ';try{localStorage.setItem(AUTO_SIGNAL_KEY,state.auto?'1':'0')}catch(_){}};
 function scheduleAuto(){clearTimeout(state.autoTimer);if(!state.auto||!state.pair)return;const now=Date.now();const minute=Math.floor(now/60000)*60000;const next=minute+60000+1000;state.autoTimer=setTimeout(async()=>{await runAuto();scheduleAuto()},Math.max(50,next-now))}
 async function runAuto(){if(!state.auto||!state.pair)return;try{const r=await fetch('/auto-signal',{credentials:'same-origin',cache:'no-store'});const d=await r.json();if(r.ok&&d.ok){renderResult(d.result);if(window.alertForSignal)window.alertForSignal(d.result);recordPerformance(d.result);$('auto-status').textContent=`AUTO SIGNAL চালু • ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;loadPerformance()}}catch(e){$('auto-status').textContent='AUTO SIGNAL error'}}
 $('enable-alerts').onclick=async()=>{if(window.enableSignalAudio)window.enableSignalAudio();toast('Signal alerts enabled for this browser when permission is granted.')};
@@ -352,6 +354,19 @@ setInterval(resolvePerformanceResults,2000);
 const performanceDomGuard=new MutationObserver(()=>{if(!$('performance-card'))ensurePerformanceCard()});
 performanceDomGuard.observe(document.body,{childList:true,subtree:true});
 ensurePerformanceCard();
+// Keep AUTO SIGNAL enabled across a full browser/page refresh.
+// The setting is local to this browser; the current market is re-synced before scheduling.
+(function restoreAutoSignal(){
+  const toggle=$('auto-toggle');
+  if(!toggle||!state.auto)return;
+  toggle.checked=true;
+  $('auto-status').textContent='AUTO SIGNAL চালু • মার্কেট সিঙ্ক হচ্ছে…';
+  syncMarket().then(ok=>{
+    if(!state.auto)return;
+    if(ok){$('auto-status').textContent='AUTO SIGNAL চালু • পরের 1-minute entry-এর জন্য অপেক্ষা';scheduleAuto()}
+    else{$('auto-status').textContent='AUTO SIGNAL চালু • মার্কেট সিঙ্ক হয়নি'}
+  }).catch(()=>{if(state.auto)$('auto-status').textContent='AUTO SIGNAL চালু • মার্কেট সিঙ্ক হয়নি'});
+})();
 $('notify-btn').onclick=()=>modalOpen('Notifications','No new critical notifications. Signal alerts can be enabled with the 🔔 Enable Alerts button.');$('theme-btn').onclick=()=>toast('MMC dark dashboard is optimized for trading visibility');
 function updateChartSelection(){window.dispatchEvent(new Event('mmc-market-changed'))}
 const MMC_THEMES=[
