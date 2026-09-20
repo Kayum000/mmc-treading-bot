@@ -283,9 +283,16 @@ class Collector:
         log(f"sent {accepted} closed candle rows to MMC ({len(otc_rows)} OTC, {len(real_rows)} real-market)")
 
     def _send_quote(self, asset: str, price: float, ts: float) -> None:
-        if asset in OTC_PAIRS:
-            return
         now = time.monotonic()
+        if asset in OTC_PAIRS:
+            if now - self.last_quote_send.get(asset, 0.0) < 0.20:
+                return
+            self._post("/quotex/tick-ingest", {
+                "sent_at": time.time(), "asset": asset,
+                "ticks": [{"price": price, "timestamp": ts}],
+            })
+            self.last_quote_send[asset] = now
+            return
         if now - self.last_quote_send.get(asset, 0.0) < 1.0:
             return
         data = self._post("/quotex/real-ingest", {
