@@ -12,6 +12,34 @@
 @media(max-width:1200px){.hero{grid-template-columns:1fr 1fr}.hero-copy{grid-column:1/-1}.dashboard-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.news{grid-column:1/-1}}
 @media(max-width:760px){.app{display:block}.sidebar{position:fixed;left:0;top:0;width:280px;transform:translateX(-102%);transition:.2s}.sidebar.open{transform:translateX(0)}.mobile-menu{display:block}.topbar{height:58px;padding:0 12px}.top-actions{gap:7px}.top-actions .desktop-only{display:none}.avatar{padding-left:7px}.avatar div{display:none}.avatar .initials{width:34px;height:34px}.content{padding:8px 10px 85px}.hero{grid-template-columns:1fr 1fr;padding:12px;gap:10px}.hero-copy{grid-column:1/-1}.bot-icon{width:52px;height:52px}.hero h1{font-size:16px}.hero small{font-size:9px}.market-wrap{grid-column:1/-1}.primary,.secondary{width:100%;padding:0 10px;font-size:11px}.dashboard-grid{grid-template-columns:1fr;gap:10px}.news{grid-column:auto}.chart-panel{height:330px}.chart-controls .tf{display:none}.download-app{right:10px;bottom:10px}.signal-time{font-size:8px}.panel{padding:12px}}
 @media(max-width:390px){.hero{grid-template-columns:1fr}.mode-row{flex-wrap:wrap}.primary,.secondary{grid-column:auto}}
+<style id="mmc-theme-overrides">
+:root{--mmc-bg:#06172e;--mmc-main:#06172e;--mmc-side:#061426;--mmc-panel:#071f3a;--mmc-panel2:#061a31;--mmc-border:#12365d;--mmc-accent:#1684ee;--mmc-accent2:#0759ba;--mmc-soft:#0a2440;--mmc-text:#e8f2ff}
+body{background:var(--mmc-bg)!important;color:var(--mmc-text)!important}
+.sidebar{background:linear-gradient(180deg,var(--mmc-side),var(--mmc-bg))!important;border-color:var(--mmc-border)!important}
+.main{background:radial-gradient(circle at 50% -15%,var(--mmc-panel) 0,var(--mmc-main) 43%,var(--mmc-bg) 100%)!important}
+.topbar,.brand{border-color:var(--mmc-border)!important}
+.nav button:hover,.nav button.active,.nav a:hover{background:linear-gradient(90deg,var(--mmc-accent2),var(--mmc-accent))!important;border-color:var(--mmc-accent)!important}
+.nav button,.nav a{color:color-mix(in srgb,var(--mmc-text) 72%,#789 28%)!important}
+.hero,.panel,.performance-panel,.chart-panel,.chart-head,.signal-card,.modal-card,.download-app{border-color:var(--mmc-border)!important}
+.hero{background:linear-gradient(100deg,var(--mmc-panel),var(--mmc-panel2))!important}
+.panel,.performance-panel{background:linear-gradient(180deg,var(--mmc-panel),var(--mmc-panel2))!important}
+.chart-panel{background:var(--mmc-panel2)!important}.chart-head{background:var(--mmc-panel)!important}
+.chart-canvas-wrap{background:linear-gradient(180deg,var(--mmc-panel2),var(--mmc-bg))!important}
+.market-select select,.mode-btn,.period,.mini-btn,.chart-controls select,.chart-controls button,.refresh{background:var(--mmc-soft)!important;border-color:var(--mmc-border)!important}
+.mode-btn.active,.secondary{background:linear-gradient(135deg,var(--mmc-accent2),var(--mmc-accent))!important;border-color:var(--mmc-accent)!important}
+.signal-button{background:linear-gradient(135deg,var(--mmc-accent2),var(--mmc-accent))!important}
+.bot-icon{background:var(--mmc-accent2)!important;border-color:var(--mmc-accent)!important}
+.round-icon,.news-dot{background:var(--mmc-accent2)!important}
+.performance-table th{background:var(--mmc-soft)!important}.performance-table-wrap{border-color:var(--mmc-border)!important}
+.modal{background:#020b16aa!important}.modal-card{background:var(--mmc-panel)!important}
+.performance-summary span,.metric{background:var(--mmc-panel2)!important;border-color:var(--mmc-border)!important}
+.theme-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}
+.theme-option{display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;border:1px solid var(--mmc-border);border-radius:8px;background:var(--mmc-panel2);color:var(--mmc-text);cursor:pointer;text-align:left}
+.theme-option:hover,.theme-option.active{border-color:var(--mmc-accent);box-shadow:0 0 0 1px var(--mmc-accent) inset}
+.theme-dot{width:22px;height:22px;border-radius:50%;flex:none;border:2px solid #ffffff55}
+.theme-option small{display:block;color:#8fa8c0;font-size:9px;margin-top:2px}
+@media(max-width:390px){.theme-grid{grid-template-columns:1fr}}
+</style>
 </style>
 </head>
 <body>
@@ -125,7 +153,7 @@ function handleSidebarNav(e){
   }
   if(action==='settings'){
     closeMobile();
-    modalOpen('Settings','এখান থেকে Dashboard-এর display settings নিয়ন্ত্রণ করা যাবে।');
+    openSettings();
   }
 }
 document.addEventListener('click',handleSidebarNav);
@@ -230,7 +258,46 @@ performanceDomGuard.observe(document.body,{childList:true,subtree:true});
 ensurePerformanceCard();
 $('notify-btn').onclick=()=>modalOpen('Notifications','No new critical notifications. Signal alerts can be enabled with the 🔔 Enable Alerts button.');$('theme-btn').onclick=()=>toast('MMC dark dashboard is optimized for trading visibility');
 function updateChartSelection(){window.dispatchEvent(new Event('mmc-market-changed'))}
-window.addEventListener('load',()=>{activeMode(state.mode||'real');setMode(state.mode||'real');if(state.pair)pair.value=state.pair;updateStatus();loadNews();loadPerformance();bindResult()});
+const MMC_THEMES=[
+  {id:'ocean',name:'Ocean Blue',sub:'বর্তমান',bg:'#06172e',side:'#061426',panel:'#071f3a',panel2:'#061a31',border:'#12365d',accent:'#1684ee',accent2:'#0759ba',soft:'#0a2440'},
+  {id:'royal',name:'Royal Purple',sub:'Purple',bg:'#170d2e',side:'#120a25',panel:'#24133f',panel2:'#1b1031',border:'#4b2a70',accent:'#9b5cff',accent2:'#6d28d9',soft:'#2b1749'},
+  {id:'emerald',name:'Emerald',sub:'Green',bg:'#061f1b',side:'#051813',panel:'#092d27',panel2:'#07251f',border:'#155e52',accent:'#18c79a',accent2:'#07866b',soft:'#0b382f'},
+  {id:'crimson',name:'Crimson',sub:'Red',bg:'#240b12',side:'#1a080d',panel:'#35111a',panel2:'#2a0d15',border:'#6b2434',accent:'#ff5570',accent2:'#c51f42',soft:'#451522'},
+  {id:'amber',name:'Amber',sub:'Gold',bg:'#211608',side:'#190f06',panel:'#33220b',panel2:'#281b08',border:'#6a4b16',accent:'#f5b83d',accent2:'#c87909',soft:'#412c0c'},
+  {id:'cyan',name:'Cyber Cyan',sub:'Cyan',bg:'#061c25',side:'#05151c',panel:'#092b36',panel2:'#07232c',border:'#155568',accent:'#20d7e8',accent2:'#0787a0',soft:'#0b3541'},
+  {id:'teal',name:'Teal',sub:'Teal',bg:'#061f22',side:'#051619',panel:'#092d31',panel2:'#07262a',border:'#15575b',accent:'#20c6b0',accent2:'#078b82',soft:'#0b393b'},
+  {id:'orange',name:'Sunset Orange',sub:'Orange',bg:'#241108',side:'#1a0c05',panel:'#351a0b',panel2:'#2a1408',border:'#6a3217',accent:'#ff8a3d',accent2:'#d94d16',soft:'#43200c'},
+  {id:'indigo',name:'Indigo',sub:'Indigo',bg:'#0e1230',side:'#090d24',panel:'#171d43',panel2:'#121736',border:'#303b78',accent:'#7185ff',accent2:'#4657d8',soft:'#202958'},
+  {id:'slate',name:'Slate',sub:'Graphite',bg:'#11161d',side:'#0c1015',panel:'#1a212b',panel2:'#151b23',border:'#344150',accent:'#8ea7bd',accent2:'#526b7e',soft:'#232d38'}
+];
+function setThemeVars(t){
+  if(!t)return;
+  const root=document.documentElement;
+  root.dataset.theme=t.id;
+  const vars={bg:t.bg,main:t.bg,side:t.side,panel:t.panel,panel2:t.panel2,border:t.border,accent:t.accent,accent2:t.accent2,soft:t.soft};
+  Object.entries(vars).forEach(([k,v])=>root.style.setProperty('--mmc-'+k,v));
+  document.querySelectorAll('.theme-option').forEach(b=>b.classList.toggle('active',b.dataset.theme===t.id));
+  try{localStorage.setItem('mmc_theme',t.id)}catch(_){}
+  const meta=document.querySelector('meta[name="theme-color"]');if(meta)meta.setAttribute('content',t.bg);
+}
+function applySavedTheme(){
+  let id='ocean';try{id=localStorage.getItem('mmc_theme')||'ocean'}catch(_){}
+  setThemeVars(MMC_THEMES.find(t=>t.id===id)||MMC_THEMES[0]);
+}
+function openThemeSettings(){
+  const extra='<div class="theme-grid">'+MMC_THEMES.map(t=>'<button type="button" class="theme-option" data-theme="'+t.id+'"><span class="theme-dot" style="background:linear-gradient(135deg,'+t.accent2+','+t.accent+')"></span><span><b>'+esc(t.name)+'</b><small>'+esc(t.sub)+'</small></span></button>').join('')+'</div>';
+  modalOpen('Theme Color','একটি থিম নির্বাচন করুন। নির্বাচনটি এই ব্রাউজারে সংরক্ষণ হবে।',extra);
+  document.querySelectorAll('.theme-option').forEach(b=>b.onclick=()=>{
+    const t=MMC_THEMES.find(x=>x.id===b.dataset.theme);setThemeVars(t);toast(t.name+' theme applied');openThemeSettings();
+  });
+}
+function openSettings(){
+  modalOpen('Settings','Dashboard settings', '<div class="setting-row"><span>Theme Color</span><button type="button" class="mini-btn" id="settings-theme">10 Themes</button></div><div class="setting-row"><span>Signal Alerts</span><button type="button" class="mini-btn" id="settings-alerts">Enable</button></div>');
+  $('settings-theme').onclick=openThemeSettings;
+  $('settings-alerts').onclick=()=>{$('enable-alerts')?.click();closeModal()};
+}
+$('theme-btn').onclick=openThemeSettings;
+window.addEventListener('load',()=>{applySavedTheme();activeMode(state.mode||'real');setMode(state.mode||'real');if(state.pair)pair.value=state.pair;updateStatus();loadNews();loadPerformance();bindResult()});
 })();
 </script>
 </body>
