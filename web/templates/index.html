@@ -270,7 +270,6 @@ function resolvePerformanceResults(){
   let changed=false;
   const now=Number(window.__mmcChartMarketNow||Date.now());
   for(const row of rows){
-    if(row.result!=='অপেক্ষমাণ')continue;
     const signalMs=Date.parse(row.signal_time_utc||'');
     if(!Number.isFinite(signalMs))continue;
 
@@ -285,17 +284,17 @@ function resolvePerformanceResults(){
     const signalBarMs=Number(signalBar.t);
     if(now < signalBarMs+60000)continue;
 
-    const entry=Number(row.entry_price);
     const close=Number(signalBar.c);
     const open=Number(signalBar.o);
-    const base=Number.isFinite(entry)?entry:open;
-    if(!Number.isFinite(close)||!Number.isFinite(base))continue;
+    if(!Number.isFinite(close)||!Number.isFinite(open))continue;
 
-    const move=close-base;
+    // Performance follows the documented 1-minute candle rule:
+    // BUY + bullish close = লাভ, SELL + bearish close = লাভ.
+    const move=close-open;
     row.result=move>0?(row.signal==='BUY'?'লাভ':'লস'):move<0?(row.signal==='SELL'?'লাভ':'লস'):'HOLD';
     row.outcome_price=close;
     row.outcome_candle_time_utc=new Date(signalBarMs).toISOString();
-    row.outcome_basis='সিগন্যাল দেওয়া ১-মিনিট candle-এর সম্পূর্ণ close';
+    row.outcome_basis='এন্ট্রি ১-মিনিট candle-এর সম্পূর্ণ open-to-close ফলাফল';
     changed=true;
   }
   if(changed){try{localStorage.setItem(PERF_KEY,JSON.stringify(rows.slice(0,200)))}catch(_){}}
