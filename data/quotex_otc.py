@@ -22,6 +22,7 @@ PERIOD = 60
 _LOCAL_TTL = 50
 _LOCAL_DATA_TTL = 75
 _LOCAL_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}
+_LOCAL_TICK_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}
 _LOCAL_ACTIVE_ASSET: tuple[float, str] | None = None
 _LOCAL_LOCK = threading.Lock()
 
@@ -129,6 +130,57 @@ def ingest_local_candles(payload: Any) -> int:
             )
             _LOCAL_ACTIVE_ASSET = (time.monotonic(), newest)
     return accepted
+
+
+def ingest_local_ticks(payload: Any) -> int:
+    """Store fresh OTC tick/quote data from the user's local Quotex collector."""
+    global _LOCAL_ACTIVE_ASSET
+    if not isinstance(payload, dict):
+        return 0
+    raw_asset = str(payload.get("asset") or "").strip()
+    asset = raw_asset if raw_asset in OTC_PAIRS else normalize_detected_market(raw_asset)
+    if asset not in OTC_PAIRS:
+        return 0
+    rows = payload.get("ticks") or payload.get("quotes") or []
+    if not isinstance(rows, list):
+        return 0
+    out = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        try:
+            ts = float(item.get("timestamp", item.get("time")))
+            price = float(item.get("price", item.get("close")))
+        except (TypeError, ValueError):
+            continue
+        if ts > 10_000_000_000:
+            ts /= 1000.0
+        if not all(v == v and abs(v) != float("inf") for v in (ts, price)):
+            continue
+        stamp = pd.to_datetime(ts, unit="s", utc=True, errors="coerce")
+        if pd.isna(stamp):
+            continue
+        spread = max(abs(price) * 0.00001, 0.00001)
+        out.append({"timestamp": stamp, "askPrice": price + spread / 2.0, "bidPrice": price - spread / 2.0})
+    if not out:
+        return 0
+    frame = pd.DataFrame(out).drop_duplicates("timestamp").sort_values("timestamp")
+    now = time.monotonic()
+    with _LOCAL_LOCK:
+        old = _LOCAL_TICK_CACHE.get(asset)
+        if old and now - old[0] < 120:
+            frame = pd.concat([old[1], frame], ignore_index=True).drop_duplicates("timestamp").sort_values("timestamp")
+        _LOCAL_TICK_CACHE[asset] = (now, frame.tail(1000).reset_index(drop=True))
+        _LOCAL_ACTIVE_ASSET = (now, asset)
+    return len(out)
+
+
+def local_ticks(asset: str, count: int = 1000) -> pd.DataFrame:
+    with _LOCAL_LOCK:
+        cached = _LOCAL_TICK_CACHE.get(asset)
+        if not cached or time.monotonic() - cached[0] > 75:
+            return pd.DataFrame(columns=["timestamp", "askPrice", "bidPrice"])
+        return cached[1].tail(max(1, min(int(count), 1000))).copy(deep=True).reset_index(drop=True)
 
 
 def local_active_asset() -> str | None:
