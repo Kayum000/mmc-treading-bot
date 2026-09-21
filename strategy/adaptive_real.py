@@ -1,20 +1,18 @@
-"""Regime-adaptive strategy layer for Quotex Real Market only.
+"""Regime-adaptive candle strategy layer for Real and OTC markets.
 
-Keeps the existing tick-pressure engine intact and adds candle-based engines:
+Uses candle-based engines:
 - trend: EMA20/EMA50 + trend strength
 - breakout: rolling 20-bar high/low
 - range: Bollinger mean reversion + RSI
 
 The selector uses only data available up to the signal candle, so the backtest
-can be run without look-ahead from future candles. OTC code is not imported.
+can be run without look-ahead from future candles. The same selector is shared by Real and OTC signal adapters.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 import numpy as np
 import pandas as pd
-
-from strategy.tick_run_pressure import generate_signal as tick_signal
 
 
 @dataclass
@@ -109,17 +107,10 @@ def _range(row: pd.Series) -> tuple[str, float, str]:
     return "HOLD", 0.0, "mean-reversion setup absent"
 
 
-def _tick_adapter(ticks: pd.DataFrame) -> AdaptiveSignal:
-    result = tick_signal(ticks, run_length=3, microprice_threshold=0.40)
-    return AdaptiveSignal(result.action, result.confidence, result.reason, "MICRO_MOVE", "TICK_PRESSURE")
-
-
 def generate_adaptive_signal(candles: pd.DataFrame, ticks: pd.DataFrame | None = None) -> AdaptiveSignal:
     """Choose one Real-Market strategy from the current market regime."""
     x = _features(_prep(candles))
     if len(x) < 60:
-        if ticks is not None and not ticks.empty:
-            return _tick_adapter(ticks)
         return AdaptiveSignal("HOLD", 0.0, "insufficient candle history", "UNKNOWN", "NONE")
     row = x.iloc[-1]
     regime = detect_regime(row)
@@ -137,8 +128,6 @@ def generate_adaptive_signal(candles: pd.DataFrame, ticks: pd.DataFrame | None =
         if action != "HOLD":
             return AdaptiveSignal(action, conf, reason + "; high-volatility filter", regime, "BREAKOUT_20")
         return AdaptiveSignal("HOLD", 0.0, "high volatility without clean breakout", regime, "VOLATILITY_FILTER")
-    if ticks is not None and not ticks.empty:
-        return _tick_adapter(ticks)
     return AdaptiveSignal("HOLD", 0.0, "market regime unclear", regime, "NO_TRADE")
 
 
