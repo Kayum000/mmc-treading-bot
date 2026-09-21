@@ -17,6 +17,24 @@ def _bengali_reason(reason: str) -> str:
     return text
 
 
+def _hold_condition(reason: str, regime: str = "", strategy: str = "") -> str:
+    """Return a clear Bengali explanation of why the signal is HOLD."""
+    raw = str(reason or "").strip().lower()
+    if "insufficient candle history" in raw:
+        return "পর্যাপ্ত ১-মিনিট বন্ধ candle history নেই"
+    if "trend alignment absent" in raw:
+        return "Trend-এর EMA20/EMA50 alignment নিশ্চিত হয়নি"
+    if "breakout not confirmed" in raw:
+        return "২০-বarm high/low breakout নিশ্চিত হয়নি"
+    if "mean-reversion setup absent" in raw:
+        return "Bollinger Band + RSI mean-reversion setup পাওয়া যায়নি"
+    if "high volatility without clean breakout" in raw:
+        return "Volatility বেশি, কিন্তু পরিষ্কার breakout পাওয়া যায়নি"
+    if "market regime unclear" in raw:
+        return "Market regime পরিষ্কারভাবে শনাক্ত হয়নি"
+    return _bengali_reason(reason) or "BUY/SELL-এর প্রয়োজনীয় confirmation পাওয়া যায়নি"
+
+
 def _real_signal(pair: str, automatic: bool) -> dict:
     from quotex_browser_ingest import _REAL_MARKET, _REAL_MARKET_LOCK, real_market_ticks
     from strategy.adaptive_real import generate_adaptive_signal
@@ -49,13 +67,15 @@ def _real_signal(pair: str, automatic: bool) -> dict:
         result = generate_adaptive_signal(candles, ticks=ticks)
         if result.action in {"BUY", "SELL"}:
             score = int(round(float(result.confidence) * 100))
+            is_entry = result.action in {"BUY", "SELL"}
             signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
-            return {"pair": pair, "requested_pair": pair, "market_mode": "real", "source": "Quotex Real Market browser WebSocket", "signal": result.action, "market_bias": result.action, "entry_signal": result.action, "buy_score": score if result.action == "BUY" else 0, "sell_score": score if result.action == "SELL" else 0, "reason": _bengali_reason(f"[{result.regime} / {result.strategy}] {result.reason}"), "signal_created_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None, "signal_created_bd": signal_at_utc.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None, "signal_time_utc": signal_candle.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": signal_candle.isoformat(timespec="seconds"), "analysis_candle_time_utc": None, "entry_price": None, "entry_price_type": "closed_candle_model", "entry_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_delay_seconds": 0, "timeframe": "1-minute closed-candle adaptive", "entry_timeframe": "next 1-minute candle after closed-candle analysis", "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None, "regime": result.regime, "strategy": result.strategy}
+            return {"pair": pair, "requested_pair": pair, "market_mode": "real", "source": "Quotex Real Market browser WebSocket", "signal": result.action, "market_bias": result.action, "entry_signal": result.action, "buy_score": score if result.action == "BUY" else 0, "sell_score": score if result.action == "SELL" else 0, "reason": _bengali_reason(f"[{result.regime} / {result.strategy}] {result.reason}"), "hold_condition": _hold_condition(result.reason, result.regime, result.strategy) if result.action == "HOLD" else None, "signal_created_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None, "signal_created_bd": signal_at_utc.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None, "signal_time_utc": signal_candle.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": signal_candle.isoformat(timespec="seconds"), "analysis_candle_time_utc": None, "entry_price": None, "entry_price_type": "closed_candle_model", "entry_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_delay_seconds": 0, "timeframe": "1-minute closed-candle adaptive", "entry_timeframe": "next 1-minute candle after closed-candle analysis", "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None, "regime": result.regime, "strategy": result.strategy}
         return {
             "pair": pair, "requested_pair": pair, "market_mode": "real",
             "source": "Quotex Real Market browser WebSocket", "signal": "HOLD",
             "market_bias": "HOLD", "entry_signal": "HOLD", "buy_score": 0, "sell_score": 0,
             "reason": "বন্ধ হওয়া ১-মিনিট candle-এর পর্যাপ্ত history পাওয়া যায়নি",
+            "hold_condition": "পর্যাপ্ত ১-মিনিট বন্ধ candle history নেই",
             "signal_created_utc": None,
             "signal_created_bd": None,
             "signal_time_utc": None,
@@ -90,7 +110,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
         "signal": result.action, "market_bias": result.action, "entry_signal": result.action,
         "signal_created_utc": signal_at_utc.isoformat(timespec="seconds"), "signal_created_bd": signal_at_utc.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S"),
         "buy_score": score if result.action == "BUY" else 0, "sell_score": score if result.action == "SELL" else 0,
-        "reason": _bengali_reason(reason), "signal_time_utc": signal_candle.isoformat(timespec="seconds"),
+        "reason": _bengali_reason(reason), "hold_condition": _hold_condition(result.reason, regime, strategy_name) if result.action == "HOLD" else None, "signal_time_utc": signal_candle.isoformat(timespec="seconds"),
         "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
         "candle_time": signal_candle.isoformat(timespec="seconds") if is_entry else None,
         "analysis_candle_time_utc": analysis_time.isoformat(timespec="milliseconds"),
