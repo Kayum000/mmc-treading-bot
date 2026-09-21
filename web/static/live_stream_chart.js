@@ -94,7 +94,7 @@
       legacyResult.style.display = 'none';
       legacyResult.setAttribute('aria-hidden', 'true');
     }
-    latest.querySelectorAll('.chart-panel,#live-market-chart').forEach(el => el.remove());
+    // Keep the live chart mounted. The chart module owns #live-market-chart.
     latest.querySelectorAll('.signal-card').forEach(el => {
       if (!el.closest('.mmc-legacy-signal')) el.remove();
     });
