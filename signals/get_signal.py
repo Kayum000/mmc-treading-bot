@@ -56,6 +56,8 @@ def _real_signal(pair: str, automatic: bool) -> dict:
             "source": "Quotex Real Market browser WebSocket", "signal": "HOLD",
             "market_bias": "HOLD", "entry_signal": "HOLD", "buy_score": 0, "sell_score": 0,
             "reason": "বন্ধ হওয়া ১-মিনিট candle-এর পর্যাপ্ত history পাওয়া যায়নি",
+            "signal_created_utc": signal_at_utc.isoformat(timespec="seconds"),
+            "signal_created_bd": signal_at_utc.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S"),
             "signal_time_utc": signal_candle.isoformat(timespec="seconds"),
             "signal_time_bd": signal_candle.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S"),
             "candle_time": None, "analysis_candle_time_utc": None,
