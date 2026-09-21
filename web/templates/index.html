@@ -141,7 +141,7 @@ body{background:var(--mmc-bg)!important;color:var(--mmc-text)!important}
     <div class="performance-summary">
       <span>লাভ <b id="perf-win-count">0</b></span>
       <span>লস <b id="perf-loss-count">0</b></span>
-      <span>HOLD <b id="perf-hold-count">0</b></span>
+      <span>DOJI <b id="perf-hold-count">0</b></span>
     </div>
     <span class="performance-open">View ›</span>
   </button>
@@ -276,9 +276,10 @@ function resolvePerformanceResults(){
     if(!Number.isFinite(signalMs))continue;
 
     // Real Market and OTC use the same performance rule: the signal is generated
-    // from a closed 1-minute candle, and the result is measured on the NEXT completed
-    // 1-minute candle. OTC bars come from the authenticated local collector cache.
-    // The signal is for the candle whose opening timestamp is signalMs.
+    // from a closed 1-minute candle, and the result is measured on the exact entry
+    // 1-minute candle identified by signal_time_utc. The signal creation time is
+    // stored separately and is never used as the entry-candle lookup timestamp.
+    // OTC bars come from the authenticated local collector cache.
     // Resolve the result only after that exact entry candle has fully closed.
     const signalBar=bars.find(b=>Number.isFinite(Number(b?.t)) && Number(b.t)===signalMs);
     if(!signalBar)continue;
@@ -291,9 +292,9 @@ function resolvePerformanceResults(){
     if(!Number.isFinite(close)||!Number.isFinite(open))continue;
 
     // Performance follows the documented 1-minute candle rule:
-    // BUY + bullish close = লাভ, SELL + bearish close = লাভ.
+    // BUY + bullish close = লাভ, SELL + bearish close = লাভ, Open == Close = DOJI.
     const move=close-open;
-    row.result=move>0?(row.signal==='BUY'?'লাভ':'লস'):move<0?(row.signal==='SELL'?'লাভ':'লস'):'HOLD';
+    row.result=move>0?(row.signal==='BUY'?'লাভ':'লস'):move<0?(row.signal==='SELL'?'লাভ':'লস'):'DOJI';
     row.outcome_price=close;
     row.outcome_candle_time_utc=new Date(signalBarMs).toISOString();
     row.outcome_basis='এন্ট্রি ১-মিনিট candle-এর সম্পূর্ণ open-to-close ফলাফল';
@@ -308,14 +309,16 @@ function recordPerformance(r){
   if(!r||!r.signal)return;
   const row={
     id:[r.pair,r.signal,r.signal_time_utc,r.analysis_candle_time_utc].join('|'),
-    time:r.signal_time_bd||r.signal_time_utc||'—',
+    time:r.signal_created_bd||r.signal_created_utc||r.signal_time_bd||r.signal_time_utc||'—',
     pair:r.pair||state.pair||'—',
     signal:String(r.signal).toUpperCase(),
     entry_price:r.entry_price??null,
     candle_color:r.signal_candle_color||'—',
     signal_time_utc:r.signal_time_utc||new Date().toISOString(),
     analysis_candle_time_utc:r.analysis_candle_time_utc||null,
-    result:(r.result==='লাভ'||r.result==='লস'||r.result==='HOLD')?r.result:'অপেক্ষমাণ'
+    result:(r.result==='লাভ'||r.result==='লস'||r.result==='DOJI')?r.result:'অপেক্ষমাণ',
+    signal_created_utc:r.signal_created_utc||null,
+    signal_created_bd:r.signal_created_bd||null
   };
   const rows=performanceHistory().filter(x=>x.id!==row.id);
   rows.unshift(row);
@@ -323,8 +326,8 @@ function recordPerformance(r){
   renderPerformanceSummary();
 }
 function renderPerformanceSummary(){
-  const rows=performanceHistory(), win=rows.filter(x=>x.result==='লাভ').length, loss=rows.filter(x=>x.result==='লস').length, hold=rows.filter(x=>x.result==='HOLD'||x.result==='অপেক্ষমাণ').length;
-  $('perf-win-count').textContent=win;$('perf-loss-count').textContent=loss;$('perf-hold-count').textContent=hold;
+  const rows=performanceHistory(), win=rows.filter(x=>x.result==='লাভ').length, loss=rows.filter(x=>x.result==='লস').length, doji=rows.filter(x=>x.result==='DOJI').length;
+  $('perf-win-count').textContent=win;$('perf-loss-count').textContent=loss;$('perf-hold-count').textContent=doji;
 }
 function performanceTable(){
   const rows=performanceHistory();
