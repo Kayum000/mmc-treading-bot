@@ -25,7 +25,7 @@ def _hold_condition(reason: str, regime: str = "", strategy: str = "") -> str:
     if "trend alignment absent" in raw:
         return "Trend-এর EMA20/EMA50 alignment নিশ্চিত হয়নি"
     if "breakout not confirmed" in raw:
-        return "২০-বarm high/low breakout নিশ্চিত হয়নি"
+        return "২০-bar high/low breakout নিশ্চিত হয়নি"
     if "mean-reversion setup absent" in raw:
         return "Bollinger Band + RSI mean-reversion setup পাওয়া যায়নি"
     if "high volatility without clean breakout" in raw:
