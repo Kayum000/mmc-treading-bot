@@ -23,8 +23,8 @@ class OTCSignal:
 
 
 def generate_signal(candles: pd.DataFrame, ticks: pd.DataFrame | None = None) -> OTCSignal:
-    """Use the same adaptive candle logic, with OTC Tick Pressure as fallback."""
-    result = generate_adaptive_signal(candles, ticks=ticks)
+    """Use the shared adaptive candle logic without tick-pressure fallback."""
+    result = generate_adaptive_signal(candles)
 
     return OTCSignal(
         action=result.action,
