@@ -80,6 +80,14 @@
   function stopFallback(){clearInterval(S.poll);S.poll=null;}
   async function stop(){clearTimeout(S.timer);S.timer=null;stopFallback();S.c=null;}
   async function connect(){startFallback();}
+  async function select(symbol){
+    await stop();
+    S.symbol=String(symbol||'').trim();
+    S.bars=[];S.scaleMin=S.scaleMax=null;S.marketTs=0;
+    if(!S.symbol){draw();return;}
+    await history();
+    await connect();
+  }
   function watch(){const pair=document.getElementById('pair');if(!pair){setTimeout(watch,500);return;}const start=()=>{const chart=document.getElementById('live-market-chart');if(!chart){setTimeout(start,500);return;}canvas();pair.onchange=()=>select(pair.value);select(pair.value);const interval=document.getElementById('chart-interval');if(interval){interval.value=S.interval;interval.addEventListener('change',async()=>{S.interval=interval.value||'1m';S.bars=[];S.scaleMin=S.scaleMax=null;await history();await connect();});}window.addEventListener('resize',draw,{passive:true});window.addEventListener('mmc-market-changed',()=>select(pair.value),{passive:true});clearInterval(S.clock);S.clock=setInterval(updateLiveInfo,1000);};start();}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',watch,{once:true});else watch();
 })();
