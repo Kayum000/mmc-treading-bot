@@ -18,7 +18,7 @@ def _bengali_reason(reason: str) -> str:
 
 
 def _real_signal(pair: str, automatic: bool) -> dict:
-    from quotex_browser_ingest import _REAL_MARKET, _REAL_MARKET_LOCK
+    from quotex_browser_ingest import _REAL_MARKET, _REAL_MARKET_LOCK, real_market_ticks
     from strategy.adaptive_real import generate_adaptive_signal
 
     # During minute N, analyze only the fully closed candle N-1.
@@ -33,7 +33,12 @@ def _real_signal(pair: str, automatic: bool) -> dict:
     with _REAL_MARKET_LOCK:
         state = dict(_REAL_MARKET.get(asset) or {})
         candle_rows = list(state.get("bars") or [])[-80:]
-        ticks = state.get("ticks")
+    # Real quotes are stored in quote_history. Build the same normalized tick
+    # DataFrame used by the shared adaptive strategy; do this after releasing
+    # the market lock because real_market_ticks() acquires the same lock.
+    ticks = real_market_ticks(asset, count=1000)
+    if ticks.empty:
+        ticks = None
     candles = pd.DataFrame(candle_rows)
     if not candles.empty:
         candles["timestamp"] = pd.to_datetime(candles["timestamp"], unit="s", utc=True, errors="coerce")
