@@ -237,7 +237,10 @@ def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> 
         raise ValueError("Unsupported Quotex OTC market")
     if interval != "1m":
         raise ValueError("Quotex OTC MMC uses 1-minute candles only")
-    count = max(60, min(int(count), 300))
+    # Keep the same fallback behavior as Real Market: when fewer than 60
+    # closed candles are temporarily available, the shared adaptive strategy
+    # can still use fresh tick pressure instead of hard-failing the request.
+    count = max(8, min(int(count), 300))
     local = _local_candles(canonical, count)
     if local is None:
         raise RuntimeError("Quotex local WebSocket collector is not connected or has no fresh closed candles.")
