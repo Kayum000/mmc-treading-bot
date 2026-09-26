@@ -1,8 +1,8 @@
 """Future opportunity scanner.
 
-Produces up to 15 ranked forward-looking opportunities from the current closed-candle
-setup. These are projections, not guaranteed future outcomes. Each horizon is scored
-from the same validated strategy signals plus trend/momentum/structure alignment.
+Produces all qualifying high-confidence forward-looking opportunities from the current
+closed-candle setup. There is no fixed result count: only opportunities that clear the
+quality threshold are returned. These are projections, not guaranteed future outcomes.
 """
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def _reason(action: str, trend: str, momentum: str, base_reason: str, horizon: i
     return " • ".join(bits)
 
 
-def scan_future_opportunities(candles: pd.DataFrame, ticks=None, strategy_mode: str = "normal", limit: int = 15) -> dict:
+def scan_future_opportunities(candles: pd.DataFrame, ticks=None, strategy_mode: str = "normal") -> dict:
     if candles is None or len(candles) < 60:
         return {"ok": False, "error": "Future Signal-এর জন্য অন্তত 60টি বন্ধ ১-মিনিট candle দরকার", "signals": []}
 
@@ -97,7 +97,8 @@ def scan_future_opportunities(candles: pd.DataFrame, ticks=None, strategy_mode: 
             if action != base_action:
                 score -= 5.0
             score = max(0.0, min(99.0, score))
-            if score >= 70:
+            # Future list is intentionally selective: show only stronger setups.
+            if score >= 82:
                 candidates.append(FutureOpportunity(
                     rank=0,
                     horizon_candles=horizon,
@@ -108,24 +109,16 @@ def scan_future_opportunities(candles: pd.DataFrame, ticks=None, strategy_mode: 
                     reason=_reason(action, trend, momentum, str(base.reason), horizon),
                 ))
 
-    # Keep one opportunity per horizon where possible and avoid a BUY/SELL pair
-    # for the same horizon unless both genuinely clear the threshold.
+    # No fixed count: return every opportunity that clears the quality threshold.
+    # Rank all qualifying setups by score, then by nearer entry horizon.
     candidates.sort(key=lambda s: (-s.score, s.horizon_candles, s.action))
-    selected=[]
-    used_horizons=set()
-    for c in candidates:
-        if c.horizon_candles not in used_horizons or len(selected) >= limit - 3:
-            selected.append(c)
-            used_horizons.add(c.horizon_candles)
-        if len(selected) >= limit:
-            break
-    for i, c in enumerate(selected, 1):
-        c.rank=i
+    for i, c in enumerate(candidates, 1):
+        c.rank = i
 
     return {
         "ok": True,
-        "signals": [asdict(c) for c in selected],
-        "count": len(selected),
+        "signals": [asdict(c) for c in candidates],
+        "count": len(candidates),
         "strategy_mode": strategy_mode,
         "base_signal": base_action,
         "base_score": int(round(float(base.confidence) * 100)) if base_action in {"BUY","SELL"} else 0,
