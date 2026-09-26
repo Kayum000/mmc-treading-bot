@@ -15,6 +15,13 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.IBinder
 import android.util.Log
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.WindowManager
+import android.widget.TextView
+import android.provider.Settings
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -51,6 +58,8 @@ class CaptureService : Service() {
     private val executor = Executors.newSingleThreadExecutor()
     private val lastFrameAt = AtomicLong(0L)
     private val lastOcrAt = AtomicLong(0L)
+    private var overlayView: TextView? = null
+    private var windowManager: WindowManager? = null
     private val textRecognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -251,7 +260,94 @@ class CaptureService : Service() {
         else Log.w(TAG, "Frame upload HTTP $code")
     }
 
+    private fun showFloatingControl() {
+        if (android.os.Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
+            Log.w(TAG, "Overlay permission not granted; floating control skipped")
+            return
+        }
+
+        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        val control = TextView(this).apply {
+            text = "● Capture ON\nTap = Stop"
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setPadding(22, 14, 22, 14)
+            background = GradientDrawable().apply {
+                setColor(Color.argb(220, 20, 20, 20))
+                cornerRadius = 28f
+            }
+            elevation = 8f
+        }
+
+        val type = if (android.os.Build.VERSION.SDK_INT >= 26) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            android.graphics.PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 18
+            y = 180
+        }
+
+        var downX = 0f
+        var downY = 0f
+        var startX = 0
+        var startY = 0
+
+        control.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.rawX
+                    downY = event.rawY
+                    startX = params.x
+                    startY = params.y
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val moved = kotlin.math.abs(event.rawX - downX) > 12f ||
+                        kotlin.math.abs(event.rawY - downY) > 12f
+                    if (!moved) stopSelf()
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    params.x = startX + (event.rawX - downX).toInt()
+                    params.y = startY + (event.rawY - downY).toInt()
+                    try { wm.updateViewLayout(view, params) } catch (_: Throwable) {}
+                    true
+                }
+                else -> true
+            }
+        }
+
+        try {
+            wm.addView(control, params)
+            windowManager = wm
+            overlayView = control
+        } catch (t: Throwable) {
+            Log.w(TAG, "Unable to show floating control: ${t.javaClass.simpleName}: ${t.message}")
+        }
+    }
+
+    private fun removeFloatingControl() {
+        val view = overlayView ?: return
+        try { windowManager?.removeView(view) } catch (_: Throwable) {}
+        overlayView = null
+        windowManager = null
+    }
+
     override fun onDestroy() {
+        removeFloatingControl()
         reader?.setOnImageAvailableListener(null, null)
         reader?.close()
         reader = null
