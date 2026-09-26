@@ -222,7 +222,7 @@ function handleSidebarNav(e){
   }
 }
 document.addEventListener('click',handleSidebarNav);
-function activeMode(m){document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));}
+function activeMode(m){document.querySelectorAll('.mode-btn[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));}
 function activeStrategyMode(m){document.querySelectorAll('.strategy-btn').forEach(b=>b.classList.toggle('active',b.dataset.strategy===m));}
 function setStrategyMode(m){state.strategyMode=m||'normal';activeStrategyMode(state.strategyMode);syncMarket().then(()=>toast(state.strategyMode==='candle_reaction'?'Candle Reaction Mode চালু':'Normal Strategy Mode চালু'));}
 function setMode(m){state.mode=m;activeMode(m);const opts=[...pair.options];opts.forEach(o=>{if(o.value)o.hidden=o.dataset.mode!==m});const current=opts.find(o=>o.value===state.pair&&!o.hidden);if(!current){const first=opts.find(o=>o.value&&!o.hidden);state.pair=first?.value||'';pair.value=state.pair}else pair.value=state.pair;syncMarket();updateStatus();loadNews();updateChartSelection();}
