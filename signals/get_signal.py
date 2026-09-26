@@ -218,12 +218,11 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False, st
     raise ValueError("Unsupported market mode")
 
 
-def get_future_signals(pair: str, market_mode: str = "real", strategy_mode: str = "normal", limit: int = 15) -> dict:
+def get_future_signals(pair: str, market_mode: str = "real", strategy_mode: str = "normal") -> dict:
     """Return ranked forward opportunities for the currently selected pair."""
     pair = (pair or "").strip().upper()
     mode = (market_mode or "real").strip().lower()
     strategy_mode = str(strategy_mode or "normal").strip().lower()
-    limit = max(1, min(int(limit or 15), 15))
     if mode == "real":
         from quotex_browser_ingest import _REAL_MARKET, _REAL_MARKET_LOCK, real_market_ticks
         asset = "".join(ch for ch in pair if ch.isalnum() or ch in "._-")
@@ -246,6 +245,6 @@ def get_future_signals(pair: str, market_mode: str = "real", strategy_mode: str 
         ticks = local_ticks(asset)
     else:
         raise ValueError("Unsupported market mode")
-    result = scan_future_opportunities(candles, ticks=ticks, strategy_mode=strategy_mode, limit=limit)
+    result = scan_future_opportunities(candles, ticks=ticks, strategy_mode=strategy_mode)
     result.update({"pair": pair, "market_mode": mode})
     return result
