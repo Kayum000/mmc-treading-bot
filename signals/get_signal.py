@@ -70,7 +70,8 @@ def _real_signal(pair: str, automatic: bool, strategy_mode: str = "normal") -> d
         candles = candles.dropna(subset=["timestamp"])
         candles = candles[candles["timestamp"] < current_minute].reset_index(drop=True)
 
-    if len(candles) < 60:
+    min_history = 22 if strategy_mode == "candle_reaction" else 60
+    if len(candles) < min_history:
         result = _strategy_result(candles, ticks, strategy_mode)
         if result.action in {"BUY", "SELL"}:
             score = int(round(float(result.confidence) * 100))
