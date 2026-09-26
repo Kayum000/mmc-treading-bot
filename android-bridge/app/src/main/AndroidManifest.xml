@@ -8,6 +8,9 @@
         android:label="MMC Quotex Bridge"
         android:allowBackup="false"
         android:supportsRtl="true">
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="ocr" />
 
         <activity
             android:name=".MainActivity"
