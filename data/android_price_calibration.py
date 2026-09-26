@@ -46,7 +46,7 @@ def update_ocr(payload: dict[str, Any]) -> dict[str, Any]:
             cx = (left + right) / 2.0
             if cx < width * 0.62:
                 continue
-            candidates.append({"value": value, "y": (top + bottom) / 2.0, "x": cx, "text": text})
+            candidates.append({"value": value, "y": (top + bottom) / 2.0 / height, "x": cx, "text": text})
 
     # Keep one reading per y-band, preferring the rightmost/highest-confidence
     # candidate. This prevents duplicated OCR blocks from biasing calibration.
@@ -77,7 +77,7 @@ def update_ocr(payload: dict[str, Any]) -> dict[str, Any]:
             # A chart price scale should decrease as screen Y increases.
             if slope < 0 and monotonic and r2 >= 0.985:
                 calibration = {
-                    "slope_per_source_y": slope,
+                    "slope_per_normalized_y": slope,
                     "intercept": intercept,
                     "r2": r2,
                     "anchors": unique[-12:],
@@ -113,12 +113,7 @@ def apply_calibration(probe: dict[str, Any], calibration: dict[str, Any] | None)
     if not calibration:
         probe["price_scale_calibrated"] = False
         return probe
-    source_h = float(calibration.get("source_height") or 0)
-    sample_h = float(probe.get("sample_height") or 0)
-    if source_h <= 0 or sample_h <= 0:
-        return probe
-    scale = source_h / sample_h
-    slope = float(calibration["slope_per_source_y"])
+    slope = float(calibration["slope_per_normalized_y"])
     intercept = float(calibration["intercept"])
     for candle in probe.get("candles", []):
         rel = candle.get("normalized_ohlc") or {}
@@ -126,9 +121,8 @@ def apply_calibration(probe: dict[str, Any], calibration: dict[str, Any] | None)
         for key, value in rel.items():
             if value is None:
                 continue
-            sample_y = sample_h * (1.0 - float(value))
-            source_y = sample_y * scale
-            prices[key] = round(slope * source_y + intercept, 10)
+            normalized_y = 1.0 - float(value)
+            prices[key] = round(slope * normalized_y + intercept, 10)
         candle["price_ohlc"] = prices
     probe["price_scale_calibrated"] = True
     probe["calibration"] = {
