@@ -18,6 +18,7 @@ from flask import jsonify, request, session
 from data.quotex_otc import ingest_local_candles, ingest_local_ticks, local_stream_status, local_active_asset, local_candles_payload
 from data.otc_markets import display_for_asset, OTC_DISPLAY_PAIRS
 from signals.get_signal import get_signal
+from data.android_chart_probe import analyze_chart
 
 logger = logging.getLogger(__name__)
 
@@ -266,116 +267,14 @@ def init_quotex_browser_ingest(app):
             image = Image.open(BytesIO(request.data)).convert("RGB")
             width, height = image.size
             sample = image.resize((max(1, min(360, width)), max(1, min(640, height))))
-            pixels = sample.load()
-            sw, sh = sample.size
-            # Generic chart-color geometry probe. This intentionally avoids
-            # hard-coded Quotex coordinates and never converts pixels into prices.
-            # It is a calibration/diagnostic layer only; the existing signal engine
-            # continues to require structured OHLC/tick data.
-            y0, y1 = int(sh * 0.06), int(sh * 0.80)
-            green_cols = 0
-            red_cols = 0
-            active = []
-            for x in range(sw):
-                green_hits = 0
-                red_hits = 0
-                for y in range(y0, y1):
-                    rr, gg, bb = pixels[x, y]
-                    if gg > rr * 1.18 and gg > bb * 1.08 and gg > 70:
-                        green_hits += 1
-                    if rr > gg * 1.18 and rr > bb * 1.08 and rr > 70:
-                        red_hits += 1
-                if green_hits >= 2:
-                    green_cols += 1
-                if red_hits >= 2:
-                    red_cols += 1
-                if green_hits >= 2 or red_hits >= 2:
-                    active.append((x, green_hits, red_hits))
-
-            # Merge nearby active columns into candidate candle strokes.
-            groups = []
-            current = []
-            for item in active:
-                if not current or item[0] <= current[-1][0] + 2:
-                    current.append(item)
-                else:
-                    groups.append(current)
-                    current = [item]
-            if current:
-                groups.append(current)
-
-            candles = []
-            for group in groups:
-                if len(group) < 1:
-                    continue
-                left, right = group[0][0], group[-1][0]
-                green_score = sum(item[1] for item in group)
-                red_score = sum(item[2] for item in group)
-                cx = int((left + right) / 2)
-                top = sh
-                bottom = 0
-                body_top = sh
-                body_bottom = 0
-                color = "green" if green_score >= red_score else "red"
-                # Inspect the candidate x-band again so wick/body bounds are
-                # measured from actual color evidence rather than assumptions.
-                for x in range(max(0, left - 1), min(sw, right + 2)):
-                    for y in range(y0, y1):
-                        rr, gg, bb = pixels[x, y]
-                        is_green = gg > rr * 1.18 and gg > bb * 1.08 and gg > 70
-                        is_red = rr > gg * 1.18 and rr > bb * 1.08 and rr > 70
-                        if not (is_green or is_red):
-                            continue
-                        top = min(top, y)
-                        bottom = max(bottom, y)
-                        if (color == "green" and is_green) or (color == "red" and is_red):
-                            body_top = min(body_top, y)
-                            body_bottom = max(body_bottom, y)
-                if top >= sh or bottom <= 0:
-                    continue
-                candles.append({
-                    "x": cx,
-                    "left": left,
-                    "right": right,
-                    "color": color,
-                    "top": top,
-                    "bottom": bottom,
-                    "height": bottom - top + 1,
-                    "body_top": body_top if body_top < sh else None,
-                    "body_bottom": body_bottom if body_bottom > 0 else None,
-                    "strength": round(min(1.0, max(green_score, red_score) / max(1, len(group) * 8)), 3),
-                })
-
-            candles = sorted(candles, key=lambda item: item["x"])
-            if len(candles) > 120:
-                candles = candles[-120:]
-
-            chart_bounds = None
-            if candles:
-                chart_bounds = {
-                    "left": min(item["left"] for item in candles),
-                    "right": max(item["right"] for item in candles),
-                    "top": min(item["top"] for item in candles),
-                    "bottom": max(item["bottom"] for item in candles),
-                }
+            probe = analyze_chart(image)
 
             return jsonify({
                 "ok": True,
                 "source": "android_bridge_frame_probe",
                 "frame": {"width": width, "height": height, "bytes": len(request.data)},
-                "chart_probe": {
-                    "green_columns": green_cols,
-                    "red_columns": red_cols,
-                    "sample_width": sw,
-                    "sample_height": sh,
-                    "candidate_candles": len(candles),
-                    "chart_bounds": chart_bounds,
-                    "candles": candles,
-                    "status": "candle-geometry-detected" if candles else (
-                        "color-evidence-detected" if (green_cols or red_cols) else "no-candle-color-evidence"
-                    ),
-                },
-                "note": "Generic pixel geometry only. No price scale, OHLC, or BUY/SELL signal is inferred from the frame.",
+                "chart_probe": probe,
+                "note": probe.get("note"),
             })
         except Exception as exc:
             logger.exception("QUOTEX_ANDROID_FRAME_FAILED")
