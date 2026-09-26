@@ -104,10 +104,10 @@ def generate_candle_reaction_signal(candles: pd.DataFrame) -> CandleReactionSign
             reasons.append("নিচের wick rejection")
         if bullish_engulf:
             score += 12
-            reasons.append("bullish engulfing")
+            reasons.append("বুলিশ engulfing")
         if close_position >= 0.80:
             score += 5
-            reasons.append("শক্তিশালী bullish close")
+            reasons.append("শক্তিশালী বুলিশ close")
         score = min(score, 95)
         return CandleReactionSignal("BUY", score / 100.0, " • ".join(reasons))
 
@@ -119,10 +119,10 @@ def generate_candle_reaction_signal(candles: pd.DataFrame) -> CandleReactionSign
             reasons.append("উপরের wick rejection")
         if bearish_engulf:
             score += 12
-            reasons.append("bearish engulfing")
+            reasons.append("বিয়ারিশ engulfing")
         if close_position <= 0.20:
             score += 5
-            reasons.append("শক্তিশালী bearish close")
+            reasons.append("শক্তিশালী বিয়ারিশ close")
         score = min(score, 95)
         return CandleReactionSignal("SELL", score / 100.0, " + ".join(reasons))
 
