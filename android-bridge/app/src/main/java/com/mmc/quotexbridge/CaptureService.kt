@@ -139,6 +139,14 @@ class CaptureService : Service() {
             }
         }, null)
 
+        // The floating control was defined but never started.
+        // Start it after MediaProjection is active so the switch is visible.
+        try {
+            showFloatingControl()
+        } catch (t: Throwable) {
+            Log.w(TAG, "Floating control initialization failed: ${t.javaClass.simpleName}: ${t.message}")
+        }
+
         Log.i(TAG, "Capture active: ${width}x${height}")
         return START_NOT_STICKY
     }
