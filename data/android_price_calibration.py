@@ -6,9 +6,12 @@ import threading
 import time
 from typing import Any
 
+from data.otc_markets import normalize_detected_market
+
 _NUMBER_RE = re.compile(r"^[+-]?(?:\d{1,3}(?:,\d{3})*|\d+)(?:\.\d{2,8})?$")
 _LOCK = threading.Lock()
 _STATE: dict[str, Any] = {}
+_ANDROID_CONTEXT: dict[str, Any] = {}
 
 def _number(text: str) -> float | None:
     value = text.strip().replace(" ", "").replace(",", "")
@@ -22,8 +25,31 @@ def _number(text: str) -> float | None:
         return None
     return number
 
+def _detect_timeframe(text: str) -> str | None:
+    compact = str(text or "").lower().replace(" ", "")
+    if "1m" in compact or "1min" in compact or "1minute" in compact:
+        return "1m"
+    return None
+
+
+def android_context() -> dict[str, Any]:
+    now = time.time()
+    with _LOCK:
+        asset = _ANDROID_CONTEXT.get("asset")
+        asset_age = now - float(_ANDROID_CONTEXT.get("updated_at", 0))
+        timeframe = _ANDROID_CONTEXT.get("timeframe")
+        timeframe_age = now - float(_ANDROID_CONTEXT.get("timeframe_updated_at", 0))
+    return {"asset": asset if asset_age <= 30 else None, "timeframe": timeframe if timeframe_age <= 30 else None, "fresh": asset_age <= 30 and timeframe_age <= 30}
+
+
 def update_ocr(payload: dict[str, Any]) -> dict[str, Any]:
-    asset = str(payload.get("active_asset") or payload.get("asset") or "").strip() or "unknown"
+    raw_text = " ".join(str(block.get("text") or "") for block in (payload.get("blocks") or []) if isinstance(block, dict))
+    detected_asset = normalize_detected_market(raw_text)
+    timeframe = _detect_timeframe(raw_text)
+    asset = str(payload.get("active_asset") or payload.get("asset") or "").strip()
+    if detected_asset:
+        asset = detected_asset
+    asset = asset or "unknown"
     width = int(payload.get("image_width") or 0)
     height = int(payload.get("image_height") or 0)
     blocks = payload.get("blocks") or []
@@ -87,12 +113,20 @@ def update_ocr(payload: dict[str, Any]) -> dict[str, Any]:
                 }
 
     with _LOCK:
+        if detected_asset:
+            _ANDROID_CONTEXT["asset"] = detected_asset
+            _ANDROID_CONTEXT["updated_at"] = time.time()
+        if timeframe:
+            _ANDROID_CONTEXT["timeframe"] = timeframe
+            _ANDROID_CONTEXT["timeframe_updated_at"] = time.time()
         if calibration is not None:
             _STATE[asset] = calibration
         state = dict(_STATE.get(asset) or {})
     return {
         "ok": True,
         "asset": asset,
+        "detected_asset": detected_asset,
+        "timeframe": timeframe,
         "numeric_candidates": unique[-20:],
         "calibrated": bool(state),
         "calibration": state or None,
