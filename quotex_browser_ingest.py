@@ -19,6 +19,7 @@ from data.quotex_otc import ingest_local_candles, ingest_local_ticks, local_stre
 from data.otc_markets import display_for_asset, OTC_DISPLAY_PAIRS
 from signals.get_signal import get_signal
 from data.android_chart_probe import analyze_chart
+from data.android_price_calibration import update_ocr, get_calibration, apply_calibration
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +247,24 @@ def init_quotex_browser_ingest(app):
             "status": status,
         })
 
+    @app.route("/quotex/android-ocr", methods=["POST"])
+    def quotex_android_ocr():
+        """Receive OCR blocks used only to calibrate the chart price scale."""
+        if not _collector_secret_valid():
+            return jsonify({"ok": False, "error": "Invalid ingest key."}), 401
+        if not request.is_json:
+            return jsonify({"ok": False, "error": "JSON body required."}), 415
+        payload = request.get_json(silent=True) or {}
+        try:
+            sent_at = float(payload.get("sent_at", 0))
+            if not sent_at or abs(time.time() - sent_at) > 30:
+                return jsonify({"ok": False, "error": "Stale OCR payload."}), 408
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "Invalid OCR timestamp."}), 400
+        payload["active_asset"] = request.headers.get("X-MMC-Android-Asset") or "android"
+        result = update_ocr(payload)
+        return jsonify(result)
+
     @app.route("/quotex/android-frame", methods=["POST"])
     def quotex_android_frame():
         """Receive a bounded JPEG frame for Android chart calibration."""
@@ -266,8 +285,9 @@ def init_quotex_browser_ingest(app):
         try:
             image = Image.open(BytesIO(request.data)).convert("RGB")
             width, height = image.size
-            sample = image.resize((max(1, min(360, width)), max(1, min(640, height))))
             probe = analyze_chart(image)
+            calibration = get_calibration(request.headers.get("X-MMC-Android-Asset") or "android")
+            probe = apply_calibration(probe, calibration)
 
             return jsonify({
                 "ok": True,
