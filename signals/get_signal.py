@@ -9,6 +9,7 @@ from data.quotex_otc import fetch_quotex_candles, OTC_PAIRS, local_active_asset,
 from data.otc_markets import display_for_asset, asset_for_display
 from strategy.otc_candle_pressure import generate_signal as generate_otc_signal
 from strategy.candle_reaction import generate_candle_reaction_signal
+from strategy.adaptive_real import generate_adaptive_signal
 
 
 def _bengali_reason(reason: str) -> str:
@@ -40,13 +41,11 @@ def _strategy_result(candles: pd.DataFrame, ticks: pd.DataFrame | None, strategy
     """Select the requested strategy without changing the existing default path."""
     if strategy_mode == "candle_reaction":
         return generate_candle_reaction_signal(candles)
-    return generate_otc_signal(candles, ticks=ticks) if otc else __import__("strategy.adaptive_real", fromlist=["generate_adaptive_signal"]).generate_adaptive_signal(candles, ticks=ticks)
+    return generate_otc_signal(candles, ticks=ticks) if otc else generate_adaptive_signal(candles, ticks=ticks)
 
 
 def _real_signal(pair: str, automatic: bool, strategy_mode: str = "normal") -> dict:
     from quotex_browser_ingest import _REAL_MARKET, _REAL_MARKET_LOCK, real_market_ticks
-    from strategy.adaptive_real import generate_adaptive_signal
-
     # During minute N, analyze only the fully closed candle N-1.
     # Minute N is the next 1-minute candle and therefore the entry candle.
     signal_at_utc = datetime.now(timezone.utc)
