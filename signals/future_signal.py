@@ -1,8 +1,9 @@
-"""Future opportunity scanner.
+"""Future opportunity scanner with historical validation.
 
-Produces all qualifying high-confidence forward-looking opportunities from the current
-closed-candle setup. There is no fixed result count: only opportunities that clear the
-quality threshold are returned. These are projections, not guaranteed future outcomes.
+The Future Signals list is intentionally uncapped: it returns every current
+setup that passes both the live quality score and a historical walk-forward
+validation for the same direction/horizon. Historical results are filters,
+not guarantees of future performance.
 """
 from __future__ import annotations
 
@@ -11,6 +12,12 @@ import pandas as pd
 
 from strategy.candle_reaction import generate_candle_reaction_signal
 from strategy.adaptive_real import generate_adaptive_signal
+
+
+MIN_HISTORY = 60
+MAX_HORIZON = 15
+MIN_BACKTEST_TRADES = 12
+MIN_BACKTEST_WIN_RATE = 60.0
 
 
 @dataclass
@@ -22,6 +29,8 @@ class FutureOpportunity:
     confidence: float
     entry_window: str
     reason: str
+    backtest_win_rate: float
+    backtest_trades: int
 
 
 def _trend_score(x: pd.DataFrame) -> tuple[str, float]:
@@ -52,22 +61,69 @@ def _momentum_score(x: pd.DataFrame) -> tuple[str, float]:
     return "HOLD", 0.0
 
 
-def _reason(action: str, trend: str, momentum: str, base_reason: str, horizon: int) -> str:
+def _signal_for_history(x: pd.DataFrame, strategy_mode: str):
+    if strategy_mode == "candle_reaction":
+        return generate_candle_reaction_signal(x)
+    return generate_adaptive_signal(x)
+
+
+def _backtest_horizon_accuracy(
+    candles: pd.DataFrame,
+    action: str,
+    horizon: int,
+    strategy_mode: str,
+) -> tuple[float, int, int]:
+    """Walk forward through closed candles and score the exact direction/horizon.
+
+    A historical signal is generated only from candles available at that point;
+    the future close is read only afterward to determine whether that signal won.
+    """
+    if len(candles) <= MIN_HISTORY + horizon:
+        return 0.0, 0, 0
+
+    wins = 0
+    trades = 0
+    start = max(MIN_HISTORY, len(candles) - 240)
+    end = len(candles) - horizon
+    for i in range(start, end):
+        history = candles.iloc[: i + 1]
+        signal = _signal_for_history(history, strategy_mode)
+        if str(signal.action).upper() != action:
+            continue
+        trades += 1
+        entry = float(candles.iloc[i]["close"])
+        exit_price = float(candles.iloc[i + horizon]["close"])
+        if (action == "BUY" and exit_price > entry) or (action == "SELL" and exit_price < entry):
+            wins += 1
+
+    rate = round((wins / trades) * 100.0, 2) if trades else 0.0
+    return rate, trades, wins
+
+
+def _reason(action: str, trend: str, momentum: str, base_reason: str, horizon: int, win_rate: float, trades: int) -> str:
     bits = [f"পরবর্তী {horizon}টি ১-মিনিট candle window"]
     if trend == action:
         bits.append("EMA20/EMA50 trend alignment")
     if momentum == action:
         bits.append("সাম্প্রতিক momentum alignment")
+    bits.append(f"ব্যাকটেস্ট: {win_rate:.1f}% ({trades}টি historical setup)")
     if base_reason:
         bits.append(base_reason)
     return " • ".join(bits)
 
 
 def scan_future_opportunities(candles: pd.DataFrame, ticks=None, strategy_mode: str = "normal") -> dict:
-    if candles is None or len(candles) < 60:
+    if candles is None or len(candles) < MIN_HISTORY:
         return {"ok": False, "error": "Future Signal-এর জন্য অন্তত 60টি বন্ধ ১-মিনিট candle দরকার", "signals": []}
 
+    strategy_mode = str(strategy_mode or "normal").strip().lower()
+    if strategy_mode not in {"normal", "candle_reaction"}:
+        strategy_mode = "normal"
+
     x = candles.copy().sort_values("timestamp").drop_duplicates("timestamp").reset_index(drop=True)
+    if len(x) < MIN_HISTORY:
+        return {"ok": False, "error": "Future Signal-এর জন্য পর্যাপ্ত closed candle নেই", "signals": []}
+
     if strategy_mode == "candle_reaction":
         base = generate_candle_reaction_signal(x)
     else:
@@ -78,9 +134,11 @@ def scan_future_opportunities(candles: pd.DataFrame, ticks=None, strategy_mode: 
     base_action = str(base.action).upper()
 
     candidates = []
-    # Near horizons get more weight because the setup is based on the latest
-    # closed candle; farther horizons are deliberately penalized.
-    for horizon in range(1, 16):
+    rejected_by_backtest = 0
+
+    # No fixed result count. Horizons remain capped at 15 minutes because
+    # this scanner is intended for short-term 1-minute entry opportunities.
+    for horizon in range(1, MAX_HORIZON + 1):
         for action in ("BUY", "SELL"):
             score = 50.0
             if action == base_action:
@@ -97,21 +155,28 @@ def scan_future_opportunities(candles: pd.DataFrame, ticks=None, strategy_mode: 
             if action != base_action:
                 score -= 5.0
             score = max(0.0, min(99.0, score))
-            # Future list is intentionally selective: show only stronger setups.
-            if score >= 82:
-                candidates.append(FutureOpportunity(
-                    rank=0,
-                    horizon_candles=horizon,
-                    action=action,
-                    score=int(round(score)),
-                    confidence=round(score / 100.0, 3),
-                    entry_window=f"পরবর্তী {horizon} candle-এর মধ্যে",
-                    reason=_reason(action, trend, momentum, str(base.reason), horizon),
-                ))
 
-    # No fixed count: return every opportunity that clears the quality threshold.
-    # Rank all qualifying setups by score, then by nearer entry horizon.
-    candidates.sort(key=lambda s: (-s.score, s.horizon_candles, s.action))
+            if score < 82:
+                continue
+
+            win_rate, trades, _wins = _backtest_horizon_accuracy(x, action, horizon, strategy_mode)
+            if trades < MIN_BACKTEST_TRADES or win_rate < MIN_BACKTEST_WIN_RATE:
+                rejected_by_backtest += 1
+                continue
+
+            candidates.append(FutureOpportunity(
+                rank=0,
+                horizon_candles=horizon,
+                action=action,
+                score=int(round(score)),
+                confidence=round(score / 100.0, 3),
+                entry_window=f"পরবর্তী {horizon} candle-এর মধ্যে",
+                reason=_reason(action, trend, momentum, str(base.reason), horizon, win_rate, trades),
+                backtest_win_rate=win_rate,
+                backtest_trades=trades,
+            ))
+
+    candidates.sort(key=lambda s: (-s.score, -s.backtest_win_rate, s.horizon_candles, s.action))
     for i, c in enumerate(candidates, 1):
         c.rank = i
 
@@ -121,6 +186,12 @@ def scan_future_opportunities(candles: pd.DataFrame, ticks=None, strategy_mode: 
         "count": len(candidates),
         "strategy_mode": strategy_mode,
         "base_signal": base_action,
-        "base_score": int(round(float(base.confidence) * 100)) if base_action in {"BUY","SELL"} else 0,
-        "note": "এগুলো বর্তমান closed-candle setup থেকে forward opportunities; নিশ্চিত ভবিষ্যৎ ফলাফল নয়।",
+        "base_score": int(round(float(base.confidence) * 100)) if base_action in {"BUY", "SELL"} else 0,
+        "backtest": {
+            "minimum_win_rate": MIN_BACKTEST_WIN_RATE,
+            "minimum_trades": MIN_BACKTEST_TRADES,
+            "validated_candidates": len(candidates),
+            "rejected_by_backtest": rejected_by_backtest,
+        },
+        "note": "তালিকায় শুধু live quality threshold এবং historical backtest validation—দুই শর্ত পূরণ করা setup থাকে। Backtest ভবিষ্যৎ ফলাফলের গ্যারান্টি নয়।",
     }

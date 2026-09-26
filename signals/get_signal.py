@@ -227,7 +227,7 @@ def get_future_signals(pair: str, market_mode: str = "real", strategy_mode: str 
         from quotex_browser_ingest import _REAL_MARKET, _REAL_MARKET_LOCK, real_market_ticks
         asset = "".join(ch for ch in pair if ch.isalnum() or ch in "._-")
         with _REAL_MARKET_LOCK:
-            rows = list((_REAL_MARKET.get(asset) or {}).get("bars") or [])[-100:]
+            rows = list((_REAL_MARKET.get(asset) or {}).get("bars") or [])[-300:]
         candles = pd.DataFrame(rows)
         if not candles.empty:
             candles["timestamp"] = pd.to_datetime(candles["timestamp"], unit="s", utc=True, errors="coerce")
@@ -241,7 +241,7 @@ def get_future_signals(pair: str, market_mode: str = "real", strategy_mode: str 
         asset = asset_for_display(pair)
         if not asset or asset not in OTC_PAIRS:
             raise RuntimeError("বর্তমান Quotex OTC মার্কেট শনাক্ত করা যায়নি।")
-        candles = fetch_quotex_candles(asset, count=100)
+        candles = fetch_quotex_candles(asset, count=300)
         ticks = local_ticks(asset)
     else:
         raise ValueError("Unsupported market mode")
