@@ -66,8 +66,11 @@ def _is_red(rgb: tuple[int, int, int]) -> bool:
 def analyze_chart(image, *, max_candles: int = 120) -> dict[str, Any]:
     """Analyze a PIL RGB image without assuming a Quotex screen layout."""
     width, height = image.size
-    sample_w = max(1, min(480, width))
-    sample_h = max(1, min(720, height))
+    # Preserve the screenshot aspect ratio so OCR coordinates and candle
+    # coordinates remain geometrically compatible.
+    scale = min(1.0, 480.0 / max(1, width), 720.0 / max(1, height))
+    sample_w = max(1, int(round(width * scale)))
+    sample_h = max(1, int(round(height * scale)))
     sample = image.resize((sample_w, sample_h))
     pixels = sample.load()
 
@@ -168,6 +171,8 @@ def analyze_chart(image, *, max_candles: int = 120) -> dict[str, Any]:
         "red_columns": red_columns,
         "sample_width": sample_w,
         "sample_height": sample_h,
+        "source_width": width,
+        "source_height": height,
         "candidate_candles": len(rows),
         "chart_bounds": bounds,
         "candles": rows,
