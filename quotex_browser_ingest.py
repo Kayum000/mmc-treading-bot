@@ -296,6 +296,45 @@ def init_quotex_browser_ingest(app):
             probe["active_asset"] = asset if asset != "android" else None
             probe["timeframe"] = context.get("timeframe")
 
+            # Android previously stopped at frame/OCR probing. Once a fresh
+            # 1-minute context and a validated price calibration exist, turn
+            # the detected closed candles into the same normalized OTC cache
+            # used by the existing signal engine. The rightmost candle is
+            # treated as the currently forming candle and is never ingested.
+            accepted_candles = 0
+            if asset != "android" and context.get("timeframe") == "1m" and probe.get("price_scale_calibrated"):
+                candles = list(probe.get("candles") or [])
+                closed = candles[:-1] if len(candles) >= 2 else []
+                closed = [row for row in closed if isinstance(row, dict) and row.get("price_ohlc")]
+                if closed:
+                    now_minute = int(time.time() // 60) * 60
+                    rows = []
+                    total = len(closed)
+                    for index, row in enumerate(closed):
+                        prices = row.get("price_ohlc") or {}
+                        if not all(key in prices for key in ("open", "high", "low", "close")):
+                            continue
+                        rows.append({
+                            "asset": asset,
+                            "timestamp": float(now_minute - (total - index) * 60),
+                            "open": float(prices["open"]),
+                            "high": float(prices["high"]),
+                            "low": float(prices["low"]),
+                            "close": float(prices["close"]),
+                        })
+                    if rows:
+                        accepted_candles = ingest_local_candles({
+                            "sent_at": time.time(),
+                            "active_asset": asset,
+                            "candles": rows,
+                        })
+                        logger.info(
+                            "QUOTEX_ANDROID_FRAME_INGEST asset=%s accepted=%s candidates=%s",
+                            asset,
+                            accepted_candles,
+                            len(rows),
+                        )
+
             return jsonify({
                 "ok": True,
                 "source": "android_bridge_frame_probe",
