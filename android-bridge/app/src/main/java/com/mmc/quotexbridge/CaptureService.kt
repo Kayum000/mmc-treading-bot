@@ -180,16 +180,6 @@ class CaptureService : Service() {
         cropped.recycle()
 
         val output = ByteArrayOutputStream()
-        val ocrPayload = if (System.currentTimeMillis() - lastOcrAt.get() >= OCR_INTERVAL_MS) {
-            lastOcrAt.set(System.currentTimeMillis())
-            try {
-                recognizeText(scaled)
-            } catch (t: Throwable) {
-                Log.w(TAG, "OCR failed: ${t.javaClass.simpleName}: ${t.message}")
-                null
-            }
-        } else null
-
         scaled.compress(Bitmap.CompressFormat.JPEG, 55, output)
         scaled.recycle()
         var bytes = output.toByteArray()
@@ -208,8 +198,27 @@ class CaptureService : Service() {
             bytes = retry.toByteArray()
         }
 
-        postFrame(bytes, image.width, image.height)
-        if (ocrPayload != null) postOcr(ocrPayload)
+        // Send the frame before OCR so first-run ML Kit setup cannot block uploads.
+        try {
+            postFrame(bytes, image.width, image.height)
+        } catch (t: Throwable) {
+            Log.w(TAG, "Frame upload failed: " + t.javaClass.simpleName + ": " + t.message)
+        }
+
+        // OCR is calibration-only and must not block frame uploads.
+        if (System.currentTimeMillis() - lastOcrAt.get() >= OCR_INTERVAL_MS) {
+            lastOcrAt.set(System.currentTimeMillis())
+            try {
+                val ocrPayload = recognizeText(BitmapFactoryCompat.decodeJpeg(bytes))
+                try {
+                    postOcr(ocrPayload)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "OCR upload failed: " + t.javaClass.simpleName + ": " + t.message)
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "OCR failed: " + t.javaClass.simpleName + ": " + t.message)
+            }
+        }
     }
 
     private fun recognizeText(bitmap: Bitmap): String {
