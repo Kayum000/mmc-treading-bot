@@ -14,7 +14,6 @@ import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.IBinder
-import android.util.Base64
 import android.util.Log
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
@@ -22,6 +21,8 @@ import java.net.URL
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
+import androidx.core.app.ServiceCompat
+import android.content.pm.ServiceInfo
 
 class CaptureService : Service() {
     companion object {
@@ -45,7 +46,6 @@ class CaptureService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createNotificationChannel()
-        startForeground(1001, notification())
 
         endpoint = (intent?.getStringExtra(EXTRA_ENDPOINT) ?: "").trim().trimEnd('/')
         secret = intent?.getStringExtra(EXTRA_SECRET) ?: ""
@@ -58,8 +58,32 @@ class CaptureService : Service() {
             return START_NOT_STICKY
         }
 
+        // Android 14+ requires the mediaProjection foreground-service type to be
+        // declared in the manifest and supplied when promoting the service.
+        ServiceCompat.startForeground(
+            this,
+            1001,
+            notification(),
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            } else {
+                0
+            }
+        )
+
         val manager = getSystemService(MediaProjectionManager::class.java)
-        projection = manager.getMediaProjection(resultCode, data)
+        projection = try {
+            manager.getMediaProjection(resultCode, data)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Unable to create MediaProjection", t)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (projection == null) {
+            Log.e(TAG, "MediaProjection unavailable")
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         val metrics = resources.displayMetrics
         val width = metrics.widthPixels
@@ -67,7 +91,7 @@ class CaptureService : Service() {
         val density = metrics.densityDpi
 
         reader = ImageReader.newInstance(width, height, ImageFormat.RGBA_8888, 2)
-        display = projection?.createVirtualDisplay(
+        display = projection.createVirtualDisplay(
             "MMCQuotexBridge",
             width,
             height,
@@ -168,10 +192,15 @@ class CaptureService : Service() {
     }
 
     override fun onDestroy() {
+        reader?.setOnImageAvailableListener(null, null)
         reader?.close()
+        reader = null
         display?.release()
+        display = null
         projection?.stop()
+        projection = null
         executor.shutdownNow()
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
 
