@@ -16,6 +16,7 @@ class CandleReactionSignal:
     action: str
     confidence: float
     reason: str
+    regime: str = "CANDLE_REACTION"
     strategy: str = "CANDLE_REACTION"
 
 
@@ -124,7 +125,7 @@ def generate_candle_reaction_signal(candles: pd.DataFrame) -> CandleReactionSign
             score += 5
             reasons.append("শক্তিশালী বিয়ারিশ close")
         score = min(score, 95)
-        return CandleReactionSignal("SELL", score / 100.0, " + ".join(reasons))
+        return CandleReactionSignal("SELL", score / 100.0, " • ".join(reasons))
 
     if at_support and at_resistance:
         return CandleReactionSignal("HOLD", 0.0, "support ও resistance একই candle-এ overlap করেছে")
