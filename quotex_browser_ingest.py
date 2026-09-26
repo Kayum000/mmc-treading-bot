@@ -19,7 +19,7 @@ from data.quotex_otc import ingest_local_candles, ingest_local_ticks, local_stre
 from data.otc_markets import display_for_asset, OTC_DISPLAY_PAIRS
 from signals.get_signal import get_signal
 from data.android_chart_probe import analyze_chart
-from data.android_price_calibration import update_ocr, get_calibration, apply_calibration
+from data.android_price_calibration import update_ocr, get_calibration, apply_calibration, android_context
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +261,9 @@ def init_quotex_browser_ingest(app):
                 return jsonify({"ok": False, "error": "Stale OCR payload."}), 408
         except (TypeError, ValueError):
             return jsonify({"ok": False, "error": "Invalid OCR timestamp."}), 400
-        payload["active_asset"] = request.headers.get("X-MMC-Android-Asset") or "android"
+        header_asset = request.headers.get("X-MMC-Android-Asset")
+        if header_asset:
+            payload["active_asset"] = header_asset
         result = update_ocr(payload)
         return jsonify(result)
 
@@ -286,8 +288,13 @@ def init_quotex_browser_ingest(app):
             image = Image.open(BytesIO(request.data)).convert("RGB")
             width, height = image.size
             probe = analyze_chart(image)
-            calibration = get_calibration(request.headers.get("X-MMC-Android-Asset") or "android")
+            context = android_context()
+            asset = request.headers.get("X-MMC-Android-Asset") or context.get("asset") or "android"
+            calibration = get_calibration(asset)
             probe = apply_calibration(probe, calibration)
+            probe["android_context"] = context
+            probe["active_asset"] = asset if asset != "android" else None
+            probe["timeframe"] = context.get("timeframe")
 
             return jsonify({
                 "ok": True,
