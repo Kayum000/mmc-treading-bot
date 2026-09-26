@@ -14,14 +14,28 @@ import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.IBinder
-import android.util.Base64
 import android.util.Log
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.WindowManager
+import android.widget.TextView
+import android.provider.Settings
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
+import org.json.JSONArray
+import org.json.JSONObject
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import androidx.core.app.ServiceCompat
+import android.content.pm.ServiceInfo
 
 class CaptureService : Service() {
     companion object {
@@ -33,6 +47,7 @@ class CaptureService : Service() {
         private const val TAG = "MMCBridge"
         private const val FRAME_INTERVAL_MS = 1000L
         private const val MAX_JPEG_BYTES = 220_000
+        private const val OCR_INTERVAL_MS = 5000L
     }
 
     private var projection: MediaProjection? = null
@@ -42,10 +57,13 @@ class CaptureService : Service() {
     private var secret: String = ""
     private val executor = Executors.newSingleThreadExecutor()
     private val lastFrameAt = AtomicLong(0L)
+    private val lastOcrAt = AtomicLong(0L)
+    private var overlayView: TextView? = null
+    private var windowManager: WindowManager? = null
+    private val textRecognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createNotificationChannel()
-        startForeground(1001, notification())
 
         endpoint = (intent?.getStringExtra(EXTRA_ENDPOINT) ?: "").trim().trimEnd('/')
         secret = intent?.getStringExtra(EXTRA_SECRET) ?: ""
@@ -58,8 +76,32 @@ class CaptureService : Service() {
             return START_NOT_STICKY
         }
 
+        // Android 14+ requires the mediaProjection foreground-service type to be
+        // declared in the manifest and supplied when promoting the service.
+        ServiceCompat.startForeground(
+            this,
+            1001,
+            notification(),
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            } else {
+                0
+            }
+        )
+
         val manager = getSystemService(MediaProjectionManager::class.java)
-        projection = manager.getMediaProjection(resultCode, data)
+        projection = try {
+            manager.getMediaProjection(resultCode, data)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Unable to create MediaProjection", t)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (projection == null) {
+            Log.e(TAG, "MediaProjection unavailable")
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         val metrics = resources.displayMetrics
         val width = metrics.widthPixels
@@ -67,7 +109,7 @@ class CaptureService : Service() {
         val density = metrics.densityDpi
 
         reader = ImageReader.newInstance(width, height, ImageFormat.RGBA_8888, 2)
-        display = projection?.createVirtualDisplay(
+        display = projection.createVirtualDisplay(
             "MMCQuotexBridge",
             width,
             height,
@@ -124,6 +166,16 @@ class CaptureService : Service() {
         cropped.recycle()
 
         val output = ByteArrayOutputStream()
+        val ocrPayload = if (System.currentTimeMillis() - lastOcrAt.get() >= OCR_INTERVAL_MS) {
+            lastOcrAt.set(System.currentTimeMillis())
+            try {
+                recognizeText(scaled)
+            } catch (t: Throwable) {
+                Log.w(TAG, "OCR failed: ${t.javaClass.simpleName}: ${t.message}")
+                null
+            }
+        } else null
+
         scaled.compress(Bitmap.CompressFormat.JPEG, 55, output)
         scaled.recycle()
         var bytes = output.toByteArray()
@@ -143,6 +195,47 @@ class CaptureService : Service() {
         }
 
         postFrame(bytes, image.width, image.height)
+        if (ocrPayload != null) postOcr(ocrPayload)
+    }
+
+    private fun recognizeText(bitmap: Bitmap): String {
+        val image = InputImage.fromBitmap(bitmap, 0)
+        val result = Tasks.await(textRecognizer.process(image))
+        val blocks = JSONArray()
+        for (block in result.textBlocks) {
+            val box = block.boundingBox ?: continue
+            blocks.put(JSONObject().apply {
+                put("text", block.text)
+                put("left", box.left)
+                put("top", box.top)
+                put("right", box.right)
+                put("bottom", box.bottom)
+            })
+        }
+        return JSONObject().apply {
+            put("sent_at", System.currentTimeMillis() / 1000.0)
+            put("image_width", bitmap.width)
+            put("image_height", bitmap.height)
+            put("blocks", blocks)
+        }.toString()
+    }
+
+    private fun postOcr(payload: String) {
+        val url = URL("$endpoint/quotex/android-ocr")
+        val bytes = payload.toByteArray(Charsets.UTF_8)
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 7000
+            readTimeout = 7000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("X-MMC-Quotex-Key", secret)
+            setFixedLengthStreamingMode(bytes.size)
+        }
+        connection.outputStream.use { it.write(bytes) }
+        val code = connection.responseCode
+        connection.disconnect()
+        if (code !in 200..299) Log.w(TAG, "OCR upload HTTP $code")
     }
 
     private fun postFrame(bytes: ByteArray, width: Int, height: Int) {
@@ -167,11 +260,104 @@ class CaptureService : Service() {
         else Log.w(TAG, "Frame upload HTTP $code")
     }
 
+    private fun showFloatingControl() {
+        if (android.os.Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
+            Log.w(TAG, "Overlay permission not granted; floating control skipped")
+            return
+        }
+
+        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        val control = TextView(this).apply {
+            text = "● Capture ON\nTap = Stop"
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setPadding(22, 14, 22, 14)
+            background = GradientDrawable().apply {
+                setColor(Color.argb(220, 20, 20, 20))
+                cornerRadius = 28f
+            }
+            elevation = 8f
+        }
+
+        val type = if (android.os.Build.VERSION.SDK_INT >= 26) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            android.graphics.PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 18
+            y = 180
+        }
+
+        var downX = 0f
+        var downY = 0f
+        var startX = 0
+        var startY = 0
+
+        control.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.rawX
+                    downY = event.rawY
+                    startX = params.x
+                    startY = params.y
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val moved = kotlin.math.abs(event.rawX - downX) > 12f ||
+                        kotlin.math.abs(event.rawY - downY) > 12f
+                    if (!moved) stopSelf()
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    params.x = startX + (event.rawX - downX).toInt()
+                    params.y = startY + (event.rawY - downY).toInt()
+                    try { wm.updateViewLayout(view, params) } catch (_: Throwable) {}
+                    true
+                }
+                else -> true
+            }
+        }
+
+        try {
+            wm.addView(control, params)
+            windowManager = wm
+            overlayView = control
+        } catch (t: Throwable) {
+            Log.w(TAG, "Unable to show floating control: ${t.javaClass.simpleName}: ${t.message}")
+        }
+    }
+
+    private fun removeFloatingControl() {
+        val view = overlayView ?: return
+        try { windowManager?.removeView(view) } catch (_: Throwable) {}
+        overlayView = null
+        windowManager = null
+    }
+
     override fun onDestroy() {
+        removeFloatingControl()
+        reader?.setOnImageAvailableListener(null, null)
         reader?.close()
+        reader = null
         display?.release()
+        display = null
         projection?.stop()
+        projection = null
+        try { textRecognizer.close() } catch (_: Throwable) {}
         executor.shutdownNow()
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
 

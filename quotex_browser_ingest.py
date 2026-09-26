@@ -18,6 +18,8 @@ from flask import jsonify, request, session
 from data.quotex_otc import ingest_local_candles, ingest_local_ticks, local_stream_status, local_active_asset, local_candles_payload
 from data.otc_markets import display_for_asset, OTC_DISPLAY_PAIRS
 from signals.get_signal import get_signal
+from data.android_chart_probe import analyze_chart
+from data.android_price_calibration import update_ocr, get_calibration, apply_calibration, android_context
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +247,26 @@ def init_quotex_browser_ingest(app):
             "status": status,
         })
 
+    @app.route("/quotex/android-ocr", methods=["POST"])
+    def quotex_android_ocr():
+        """Receive OCR blocks used only to calibrate the chart price scale."""
+        if not _collector_secret_valid():
+            return jsonify({"ok": False, "error": "Invalid ingest key."}), 401
+        if not request.is_json:
+            return jsonify({"ok": False, "error": "JSON body required."}), 415
+        payload = request.get_json(silent=True) or {}
+        try:
+            sent_at = float(payload.get("sent_at", 0))
+            if not sent_at or abs(time.time() - sent_at) > 30:
+                return jsonify({"ok": False, "error": "Stale OCR payload."}), 408
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "Invalid OCR timestamp."}), 400
+        header_asset = request.headers.get("X-MMC-Android-Asset")
+        if header_asset:
+            payload["active_asset"] = header_asset
+        result = update_ocr(payload)
+        return jsonify(result)
+
     @app.route("/quotex/android-frame", methods=["POST"])
     def quotex_android_frame():
         """Receive a bounded JPEG frame for Android chart calibration."""
@@ -265,36 +287,21 @@ def init_quotex_browser_ingest(app):
         try:
             image = Image.open(BytesIO(request.data)).convert("RGB")
             width, height = image.size
-            sample = image.resize((max(1, min(360, width)), max(1, min(640, height))))
-            pixels = sample.load()
-            sw, sh = sample.size
-            green_cols = 0
-            red_cols = 0
-            for x in range(sw):
-                green_hits = 0
-                red_hits = 0
-                for y in range(int(sh * 0.08), int(sh * 0.78)):
-                    rr, gg, bb = pixels[x, y]
-                    if gg > rr * 1.18 and gg > bb * 1.08 and gg > 70:
-                        green_hits += 1
-                    if rr > gg * 1.18 and rr > bb * 1.08 and rr > 70:
-                        red_hits += 1
-                if green_hits >= 2:
-                    green_cols += 1
-                if red_hits >= 2:
-                    red_cols += 1
+            probe = analyze_chart(image)
+            context = android_context()
+            asset = request.headers.get("X-MMC-Android-Asset") or context.get("asset") or "android"
+            calibration = get_calibration(asset)
+            probe = apply_calibration(probe, calibration)
+            probe["android_context"] = context
+            probe["active_asset"] = asset if asset != "android" else None
+            probe["timeframe"] = context.get("timeframe")
+
             return jsonify({
                 "ok": True,
                 "source": "android_bridge_frame_probe",
                 "frame": {"width": width, "height": height, "bytes": len(request.data)},
-                "chart_probe": {
-                    "green_columns": green_cols,
-                    "red_columns": red_cols,
-                    "sample_width": sw,
-                    "sample_height": sh,
-                    "status": "color-evidence-detected" if (green_cols or red_cols) else "no-candle-color-evidence",
-                },
-                "note": "Pixel probe only; no OHLC or BUY/SELL signal is generated from this frame.",
+                "chart_probe": probe,
+                "note": probe.get("note"),
             })
         except Exception as exc:
             logger.exception("QUOTEX_ANDROID_FRAME_FAILED")

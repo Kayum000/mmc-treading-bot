@@ -3,7 +3,9 @@ package com.mmc.quotexbridge
 import android.app.Activity
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -35,6 +37,10 @@ class MainActivity : AppCompatActivity() {
         secret = EditText(this).apply {
             hint = "QUOTEX_INGEST_SECRET"
         }
+        val overlay = Button(this).apply {
+            text = "Floating Window Permission"
+            setOnClickListener { requestOverlayPermission() }
+        }
         val start = Button(this).apply {
             text = "Quotex Screen Scan শুরু করুন"
             setOnClickListener { requestCapture() }
@@ -49,12 +55,31 @@ class MainActivity : AppCompatActivity() {
         box.addView(status)
         box.addView(endpoint)
         box.addView(secret)
+        box.addView(overlay)
         box.addView(start)
         box.addView(stop)
         setContentView(box)
     }
 
+    private fun requestOverlayPermission() {
+        if (android.os.Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this)) {
+            status.text = "Floating permission ইতিমধ্যে চালু"
+            return
+        }
+        startActivity(
+            Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+        )
+        status.text = "Floating permission দিন, তারপর Scan শুরু করুন"
+    }
+
     private fun requestCapture() {
+        if (android.os.Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
+            requestOverlayPermission()
+            return
+        }
         val manager = getSystemService(MediaProjectionManager::class.java)
         startActivityForResult(manager.createScreenCaptureIntent(), REQUEST_CAPTURE)
     }
@@ -72,6 +97,6 @@ class MainActivity : AppCompatActivity() {
             putExtra(CaptureService.EXTRA_SECRET, secret.text.toString())
         }
         startForegroundService(service)
-        status.text = "Capture service চালু হয়েছে"
+        status.text = "Capture service + Floating control চালু হয়েছে"
     }
 }
