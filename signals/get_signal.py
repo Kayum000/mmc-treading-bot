@@ -10,6 +10,7 @@ from data.otc_markets import display_for_asset, asset_for_display
 from strategy.otc_candle_pressure import generate_signal as generate_otc_signal
 from strategy.candle_reaction import generate_candle_reaction_signal
 from strategy.adaptive_real import generate_adaptive_signal
+from signals.future_signal import scan_future_opportunities
 
 
 def _bengali_reason(reason: str) -> str:
@@ -215,3 +216,36 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False, st
     if mode == "quotex_otc":
         return _otc_signal(pair, automatic, strategy_mode)
     raise ValueError("Unsupported market mode")
+
+
+def get_future_signals(pair: str, market_mode: str = "real", strategy_mode: str = "normal", limit: int = 15) -> dict:
+    """Return ranked forward opportunities for the currently selected pair."""
+    pair = (pair or "").strip().upper()
+    mode = (market_mode or "real").strip().lower()
+    strategy_mode = str(strategy_mode or "normal").strip().lower()
+    limit = max(1, min(int(limit or 15), 15))
+    if mode == "real":
+        from quotex_browser_ingest import _REAL_MARKET, _REAL_MARKET_LOCK, real_market_ticks
+        asset = "".join(ch for ch in pair if ch.isalnum() or ch in "._-")
+        with _REAL_MARKET_LOCK:
+            rows = list((_REAL_MARKET.get(asset) or {}).get("bars") or [])[-100:]
+        candles = pd.DataFrame(rows)
+        if not candles.empty:
+            candles["timestamp"] = pd.to_datetime(candles["timestamp"], unit="s", utc=True, errors="coerce")
+            now_minute = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+            candles = candles.dropna(subset=["timestamp"])
+            candles = candles[candles["timestamp"] < now_minute].reset_index(drop=True)
+        ticks = real_market_ticks(asset, count=1000)
+        if ticks.empty:
+            ticks = None
+    elif mode == "quotex_otc":
+        asset = asset_for_display(pair)
+        if not asset or asset not in OTC_PAIRS:
+            raise RuntimeError("বর্তমান Quotex OTC মার্কেট শনাক্ত করা যায়নি।")
+        candles = fetch_quotex_candles(asset, count=100)
+        ticks = local_ticks(asset)
+    else:
+        raise ValueError("Unsupported market mode")
+    result = scan_future_opportunities(candles, ticks=ticks, strategy_mode=strategy_mode, limit=limit)
+    result.update({"pair": pair, "market_mode": mode})
+    return result
