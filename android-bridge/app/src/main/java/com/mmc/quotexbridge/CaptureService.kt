@@ -21,6 +21,12 @@ import java.net.URL
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
+import org.json.JSONArray
+import org.json.JSONObject
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import androidx.core.app.ServiceCompat
 import android.content.pm.ServiceInfo
 
@@ -34,6 +40,7 @@ class CaptureService : Service() {
         private const val TAG = "MMCBridge"
         private const val FRAME_INTERVAL_MS = 1000L
         private const val MAX_JPEG_BYTES = 220_000
+        private const val OCR_INTERVAL_MS = 5000L
     }
 
     private var projection: MediaProjection? = null
@@ -43,6 +50,8 @@ class CaptureService : Service() {
     private var secret: String = ""
     private val executor = Executors.newSingleThreadExecutor()
     private val lastFrameAt = AtomicLong(0L)
+    private val lastOcrAt = AtomicLong(0L)
+    private val textRecognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createNotificationChannel()
@@ -148,6 +157,16 @@ class CaptureService : Service() {
         cropped.recycle()
 
         val output = ByteArrayOutputStream()
+        val ocrPayload = if (System.currentTimeMillis() - lastOcrAt.get() >= OCR_INTERVAL_MS) {
+            lastOcrAt.set(System.currentTimeMillis())
+            try {
+                recognizeText(scaled)
+            } catch (t: Throwable) {
+                Log.w(TAG, "OCR failed: ${t.javaClass.simpleName}: ${t.message}")
+                null
+            }
+        } else null
+
         scaled.compress(Bitmap.CompressFormat.JPEG, 55, output)
         scaled.recycle()
         var bytes = output.toByteArray()
@@ -167,6 +186,47 @@ class CaptureService : Service() {
         }
 
         postFrame(bytes, image.width, image.height)
+        if (ocrPayload != null) postOcr(ocrPayload)
+    }
+
+    private fun recognizeText(bitmap: Bitmap): String {
+        val image = InputImage.fromBitmap(bitmap, 0)
+        val result = Tasks.await(textRecognizer.process(image))
+        val blocks = JSONArray()
+        for (block in result.textBlocks) {
+            val box = block.boundingBox ?: continue
+            blocks.put(JSONObject().apply {
+                put("text", block.text)
+                put("left", box.left)
+                put("top", box.top)
+                put("right", box.right)
+                put("bottom", box.bottom)
+            })
+        }
+        return JSONObject().apply {
+            put("sent_at", System.currentTimeMillis() / 1000.0)
+            put("image_width", bitmap.width)
+            put("image_height", bitmap.height)
+            put("blocks", blocks)
+        }.toString()
+    }
+
+    private fun postOcr(payload: String) {
+        val url = URL("$endpoint/quotex/android-ocr")
+        val bytes = payload.toByteArray(Charsets.UTF_8)
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 7000
+            readTimeout = 7000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("X-MMC-Quotex-Key", secret)
+            setFixedLengthStreamingMode(bytes.size)
+        }
+        connection.outputStream.use { it.write(bytes) }
+        val code = connection.responseCode
+        connection.disconnect()
+        if (code !in 200..299) Log.w(TAG, "OCR upload HTTP $code")
     }
 
     private fun postFrame(bytes: ByteArray, width: Int, height: Int) {
@@ -199,6 +259,7 @@ class CaptureService : Service() {
         display = null
         projection?.stop()
         projection = null
+        try { textRecognizer.close() } catch (_: Throwable) {}
         executor.shutdownNow()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         super.onDestroy()
