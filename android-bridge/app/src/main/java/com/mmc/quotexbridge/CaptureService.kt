@@ -7,6 +7,7 @@ import android.app.Service
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.ImageFormat
+import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
@@ -108,8 +109,13 @@ class CaptureService : Service() {
         val height = metrics.heightPixels
         val density = metrics.densityDpi
 
-        reader = ImageReader.newInstance(width, height, ImageFormat.RGBA_8888, 2)
-        display = projection.createVirtualDisplay(
+        reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+        val activeProjection = projection ?: run {
+            Log.e(TAG, "MediaProjection became unavailable")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        display = activeProjection.createVirtualDisplay(
             "MMCQuotexBridge",
             width,
             height,
