@@ -34,3 +34,5 @@ jobs:
           name: mmc-main-app-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+# Main mobile APK: full current MMC Bot WebView app; Android bridge is intentionally excluded.
