@@ -6,20 +6,11 @@ import logging
 import os
 import threading
 import time
-from io import BytesIO
-
-try:
-    from PIL import Image
-except ImportError:  # pragma: no cover - pinned deployment dependency
-    Image = None
-
 from flask import jsonify, request, session
 
 from data.quotex_otc import ingest_local_candles, ingest_local_ticks, local_stream_status, local_active_asset, local_candles_payload
 from data.otc_markets import display_for_asset, OTC_DISPLAY_PAIRS
 from signals.get_signal import get_signal
-from data.android_chart_probe import analyze_chart
-from data.android_price_calibration import update_ocr, get_calibration, apply_calibration, android_context
 
 logger = logging.getLogger(__name__)
 
@@ -204,147 +195,6 @@ def init_quotex_browser_ingest(app):
         except Exception as exc:
             logger.exception("FLOATING_OTC_SIGNAL_FAILED pair=%s", pair)
             return jsonify({"ok": False, "error": str(exc), "error_type": type(exc).__name__}), 502
-
-    @app.route("/quotex/android-ingest", methods=["POST"])
-    def quotex_android_ingest():
-        """Receive structured candle/tick data from the optional Android Quotex bridge.
-
-        This endpoint deliberately reuses the existing authenticated collector
-        adapters, so the Android path cannot bypass the existing strategy or
-        change the current Windows/browser collector behavior.
-        """
-        if not _collector_secret_valid():
-            return jsonify({"ok": False, "error": "Invalid ingest key."}), 401
-        if not request.is_json:
-            return jsonify({"ok": False, "error": "JSON body required."}), 415
-        payload = request.get_json(silent=True) or {}
-        try:
-            sent_at = payload.get("sent_at")
-            if sent_at is not None and abs(time.time() - float(sent_at)) > 30:
-                return jsonify({"ok": False, "error": "Stale collector payload."}), 408
-        except (TypeError, ValueError):
-            return jsonify({"ok": False, "error": "Invalid sent_at."}), 400
-
-        # The Android bridge is an additional source only. It feeds the same
-        # normalized OTC cache used by the current signal engine.
-        accepted_candles = ingest_local_candles(payload)
-        accepted_ticks = ingest_local_ticks(payload)
-        status = local_stream_status()
-        logger.info(
-            "QUOTEX_ANDROID_INGEST candles=%s ticks=%s assets=%s active=%s",
-            accepted_candles,
-            accepted_ticks,
-            status.get("assets"),
-            status.get("active_asset"),
-        )
-        if not accepted_candles and not accepted_ticks:
-            return jsonify({"ok": False, "error": "No supported candle or tick data found."}), 422
-        return jsonify({
-            "ok": True,
-            "source": "android_bridge",
-            "accepted_candles": accepted_candles,
-            "accepted_ticks": accepted_ticks,
-            "status": status,
-        })
-
-    @app.route("/quotex/android-ocr", methods=["POST"])
-    def quotex_android_ocr():
-        """Receive OCR blocks used only to calibrate the chart price scale."""
-        if not _collector_secret_valid():
-            return jsonify({"ok": False, "error": "Invalid ingest key."}), 401
-        if not request.is_json:
-            return jsonify({"ok": False, "error": "JSON body required."}), 415
-        payload = request.get_json(silent=True) or {}
-        try:
-            sent_at = float(payload.get("sent_at", 0))
-            if not sent_at or abs(time.time() - sent_at) > 30:
-                return jsonify({"ok": False, "error": "Stale OCR payload."}), 408
-        except (TypeError, ValueError):
-            return jsonify({"ok": False, "error": "Invalid OCR timestamp."}), 400
-        header_asset = request.headers.get("X-MMC-Android-Asset")
-        if header_asset:
-            payload["active_asset"] = header_asset
-        result = update_ocr(payload)
-        return jsonify(result)
-
-    @app.route("/quotex/android-frame", methods=["POST"])
-    def quotex_android_frame():
-        """Receive a bounded JPEG frame for Android chart calibration."""
-        if not _collector_secret_valid():
-            return jsonify({"ok": False, "error": "Invalid ingest key."}), 401
-        if not request.data:
-            return jsonify({"ok": False, "error": "JPEG body required."}), 415
-        if len(request.data) > 220_000:
-            return jsonify({"ok": False, "error": "Frame too large."}), 413
-        try:
-            sent_at = float(request.headers.get("X-MMC-Frame-Time", ""))
-            if abs(time.time() - sent_at) > 30:
-                return jsonify({"ok": False, "error": "Stale frame."}), 408
-        except (TypeError, ValueError):
-            return jsonify({"ok": False, "error": "Invalid frame timestamp."}), 400
-        if Image is None:
-            return jsonify({"ok": False, "error": "Image probe dependency unavailable."}), 503
-        try:
-            image = Image.open(BytesIO(request.data)).convert("RGB")
-            width, height = image.size
-            probe = analyze_chart(image)
-            context = android_context()
-            asset = request.headers.get("X-MMC-Android-Asset") or context.get("asset") or "android"
-            calibration = get_calibration(asset)
-            probe = apply_calibration(probe, calibration)
-            probe["android_context"] = context
-            probe["active_asset"] = asset if asset != "android" else None
-            probe["timeframe"] = context.get("timeframe")
-
-            # Android previously stopped at frame/OCR probing. Once a fresh
-            # 1-minute context and a validated price calibration exist, turn
-            # the detected closed candles into the same normalized OTC cache
-            # used by the existing signal engine. The rightmost candle is
-            # treated as the currently forming candle and is never ingested.
-            accepted_candles = 0
-            if asset != "android" and context.get("timeframe") == "1m" and probe.get("price_scale_calibrated"):
-                candles = list(probe.get("candles") or [])
-                closed = candles[:-1] if len(candles) >= 2 else []
-                closed = [row for row in closed if isinstance(row, dict) and row.get("price_ohlc")]
-                if closed:
-                    now_minute = int(time.time() // 60) * 60
-                    rows = []
-                    total = len(closed)
-                    for index, row in enumerate(closed):
-                        prices = row.get("price_ohlc") or {}
-                        if not all(key in prices for key in ("open", "high", "low", "close")):
-                            continue
-                        rows.append({
-                            "asset": asset,
-                            "timestamp": float(now_minute - (total - index) * 60),
-                            "open": float(prices["open"]),
-                            "high": float(prices["high"]),
-                            "low": float(prices["low"]),
-                            "close": float(prices["close"]),
-                        })
-                    if rows:
-                        accepted_candles = ingest_local_candles({
-                            "sent_at": time.time(),
-                            "active_asset": asset,
-                            "candles": rows,
-                        })
-                        logger.info(
-                            "QUOTEX_ANDROID_FRAME_INGEST asset=%s accepted=%s candidates=%s",
-                            asset,
-                            accepted_candles,
-                            len(rows),
-                        )
-
-            return jsonify({
-                "ok": True,
-                "source": "android_bridge_frame_probe",
-                "frame": {"width": width, "height": height, "bytes": len(request.data)},
-                "chart_probe": probe,
-                "note": probe.get("note"),
-            })
-        except Exception as exc:
-            logger.exception("QUOTEX_ANDROID_FRAME_FAILED")
-            return jsonify({"ok": False, "error": str(exc), "error_type": type(exc).__name__}), 422
 
     @app.route("/quotex/current-market", methods=["GET"])
     def quotex_current_market():
