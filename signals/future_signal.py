@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import pandas as pd
 
-from strategy.candle_reaction import generate_candle_reaction_signal
 from strategy.adaptive_real import generate_adaptive_signal
 
 
@@ -61,9 +60,7 @@ def _momentum_score(x: pd.DataFrame) -> tuple[str, float]:
     return "HOLD", 0.0
 
 
-def _signal_for_history(x: pd.DataFrame, strategy_mode: str):
-    if strategy_mode == "candle_reaction":
-        return generate_candle_reaction_signal(x)
+def _signal_for_history(x: pd.DataFrame):
     return generate_adaptive_signal(x)
 
 
@@ -71,7 +68,6 @@ def _backtest_horizon_accuracy(
     candles: pd.DataFrame,
     action: str,
     horizon: int,
-    strategy_mode: str,
 ) -> tuple[float, int, int]:
     """Walk forward through closed candles and score the exact direction/horizon.
 
@@ -87,7 +83,7 @@ def _backtest_horizon_accuracy(
     end = len(candles) - horizon
     for i in range(start, end):
         history = candles.iloc[: i + 1]
-        signal = _signal_for_history(history, strategy_mode)
+        signal = _signal_for_history(history)
         if str(signal.action).upper() != action:
             continue
         trades += 1
@@ -112,22 +108,15 @@ def _reason(action: str, trend: str, momentum: str, base_reason: str, horizon: i
     return " • ".join(bits)
 
 
-def scan_future_opportunities(candles: pd.DataFrame, ticks=None, strategy_mode: str = "normal") -> dict:
+def scan_future_opportunities(candles: pd.DataFrame, ticks=None) -> dict:
     if candles is None or len(candles) < MIN_HISTORY:
         return {"ok": False, "error": "Future Signal-এর জন্য অন্তত 60টি বন্ধ ১-মিনিট candle দরকার", "signals": []}
-
-    strategy_mode = str(strategy_mode or "normal").strip().lower()
-    if strategy_mode not in {"normal", "candle_reaction"}:
-        strategy_mode = "normal"
 
     x = candles.copy().sort_values("timestamp").drop_duplicates("timestamp").reset_index(drop=True)
     if len(x) < MIN_HISTORY:
         return {"ok": False, "error": "Future Signal-এর জন্য পর্যাপ্ত closed candle নেই", "signals": []}
 
-    if strategy_mode == "candle_reaction":
-        base = generate_candle_reaction_signal(x)
-    else:
-        base = generate_adaptive_signal(x, ticks=ticks)
+    base = generate_adaptive_signal(x, ticks=ticks)
 
     trend, trend_strength = _trend_score(x)
     momentum, momentum_strength = _momentum_score(x)
@@ -159,7 +148,7 @@ def scan_future_opportunities(candles: pd.DataFrame, ticks=None, strategy_mode: 
             if score < 82:
                 continue
 
-            win_rate, trades, _wins = _backtest_horizon_accuracy(x, action, horizon, strategy_mode)
+            win_rate, trades, _wins = _backtest_horizon_accuracy(x, action, horizon)
             if trades < MIN_BACKTEST_TRADES or win_rate < MIN_BACKTEST_WIN_RATE:
                 rejected_by_backtest += 1
                 continue
@@ -184,7 +173,7 @@ def scan_future_opportunities(candles: pd.DataFrame, ticks=None, strategy_mode: 
         "ok": True,
         "signals": [asdict(c) for c in candidates],
         "count": len(candidates),
-        "strategy_mode": strategy_mode,
+        "strategy_mode": "adaptive",
         "base_signal": base_action,
         "base_score": int(round(float(base.confidence) * 100)) if base_action in {"BUY", "SELL"} else 0,
         "backtest": {

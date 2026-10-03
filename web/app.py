@@ -34,7 +34,6 @@ _DEFAULT_SETTINGS = {
     "pair": None,
     "auto_signal": False,
     "min_confidence": 0.0,
-    "strategy_mode": "normal",
     "timezone": "Asia/Dhaka",
 }
 _USAGE_CACHE = {"data": None, "at": 0.0}
@@ -73,10 +72,6 @@ def _usage_view():
     return data
 
 
-def _valid_strategy_modes():
-    return {"normal", "candle_reaction"}
-
-
 def _valid_pairs(mode: str):
     return REAL_PAIRS if mode == "real" else QUOTEX_OTC_PAIRS if mode == "quotex_otc" else []
 
@@ -90,10 +85,11 @@ def _settings():
         value["market_mode"] = mode
     if pair:
         value["pair"] = pair
+    value.pop("strategy_mode", None)
     return value
 
 
-def _save_settings(mode: str, pair: str, auto_signal=None, min_confidence=None, timezone=None, strategy_mode=None):
+def _save_settings(mode: str, pair: str, auto_signal=None, min_confidence=None, timezone=None):
     current = _settings()
     current["market_mode"] = mode
     current["pair"] = pair
@@ -103,8 +99,6 @@ def _save_settings(mode: str, pair: str, auto_signal=None, min_confidence=None, 
         current["min_confidence"] = float(min_confidence)
     if timezone:
         current["timezone"] = timezone
-    if strategy_mode in _valid_strategy_modes():
-        current["strategy_mode"] = strategy_mode
     session["settings"] = current
     session["selected_mode"] = mode
     session["selected_pair"] = pair
@@ -170,13 +164,10 @@ def require_dashboard():
 def select_market():
     mode = request.form.get("mode", "").strip().lower()
     pair = request.form.get("pair", "").strip().upper()
-    strategy_mode = request.form.get("strategy_mode", _settings().get("strategy_mode", "normal")).strip().lower()
-    if strategy_mode not in _valid_strategy_modes():
-        return jsonify({"ok": False, "error": "অবৈধ strategy mode।"}), 400
     if pair not in _valid_pairs(mode):
         return jsonify({"ok": False, "error": "অবৈধ মার্কেট।"}), 400
-    _save_settings(mode, pair, strategy_mode=strategy_mode)
-    return jsonify({"ok": True, "mode": mode, "pair": pair, "strategy_mode": strategy_mode})
+    _save_settings(mode, pair)
+    return jsonify({"ok": True, "mode": mode, "pair": pair, "strategy_mode": "adaptive"})
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -187,24 +178,20 @@ def index():
     if request.method == "POST":
         mode = request.form.get("mode", "").strip().lower()
         pair = request.form.get("pair", "").strip().upper()
-        strategy_mode = request.form.get("strategy_mode", "normal").strip().lower()
     else:
         mode = session.get("selected_mode", saved.get("market_mode", ""))
         pair = session.get("selected_pair", saved.get("pair", ""))
-        strategy_mode = saved.get("strategy_mode", "normal")
     if mode not in {"real", "quotex_otc"}:
         mode, pair = "", ""
-    if strategy_mode not in _valid_strategy_modes():
-        strategy_mode = "normal"
     if pair not in _valid_pairs(mode):
         pair = ""
     if request.method == "POST":
         if not pair:
             error = "Please select a market before GET SIGNAL."
         else:
-            _save_settings(mode, pair, strategy_mode=strategy_mode)
+            _save_settings(mode, pair)
             try:
-                result = get_signal(pair, mode, strategy_mode=strategy_mode)
+                result = get_signal(pair, mode)
             except Exception as exc:
                 error = str(exc)
     return render_template(
@@ -213,7 +200,7 @@ def index():
         otc_pairs=QUOTEX_OTC_PAIRS,
         mode=mode,
         pair=pair,
-        strategy_mode=strategy_mode,
+        strategy_mode="adaptive",
         error=error,
         result=result,
         usage=_usage_view(),
@@ -225,11 +212,10 @@ def auto_signal():
     settings = _settings()
     mode = session.get("selected_mode", settings.get("market_mode", "")).strip().lower()
     pair = session.get("selected_pair", settings.get("pair", "") or "").strip().upper()
-    strategy_mode = settings.get("strategy_mode", "normal")
     if pair not in _valid_pairs(mode):
         return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
     try:
-        result = get_signal(pair, mode, automatic=True, strategy_mode=strategy_mode)
+        result = get_signal(pair, mode, automatic=True)
         return jsonify({"ok": True, "result": result})
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
@@ -240,11 +226,10 @@ def future_signals():
     settings = _settings()
     mode = session.get("selected_mode", settings.get("market_mode", "")).strip().lower()
     pair = session.get("selected_pair", settings.get("pair", "") or "").strip().upper()
-    strategy_mode = settings.get("strategy_mode", "normal")
     if pair not in _valid_pairs(mode):
         return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
     try:
-        result = get_future_signals(pair, mode, strategy_mode=strategy_mode)
+        result = get_future_signals(pair, mode)
         return jsonify(result)
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
