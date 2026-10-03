@@ -194,6 +194,10 @@ def index():
                 result = get_signal(pair, mode)
             except Exception as exc:
                 error = str(exc)
+        if request.accept_mimetypes.best == "application/json":
+            if result is not None:
+                return jsonify({"ok": True, "result": result})
+            return jsonify({"ok": False, "error": error or "Signal generation failed."}), 422
     return render_template(
         "index.html",
         real_pairs=REAL_PAIRS,
