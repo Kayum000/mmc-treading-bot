@@ -19,8 +19,8 @@ PERIOD = 60
 # identity and candle-cache freshness long enough to cover that cadence plus
 # normal network/deploy jitter. The adapter also enforces the closed-candle
 # boundary so a running candle can never reach the signal engine.
-_LOCAL_TTL = 50
-_LOCAL_DATA_TTL = 75
+_LOCAL_TTL = 120
+_LOCAL_DATA_TTL = 150
 _LOCAL_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}
 _LOCAL_TICK_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}
 _LOCAL_ACTIVE_ASSET: tuple[float, str] | None = None
@@ -98,7 +98,7 @@ def ingest_local_candles(payload: Any) -> int:
         # Prefer the collector's sent_at clock so a small Render/collector clock
         # skew cannot accidentally admit the current running candle.
         server_closed_before = pd.Timestamp.now(tz="UTC").floor("min")
-        closed_before = sent_at_utc if sent_at_utc is not None else server_closed_before
+        closed_before = min(sent_at_utc, server_closed_before) if sent_at_utc is not None else server_closed_before
         accepted = 0
         # Refresh the selected/visible OTC market as soon as a valid market
         # identity arrives. The collector may send a still-forming candle;
@@ -232,6 +232,11 @@ def _local_candles(asset: str, count: int) -> pd.DataFrame | None:
     # candle after ingest.
     closed_before = pd.Timestamp.now(tz="UTC").floor("min")
     df = df[df["timestamp"] + pd.Timedelta(seconds=PERIOD) <= closed_before].reset_index(drop=True)
+    if df.empty:
+        return None
+    latest_age = max(0.0, (closed_before - df["timestamp"].iloc[-1]).total_seconds())
+    if latest_age > _LOCAL_DATA_TTL:
+        return None
     return df.tail(count).reset_index(drop=True) if len(df) >= 8 else None
 
 
