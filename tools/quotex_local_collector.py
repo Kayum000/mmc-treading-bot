@@ -391,6 +391,13 @@ async def run() -> None:
         # Backfill four hours so delayed performance lookups still have the
         # exact entry candles for recent signals after collector restarts.
         request_js = """(() => { const now=Math.floor(Date.now()/1000); const index=Math.floor(Date.now()/10); const assets=__ASSETS__; const msg=a=>`42["history/load",${JSON.stringify({asset:a,index,time:now,offset:14400,period:60})}]`; const s=(window.__mmcSockets||[]).filter(x=>x&&x.readyState===1); for(const a of assets) for(const x of s) { try{x.send(msg(a))}catch(_){}} return {sockets:s.length,assets:assets.length}; })()""".replace("__ASSETS__", assets_json)
+        # Quotex uses index as the history response correlation ID. Reusing it
+        # for every symbol drops most responses, leaving the collector with
+        # only a handful of candles instead of the requested backfill.
+        request_js = request_js.replace("const msg=a=>", "const msg=(a,i)=>")
+        request_js = request_js.replace("{asset:a,index,time:now,", "{asset:a,index:i,time:now,")
+        request_js = request_js.replace("for(const a of assets)", "for(let i=0;i<assets.length;i++)")
+        request_js = request_js.replace("msg(a)", "msg(assets[i],index+i)")
         result = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": request_js, "returnByValue": True})
         log(f"Requested OTC history backfill: {result.get('result',{}).get('result',{}).get('value',{})}")
         collector = Collector()
