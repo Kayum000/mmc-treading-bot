@@ -2,7 +2,7 @@
 setlocal EnableExtensions
 cd /d "%~dp0.."
 set "MMC_LOCAL_SERVER=1"
-set "MMC_BOT_URL=http://127.0.0.1:5000"
+set "MMC_BOT_URL=https://mmc-treading-bot.onrender.com"
 set "CHROME_CDP_URL=http://127.0.0.1:9222"
 set "QUOTEX_DEBUG_VERBOSE=0"
 set "SECRET_FILE=%~dp0.quotex_test_secret"
