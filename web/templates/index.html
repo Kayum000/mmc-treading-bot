@@ -110,6 +110,7 @@ body{background:var(--mmc-bg)!important;color:var(--mmc-text)!important}
 .performance-modal #modal-extra{display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden}
 .performance-modal #performance-modal-body{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column}
 .performance-modal #performance-modal-body .performance-table-wrap{flex:1;min-height:0;height:auto;max-height:none;overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+html:has(.performance-modal),body:has(.performance-modal),.modal:has(.performance-modal){overflow:hidden!important}
 </style>
 </head>
 <body>
