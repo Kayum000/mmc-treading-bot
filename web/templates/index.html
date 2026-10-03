@@ -267,7 +267,8 @@ async function loadOtcPerformanceBars(){
   if(otcPerformanceLoading||String(state.mode||'').toLowerCase()!=='quotex_otc')return;
   otcPerformanceLoading=true;
   try{
-    const r=await fetch('/quotex/otc-market?count=240',{credentials:'same-origin',cache:'no-store'});
+    const pair=state.pair||$('pair')?.value||'';
+    const r=await fetch(`/quotex/otc-market?asset=${encodeURIComponent(pair)}&count=240`,{credentials:'same-origin',cache:'no-store'});
     const d=await r.json();
     if(r.ok&&d.ok&&Array.isArray(d.candles)){
       otcPerformanceBars=d.candles.map(b=>({t:Date.parse(b.timestamp),o:Number(b.open),h:Number(b.high),l:Number(b.low),c:Number(b.close)}))

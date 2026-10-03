@@ -249,7 +249,9 @@ def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> 
 
 def local_candles_payload(asset: str | None = None, count: int = 240) -> dict:
     """Return fresh closed OTC candles for the authenticated chart/performance UI."""
-    chosen = asset or local_active_asset()
+    requested = str(asset or "").strip()
+    chosen = requested if requested in OTC_PAIRS else normalize_detected_market(requested)
+    chosen = chosen or local_active_asset()
     if not chosen or chosen not in OTC_PAIRS:
         return {"ok": False, "asset": chosen, "candles": []}
     frame = _local_candles(chosen, max(8, min(int(count), 300)))
