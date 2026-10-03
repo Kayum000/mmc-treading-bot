@@ -6,18 +6,19 @@ services:
     branch: main
     region: oregon
     plan: free
-    autoDeploy: false
+    autoDeployTrigger: commit
     dockerfilePath: ./Dockerfile
 
-  - type: worker
+  - type: web
     name: mmc-quotex-cloud-collector
     runtime: docker
     repo: https://github.com/Kayum000/mmc-treading-bot
     branch: main
     region: oregon
-    plan: starter
+    plan: free
     autoDeployTrigger: commit
     dockerfilePath: ./Dockerfile.quotex-cloud
+    healthCheckPath: /health
     envVars:
       - key: MMC_BOT_URL
         value: https://mmc-treading-bot.onrender.com
