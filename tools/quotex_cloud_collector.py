@@ -317,12 +317,14 @@ async def run() -> None:
                 log(f"frame handling error: {exc}")
 
         async def on_websocket(ws) -> None:
-            url = ws.url.lower()
-            if not any(host in url for host in ("market-qx.trade", "market-qx.info", "qxbroker.com")):
-                return
+            url = ws.url
             sockets.append(ws)
-            log(f"captured Quotex WebSocket: {url.split('?')[0]}")
+            log(f"captured browser WebSocket: {url.split('?')[0]}")
             ws.on("framereceived", handle_frame)
+
+            async def on_close() -> None:
+                log(f"browser WebSocket closed: {url.split('?')[0]}")
+            ws.on("close", on_close)
 
             # Ask the active Quotex socket for recent OTC history. This uses
             # the same history request shape as the working local collector.
@@ -346,7 +348,9 @@ async def run() -> None:
         page.on("websocket", on_websocket)
         log(f"opening {QUOTEX_URL}; OTC pairs={len(OTC_PAIRS)}, real asset={REAL_ASSET}")
         await page.goto(QUOTEX_URL, wait_until="domcontentloaded", timeout=60000)
-        await page.wait_for_timeout(5000)
+        log(f"page loaded: title={await page.title()!r} url={page.url}")
+        await page.wait_for_timeout(10000)
+        log(f"WebSockets observed after initial load: {len(sockets)}")
 
         # Login is optional when a storage state is supplied. Credential
         # fields are kept as environment variables and never logged.
@@ -365,11 +369,16 @@ async def run() -> None:
                     await page.wait_for_timeout(8000)
 
         await page.reload(wait_until="domcontentloaded", timeout=60000)
+        log(f"page reloaded: title={await page.title()!r} url={page.url}; WebSockets={len(sockets)}")
         log("cloud browser running: collecting both OTC and real-market WebSocket data")
 
+        diagnostic_at = 0.0
         while True:
             await page.wait_for_timeout(5000)
             collector.flush_partials()
+            if time.monotonic() - diagnostic_at >= 60:
+                diagnostic_at = time.monotonic()
+                log(f"collector diagnostic: websockets={len(sockets)} partials={len(collector.partial)} closed_assets={len(collector.closed_history)}")
             if page.is_closed():
                 raise RuntimeError("Quotex page closed")
             try:
