@@ -273,10 +273,18 @@ class Collector:
             return
         accepted = 0
         if otc_rows:
-            data = self._post("/quotex/ingest", {"sent_at": time.time(), "active_asset": otc_rows[-1].get("asset"), "candles": otc_rows})
+            try:
+                data = self._post("/quotex/ingest", {"sent_at": time.time(), "active_asset": otc_rows[-1].get("asset"), "candles": otc_rows})
+            except Exception as exc:
+                log(f"candle upload failed; keeping Quotex stream open: {exc}")
+                return
             accepted += int(data.get("accepted", 0) or 0)
         if real_rows:
-            data = self._post("/quotex/real-ingest", {"sent_at": time.time(), "candles": real_rows})
+            try:
+                data = self._post("/quotex/real-ingest", {"sent_at": time.time(), "candles": real_rows})
+            except Exception as exc:
+                log(f"real-market candle upload failed; keeping Quotex stream open: {exc}")
+                return
             accepted += int(data.get("accepted", 0) or 0)
         self.last_signature = signature
         self.last_send = time.monotonic()
@@ -285,21 +293,28 @@ class Collector:
     def _send_quote(self, asset: str, price: float, ts: float) -> None:
         now = time.monotonic()
         if asset in OTC_PAIRS:
-            if now - self.last_quote_send.get(asset, 0.0) < 0.20:
+            if now - self.last_quote_send.get(asset, 0.0) < 1.0:
                 return
-            self._post("/quotex/tick-ingest", {
-                "sent_at": time.time(), "asset": asset,
-                "ticks": [{"price": price, "timestamp": ts}],
-            })
-            self.last_quote_send[asset] = now
+            try:
+                self._post("/quotex/tick-ingest", {
+                    "sent_at": time.time(), "asset": asset,
+                    "ticks": [{"price": price, "timestamp": ts}],
+                })
+                self.last_quote_send[asset] = now
+            except Exception as exc:
+                log(f"live OTC tick upload failed; keeping Quotex stream open: {exc}")
             return
         if now - self.last_quote_send.get(asset, 0.0) < 1.0:
             return
-        data = self._post("/quotex/real-ingest", {
-            "sent_at": time.time(),
-            "quotes": [{"asset": asset, "price": price, "timestamp": ts}],
-        })
-        self.last_quote_send[asset] = now
+        try:
+            data = self._post("/quotex/real-ingest", {
+                "sent_at": time.time(),
+                "quotes": [{"asset": asset, "price": price, "timestamp": ts}],
+            })
+            self.last_quote_send[asset] = now
+        except Exception as exc:
+            log(f"live real-market tick upload failed; keeping Quotex stream open: {exc}")
+            return
         if VERBOSE:
             log(f"sent live real-market quote for {asset}: accepted={data.get('accepted', 0)}")
 
