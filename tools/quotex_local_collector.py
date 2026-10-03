@@ -257,14 +257,16 @@ class Collector:
                 for old_bucket in sorted(history)[:-2000]:
                     history.pop(old_bucket, None)
 
-    def _send(self, rows: list[dict[str, Any]], force: bool = False) -> None:
+    def _send(self, rows: list[dict[str, Any]], force: bool = False, include_history: bool = False) -> None:
         if not rows:
             return
         self._remember_closed(rows)
-        expanded: list[dict[str, Any]] = []
-        for asset in sorted({str(r.get("asset") or "") for r in rows if r.get("asset")}):
-            expanded.extend(self.closed_history.get(asset, {}).values())
-        rows = expanded or rows
+        if include_history:
+            expanded: list[dict[str, Any]] = []
+            for asset in sorted({str(r.get("asset") or "") for r in rows if r.get("asset")}):
+                history = self.closed_history.get(asset, {})
+                expanded.extend(list(history.values())[-500:])
+            rows = expanded or rows
         otc_rows = [r for r in rows if r.get("asset") in OTC_PAIRS]
         real_rows = [r for r in rows if r.get("asset") not in OTC_PAIRS]
         signature = "|".join(f"{r['asset']}:{r['timestamp']}:{r['close']}" for r in rows[-5:])
@@ -364,12 +366,12 @@ class Collector:
         if name == "history/list/v2":
             rows = _normalise_history(payload)
             if rows:
-                self._send(rows)
+                self._send(rows, include_history=True)
             return
         if name in {"candle", "candles", "history/list", "history/load", "chart_notification/get"}:
             rows = _normalise_candle(payload)
             if rows:
-                self._send(rows)
+                self._send(rows, include_history=True)
             return
         if name == "quotes/stream":
             rows = payload if isinstance(payload, list) else [payload]
