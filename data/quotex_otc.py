@@ -59,6 +59,10 @@ def _normalise_rows(payload: Any, default_asset: str) -> list[dict[str, Any]]:
             stamp = pd.to_datetime(ts, unit="s" if isinstance(ts, (int, float)) else None, utc=True, errors="coerce")
             if pd.isna(stamp):
                 continue
+            # Quotex history is minute-bucketed, but some candle payloads keep
+            # sub-minute seconds on the timestamp. Store the canonical candle
+            # open time so exact entry-minute lookups can match it reliably.
+            stamp = stamp.floor(f"{max(1, period)}s")
             rows.append({
                 "timestamp": stamp,
                 "open": float(op), "high": float(hi), "low": float(lo), "close": float(cl),

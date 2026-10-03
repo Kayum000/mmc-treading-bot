@@ -276,7 +276,7 @@ async function loadOtcPerformanceBars(){
     const r=await fetch(`/quotex/otc-market?asset=${encodeURIComponent(pair)}&count=240`,{credentials:'same-origin',cache:'no-store'});
     const d=await r.json();
     if(r.ok&&d.ok&&Array.isArray(d.candles)){
-      otcPerformanceBars=d.candles.map(b=>({t:Date.parse(b.timestamp),o:Number(b.open),h:Number(b.high),l:Number(b.low),c:Number(b.close)}))
+      otcPerformanceBars=d.candles.map(b=>({t:Math.floor(Date.parse(b.timestamp)/60000)*60000,o:Number(b.open),h:Number(b.high),l:Number(b.low),c:Number(b.close)}))
         .filter(b=>Number.isFinite(b.t)&&[b.o,b.h,b.l,b.c].every(Number.isFinite));
     }
   }catch(_){}
@@ -301,10 +301,11 @@ function resolvePerformanceResults(){
     // stored separately and is never used as the entry-candle lookup timestamp.
     // OTC bars come from the authenticated local collector cache.
     // Resolve the result only after that exact entry candle has fully closed.
-    const signalBar=bars.find(b=>Number.isFinite(Number(b?.t)) && Number(b.t)===signalMs);
+    const entryMinuteMs=Math.floor(signalMs/60000)*60000;
+    const signalBar=bars.find(b=>Number.isFinite(Number(b?.t)) && Math.floor(Number(b.t)/60000)*60000===entryMinuteMs);
     if(!signalBar)continue;
 
-    const signalBarMs=Number(signalBar.t);
+    const signalBarMs=entryMinuteMs;
     if(now < signalBarMs+60000)continue;
 
     const close=Number(signalBar.c);
