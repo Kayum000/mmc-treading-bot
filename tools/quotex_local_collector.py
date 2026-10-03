@@ -216,8 +216,7 @@ class Collector:
         self.session = requests.Session()
         self.last_signature = ""
         self.last_send = 0.0
-        self.last_partial_send: dict[str, float] = {}
-        self.last_quote_send: dict[str, float] = {}
+        self.last_partial_send: dict[str, float] = {}\n        self.last_partial_flush_bucket: dict[str, int] = {}\n        self.last_quote_send: dict[str, float] = {}
 
     def _post(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
         if not INGEST_SECRET:
@@ -340,20 +339,21 @@ class Collector:
         self._send_quote(asset, price, ts)
 
     def flush_partials(self) -> None:
-        now = time.monotonic()
         boundary = int(time.time() // PERIOD) * PERIOD
         for asset, state in list(self.partial.items()):
             # Never upload a still-running candle as a closed candle. If the
             # browser stops sending ticks exactly at the minute boundary,
-            # flush the just-completed bucket here so Render does not wait for
-            # the next quote to discover that the candle has closed.
-            if int(state.get("bucket", 0)) + PERIOD > boundary:
+            # flush the just-completed bucket once so the server does not wait
+            # for a later quote to discover that the candle has closed.
+            bucket = int(state.get("bucket", 0))
+            if bucket + PERIOD > boundary:
                 continue
-            if now - self.last_partial_send.get(asset, 0.0) < 5:
+            if self.last_partial_flush_bucket.get(asset) == bucket:
                 continue
             row = {k: v for k, v in state.items() if k != "bucket"}
             self._send([row], force=True)
-            self.last_partial_send[asset] = now
+            self.last_partial_flush_bucket[asset] = bucket
+            self.last_partial_send[asset] = time.monotonic()
 
     def handle(self, event_name: str | None, payload: Any) -> None:
         if not event_name:
