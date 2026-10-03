@@ -110,6 +110,7 @@ body{background:var(--mmc-bg)!important;color:var(--mmc-text)!important}
 .performance-modal #modal-extra{display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden}
 .performance-modal #performance-modal-body{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column}
 .performance-modal #performance-modal-body .performance-table-wrap{flex:1;min-height:0;height:auto;max-height:none;overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.performance-modal .performance-table-wrap{overflow-anchor:none;scroll-behavior:auto!important}
 html:has(.performance-modal),body:has(.performance-modal),.modal:has(.performance-modal){overflow:hidden!important}
 </style>
 </head>
@@ -322,7 +323,19 @@ function resolvePerformanceResults(){
   if(changed){try{localStorage.setItem(PERF_KEY,JSON.stringify(rows.slice(0,200)))}catch(_){}}
   renderPerformanceSummary();
   const performanceBody=$('performance-modal-body');
-  if(changed&&performanceBody)performanceBody.innerHTML=performanceTable();
+  if(changed&&performanceBody)replacePerformanceTable(true);
+}
+function replacePerformanceTable(preserveScroll=false){
+  const body=$('performance-modal-body');
+  if(!body)return;
+  const oldScroller=body.querySelector('.performance-table-wrap');
+  const scrollTop=preserveScroll&&oldScroller?oldScroller.scrollTop:0;
+  body.innerHTML=performanceTable();
+  const newScroller=body.querySelector('.performance-table-wrap');
+  if(newScroller&&preserveScroll){
+    newScroller.scrollTop=scrollTop;
+    requestAnimationFrame(()=>{if(newScroller.isConnected)newScroller.scrollTop=scrollTop});
+  }
 }
 function recordPerformance(r){
   if(!r||!r.signal)return;
