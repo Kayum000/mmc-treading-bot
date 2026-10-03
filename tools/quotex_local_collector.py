@@ -455,6 +455,10 @@ async def run() -> None:
                 pending_event = event_name
                 continue
             collector.handle(event_name, data)
+            # Run the minute-boundary flush even when the WebSocket is busy
+            # delivering continuous frames; otherwise the timeout branch may
+            # never execute and closed candles can be delayed indefinitely.
+            collector.flush_partials()
 
 
 def main() -> int:
