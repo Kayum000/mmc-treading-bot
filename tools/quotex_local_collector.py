@@ -398,6 +398,10 @@ async def run() -> None:
         request_js = request_js.replace("{asset:a,index,time:now,", "{asset:a,index:i,time:now,")
         request_js = request_js.replace("for(const a of assets)", "for(let i=0;i<assets.length;i++)")
         request_js = request_js.replace("msg(a)", "msg(assets[i],index+i)")
+        request_js = request_js.replace(
+            "for(let i=0;i<assets.length;i++) for(const x of s) { try{x.send(msg(assets[i],index+i))}catch(_){}}",
+            "for(let i=0;i<assets.length;i++) { const a=assets[i], id=index+i; for(const x of s) setTimeout(()=>{try{x.send(msg(a,id))}catch(_){}},i*250); }",
+        )
         result = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": request_js, "returnByValue": True})
         log(f"Requested OTC history backfill: {result.get('result',{}).get('result',{}).get('value',{})}")
         collector = Collector()
