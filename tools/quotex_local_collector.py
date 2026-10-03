@@ -258,7 +258,7 @@ class Collector:
                 for old_bucket in sorted(history)[:-2000]:
                     history.pop(old_bucket, None)
 
-    def _send(self, rows: list[dict[str, Any]]) -> None:
+    def _send(self, rows: list[dict[str, Any]], force: bool = False) -> None:
         if not rows:
             return
         self._remember_closed(rows)
@@ -269,7 +269,7 @@ class Collector:
         otc_rows = [r for r in rows if r.get("asset") in OTC_PAIRS]
         real_rows = [r for r in rows if r.get("asset") not in OTC_PAIRS]
         signature = "|".join(f"{r['asset']}:{r['timestamp']}:{r['close']}" for r in rows[-5:])
-        if signature == self.last_signature and time.monotonic() - self.last_send < 45:
+        if not force and signature == self.last_signature and time.monotonic() - self.last_send < 45:
             return
         accepted = 0
         if otc_rows:
@@ -352,7 +352,7 @@ class Collector:
             if now - self.last_partial_send.get(asset, 0.0) < 5:
                 continue
             row = {k: v for k, v in state.items() if k != "bucket"}
-            self._send([row])
+            self._send([row], force=True)
             self.last_partial_send[asset] = now
 
     def handle(self, event_name: str | None, payload: Any) -> None:
