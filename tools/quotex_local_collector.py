@@ -341,8 +341,15 @@ class Collector:
 
     def flush_partials(self) -> None:
         now = time.monotonic()
+        boundary = int(time.time() // PERIOD) * PERIOD
         for asset, state in list(self.partial.items()):
-            if now - self.last_partial_send.get(asset, 0.0) < 10:
+            # Never upload a still-running candle as a closed candle. If the
+            # browser stops sending ticks exactly at the minute boundary,
+            # flush the just-completed bucket here so Render does not wait for
+            # the next quote to discover that the candle has closed.
+            if int(state.get("bucket", 0)) + PERIOD > boundary:
+                continue
+            if now - self.last_partial_send.get(asset, 0.0) < 5:
                 continue
             row = {k: v for k, v in state.items() if k != "bucket"}
             self._send([row])
