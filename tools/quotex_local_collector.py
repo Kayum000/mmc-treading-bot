@@ -388,7 +388,9 @@ async def run() -> None:
         log("CDP Network capture enabled and Quotex page reloaded once to capture WebSocket from startup.")
         await asyncio.sleep(2)
         assets_json = json.dumps(sorted(OTC_PAIRS))
-        request_js = """(() => { const now=Math.floor(Date.now()/1000); const index=Math.floor(Date.now()/10); const assets=__ASSETS__; const msg=a=>`42["history/load",${JSON.stringify({asset:a,index,time:now,offset:3600,period:60})}]`; const s=(window.__mmcSockets||[]).filter(x=>x&&x.readyState===1); for(const a of assets) for(const x of s) { try{x.send(msg(a))}catch(_){}} return {sockets:s.length,assets:assets.length}; })()""".replace("__ASSETS__", assets_json)
+        # Backfill four hours so delayed performance lookups still have the
+        # exact entry candles for recent signals after collector restarts.
+        request_js = """(() => { const now=Math.floor(Date.now()/1000); const index=Math.floor(Date.now()/10); const assets=__ASSETS__; const msg=a=>`42["history/load",${JSON.stringify({asset:a,index,time:now,offset:14400,period:60})}]`; const s=(window.__mmcSockets||[]).filter(x=>x&&x.readyState===1); for(const a of assets) for(const x of s) { try{x.send(msg(a))}catch(_){}} return {sockets:s.length,assets:assets.length}; })()""".replace("__ASSETS__", assets_json)
         result = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": request_js, "returnByValue": True})
         log(f"Requested OTC history backfill: {result.get('result',{}).get('result',{}).get('value',{})}")
         collector = Collector()
