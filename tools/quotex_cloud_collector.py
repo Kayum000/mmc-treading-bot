@@ -27,7 +27,7 @@ STORAGE_STATE_B64 = os.getenv("QUOTEX_STORAGE_STATE_B64", "").strip()
 LOGIN_EMAIL = os.getenv("QUOTEX_LOGIN_EMAIL", "").strip()
 LOGIN_PASSWORD = os.getenv("QUOTEX_LOGIN_PASSWORD", "").strip()
 REAL_ASSET = os.getenv("QUOTEX_REAL_ASSET", "AUDCAD").strip().upper()
-HEALTH_PORT = int(os.getenv("QUOTEX_COLLECTOR_HEALTH_PORT", "8765"))
+HEALTH_PORT = int(os.getenv("PORT", os.getenv("QUOTEX_COLLECTOR_HEALTH_PORT", "8765")))
 PERIOD = 60
 
 
