@@ -7,12 +7,16 @@ if os.getenv("MMC_LOCAL_SERVER", "0") == "1":
 
     root = Path(__file__).resolve().parent
     load_dotenv(root / ".env", override=False)
-    if not os.getenv("QUOTEX_INGEST_SECRET"):
-        secret_file = root / "tools" / ".quotex_test_secret"
-        try:
-            os.environ["QUOTEX_INGEST_SECRET"] = secret_file.read_text(encoding="utf-8").strip()
-        except OSError:
-            pass
+    secret_file = root / "tools" / ".quotex_test_secret"
+    try:
+        local_secret = secret_file.read_text(encoding="utf-8").strip()
+        if local_secret:
+            # The local secret file is the source of truth for the embedded
+            # collector. This prevents a stale parent-process environment
+            # variable from overriding the Render-synchronized secret.
+            os.environ["QUOTEX_INGEST_SECRET"] = local_secret
+    except OSError:
+        pass
 
 from web.app import app
 from market_status import init_market_status
