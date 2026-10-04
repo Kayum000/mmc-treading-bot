@@ -4,6 +4,8 @@ from __future__ import annotations
 import hmac
 import os
 import time
+import sqlite3
+from pathlib import Path
 from flask import Flask, jsonify, render_template, request, redirect, url_for, session
 
 from signals.get_signal import get_signal, get_future_signals
@@ -29,19 +31,87 @@ REAL_PAIRS = [
 ]
 QUOTEX_OTC_PAIRS = list(OTC_DISPLAY_PAIRS)
 
+PERFORMANCE_DB = Path(os.getenv("MMC_PERFORMANCE_DB") or (Path(__file__).resolve().parent.parent / "data" / "performance.sqlite3"))
+
+def _performance_db():
+    PERFORMANCE_DB.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(PERFORMANCE_DB)
+    con.row_factory = sqlite3.Row
+    con.execute("""CREATE TABLE IF NOT EXISTS performance (
+        id TEXT PRIMARY KEY, time TEXT, pair TEXT, signal TEXT, entry_price REAL,
+        candle_color TEXT, signal_time_utc TEXT, analysis_candle_time_utc TEXT,
+        result TEXT NOT NULL, signal_created_utc TEXT, signal_created_bd TEXT,
+        outcome_price REAL, outcome_candle_time_utc TEXT, outcome_basis TEXT,
+        updated_at REAL NOT NULL
+    )""")
+    return con
+
+def _performance_row(row):
+    d = dict(row)
+    return d
+
+def _record_signal_performance(result: dict) -> None:
+    """Persist every generated BUY/SELL signal on the server immediately.
+
+    The browser still posts rows for backward compatibility, but signal
+    history must not depend on the dashboard tab staying open.
+    """
+    if not isinstance(result, dict):
+        return
+    signal = str(result.get("signal") or "").strip().upper()
+    if signal not in {"BUY", "SELL"}:
+        return
+    signal_time = result.get("signal_time_utc") or result.get("entry_candle_time_utc")
+    if not signal_time:
+        return
+    pair = str(result.get("pair") or "").strip().upper()
+    analysis_time = result.get("analysis_candle_time_utc")
+    row = {
+        "id": "|".join([pair, signal, str(signal_time), str(analysis_time or "")]),
+        "time": result.get("signal_created_bd") or result.get("signal_created_utc") or signal_time,
+        "pair": pair,
+        "signal": signal,
+        "entry_price": result.get("entry_price"),
+        "candle_color": result.get("signal_candle_color") or "—",
+        "signal_time_utc": signal_time,
+        "analysis_candle_time_utc": analysis_time,
+        "result": "অপেক্ষমাণ",
+        "signal_created_utc": result.get("signal_created_utc"),
+        "signal_created_bd": result.get("signal_created_bd"),
+        "outcome_price": None,
+        "outcome_candle_time_utc": None,
+        "outcome_basis": None,
+    }
+    con = _performance_db()
+    try:
+        cols = ["id","time","pair","signal","entry_price","candle_color","signal_time_utc","analysis_candle_time_utc","result","signal_created_utc","signal_created_bd","outcome_price","outcome_candle_time_utc","outcome_basis"]
+        vals = [row.get(c) for c in cols]
+        con.execute("""INSERT INTO performance
+            (id,time,pair,signal,entry_price,candle_color,signal_time_utc,analysis_candle_time_utc,
+             result,signal_created_utc,signal_created_bd,outcome_price,outcome_candle_time_utc,outcome_basis,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+             entry_price=COALESCE(excluded.entry_price,performance.entry_price),
+             candle_color=COALESCE(excluded.candle_color,performance.candle_color),
+             signal_created_utc=COALESCE(excluded.signal_created_utc,performance.signal_created_utc),
+             signal_created_bd=COALESCE(excluded.signal_created_bd,performance.signal_created_bd),
+             updated_at=excluded.updated_at""", vals + [time.time()])
+        con.commit()
+    finally:
+        con.close()
+
 _DEFAULT_SETTINGS = {
     "market_mode": "",
     "pair": None,
     "auto_signal": False,
     "min_confidence": 0.0,
+    "strategy_mode": "normal",
     "timezone": "Asia/Dhaka",
 }
 _USAGE_CACHE = {"data": None, "at": 0.0}
 
-
 def _login_configured() -> bool:
     return bool((os.getenv("APP_LOGIN_USERNAME") or "admin").strip() and (os.getenv("APP_LOGIN_PASSWORD") or "").strip())
-
 
 def _valid_login(username: str, password: str) -> bool:
     expected_user = (os.getenv("APP_LOGIN_USERNAME") or "admin").strip()
@@ -51,7 +121,6 @@ def _valid_login(username: str, password: str) -> bool:
         and hmac.compare_digest((username or "").strip(), expected_user)
         and hmac.compare_digest(password or "", expected_password)
     )
-
 
 def _usage_view():
     """Return cached API/credit usage without blocking the dashboard unnecessarily."""
@@ -71,10 +140,11 @@ def _usage_view():
     _USAGE_CACHE["at"] = now
     return data
 
+def _valid_strategy_modes():
+    return {"normal", "candle_reaction"}
 
 def _valid_pairs(mode: str):
     return REAL_PAIRS if mode == "real" else QUOTEX_OTC_PAIRS if mode == "quotex_otc" else []
-
 
 def _settings():
     value = dict(_DEFAULT_SETTINGS)
@@ -85,11 +155,9 @@ def _settings():
         value["market_mode"] = mode
     if pair:
         value["pair"] = pair
-    value.pop("strategy_mode", None)
     return value
 
-
-def _save_settings(mode: str, pair: str, auto_signal=None, min_confidence=None, timezone=None):
+def _save_settings(mode: str, pair: str, auto_signal=None, min_confidence=None, timezone=None, strategy_mode=None):
     current = _settings()
     current["market_mode"] = mode
     current["pair"] = pair
@@ -99,11 +167,12 @@ def _save_settings(mode: str, pair: str, auto_signal=None, min_confidence=None, 
         current["min_confidence"] = float(min_confidence)
     if timezone:
         current["timezone"] = timezone
+    if strategy_mode in _valid_strategy_modes():
+        current["strategy_mode"] = strategy_mode
     session["settings"] = current
     session["selected_mode"] = mode
     session["selected_pair"] = pair
     return current
-
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -122,22 +191,18 @@ def login():
         error = "Username অথবা Password ভুল।"
     return render_template("login.html", error=error)
 
-
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect(url_for("login"))
 
-
 @app.route("/favicon.ico")
 def favicon():
     return redirect(url_for("static", filename="sk_bot_logo.svg"))
 
-
 @app.route("/privacy")
 def privacy():
     return render_template("privacy.html")
-
 
 def _collector_request_authenticated() -> bool:
     if request.path not in {"/quotex/ingest", "/quotex/real-ingest"}:
@@ -145,7 +210,6 @@ def _collector_request_authenticated() -> bool:
     expected = (os.getenv("QUOTEX_INGEST_SECRET") or "").strip()
     supplied = (request.headers.get("X-MMC-Quotex-Key") or request.args.get("key") or "").strip()
     return bool(expected and supplied and hmac.compare_digest(supplied, expected))
-
 
 @app.before_request
 def require_dashboard():
@@ -159,16 +223,17 @@ def require_dashboard():
         return redirect(url_for("login"))
     return None
 
-
 @app.route("/select-market", methods=["POST"])
 def select_market():
     mode = request.form.get("mode", "").strip().lower()
     pair = request.form.get("pair", "").strip().upper()
+    strategy_mode = request.form.get("strategy_mode", _settings().get("strategy_mode", "normal")).strip().lower()
+    if strategy_mode not in _valid_strategy_modes():
+        return jsonify({"ok": False, "error": "অবৈধ strategy mode।"}), 400
     if pair not in _valid_pairs(mode):
         return jsonify({"ok": False, "error": "অবৈধ মার্কেট।"}), 400
-    _save_settings(mode, pair)
-    return jsonify({"ok": True, "mode": mode, "pair": pair, "strategy_mode": "adaptive"})
-
+    _save_settings(mode, pair, strategy_mode=strategy_mode)
+    return jsonify({"ok": True, "mode": mode, "pair": pair, "strategy_mode": strategy_mode})
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -178,66 +243,67 @@ def index():
     if request.method == "POST":
         mode = request.form.get("mode", "").strip().lower()
         pair = request.form.get("pair", "").strip().upper()
+        strategy_mode = request.form.get("strategy_mode", "normal").strip().lower()
     else:
         mode = session.get("selected_mode", saved.get("market_mode", ""))
         pair = session.get("selected_pair", saved.get("pair", ""))
+        strategy_mode = saved.get("strategy_mode", "normal")
     if mode not in {"real", "quotex_otc"}:
         mode, pair = "", ""
+    if strategy_mode not in _valid_strategy_modes():
+        strategy_mode = "normal"
     if pair not in _valid_pairs(mode):
         pair = ""
     if request.method == "POST":
         if not pair:
             error = "Please select a market before GET SIGNAL."
         else:
-            _save_settings(mode, pair)
+            _save_settings(mode, pair, strategy_mode=strategy_mode)
             try:
-                result = get_signal(pair, mode)
+                result = get_signal(pair, mode, strategy_mode=strategy_mode)
+                _record_signal_performance(result)
             except Exception as exc:
                 error = str(exc)
-        if request.accept_mimetypes.best == "application/json":
-            if result is not None:
-                return jsonify({"ok": True, "result": result})
-            return jsonify({"ok": False, "error": error or "Signal generation failed."}), 422
     return render_template(
         "index.html",
         real_pairs=REAL_PAIRS,
         otc_pairs=QUOTEX_OTC_PAIRS,
         mode=mode,
         pair=pair,
-        strategy_mode="adaptive",
+        strategy_mode=strategy_mode,
         error=error,
         result=result,
         usage=_usage_view(),
     )
-
 
 @app.route("/auto-signal", methods=["GET"])
 def auto_signal():
     settings = _settings()
     mode = session.get("selected_mode", settings.get("market_mode", "")).strip().lower()
     pair = session.get("selected_pair", settings.get("pair", "") or "").strip().upper()
+    strategy_mode = settings.get("strategy_mode", "normal")
     if pair not in _valid_pairs(mode):
         return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
     try:
-        result = get_signal(pair, mode, automatic=True)
+        result = get_signal(pair, mode, automatic=True, strategy_mode=strategy_mode)
+        _record_signal_performance(result)
         return jsonify({"ok": True, "result": result})
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
-
 
 @app.route("/future-signals", methods=["GET"])
 def future_signals():
     settings = _settings()
     mode = session.get("selected_mode", settings.get("market_mode", "")).strip().lower()
     pair = session.get("selected_pair", settings.get("pair", "") or "").strip().upper()
+    strategy_mode = settings.get("strategy_mode", "normal")
     if pair not in _valid_pairs(mode):
         return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
     try:
-        result = get_future_signals(pair, mode)
+        result = get_future_signals(pair, mode, strategy_mode=strategy_mode)
         return jsonify(result)
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
-
 
 @app.route("/news-alert", methods=["GET"])
 def news_alert():
@@ -255,6 +321,38 @@ def news_alert():
         except Exception as exc:
             return jsonify({"ok": False, "error": str(exc)}), 502
 
+@app.route("/performance", methods=["GET", "POST", "DELETE"])
+def performance():
+    con = _performance_db()
+    try:
+        if request.method == "GET":
+            rows = con.execute("SELECT * FROM performance ORDER BY time DESC, updated_at DESC LIMIT 200").fetchall()
+            return jsonify({"ok": True, "rows": [_performance_row(r) for r in rows]})
+        if request.method == "DELETE":
+            con.execute("DELETE FROM performance")
+            con.commit()
+            return jsonify({"ok": True})
+        payload = request.get_json(silent=True) or {}
+        if not payload.get("id") or str(payload.get("signal", "")).upper() not in {"BUY", "SELL"}:
+            return jsonify({"ok": False, "error": "Invalid performance row"}), 400
+        cols = ["id","time","pair","signal","entry_price","candle_color","signal_time_utc","analysis_candle_time_utc","result","signal_created_utc","signal_created_bd","outcome_price","outcome_candle_time_utc","outcome_basis"]
+        vals = [payload.get(c) for c in cols]
+        con.execute("""INSERT INTO performance
+            (id,time,pair,signal,entry_price,candle_color,signal_time_utc,analysis_candle_time_utc,
+             result,signal_created_utc,signal_created_bd,outcome_price,outcome_candle_time_utc,outcome_basis,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+             time=excluded.time,pair=excluded.pair,signal=excluded.signal,entry_price=excluded.entry_price,
+             candle_color=excluded.candle_color,signal_time_utc=excluded.signal_time_utc,
+             analysis_candle_time_utc=excluded.analysis_candle_time_utc,result=excluded.result,
+             signal_created_utc=excluded.signal_created_utc,signal_created_bd=excluded.signal_created_bd,
+             outcome_price=excluded.outcome_price,outcome_candle_time_utc=excluded.outcome_candle_time_utc,
+             outcome_basis=excluded.outcome_basis,updated_at=excluded.updated_at""",
+            vals + [time.time()])
+        con.commit()
+        return jsonify({"ok": True})
+    finally:
+        con.close()
 
 @app.route("/news-direction", methods=["GET"])
 def news_direction():
@@ -268,7 +366,6 @@ def news_direction():
         return jsonify(get_news_direction_for_pair(mode, pair))
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "10000")), debug=False)
