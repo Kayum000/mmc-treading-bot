@@ -300,7 +300,7 @@ def future_signals():
     if pair not in _valid_pairs(mode):
         return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
     try:
-        result = get_future_signals(pair, mode, strategy_mode=strategy_mode)
+        result = get_future_signals(pair, mode)
         return jsonify(result)
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
