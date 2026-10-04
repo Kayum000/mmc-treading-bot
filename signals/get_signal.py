@@ -195,7 +195,7 @@ def pd_timestamp_utc(value) -> str:
     return stamp.isoformat(timespec="milliseconds")
 
 
-def get_signal(pair: str, market_mode: str = "real", automatic: bool = False) -> dict:
+def get_signal(pair: str, market_mode: str = "real", automatic: bool = False, strategy_mode: str = "normal") -> dict:
     pair = (pair or "").strip().upper()
     mode = market_mode.strip().lower()
     if mode == "real":
