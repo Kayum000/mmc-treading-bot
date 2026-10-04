@@ -19,8 +19,8 @@ PERIOD = 60
 # identity and candle-cache freshness long enough to cover that cadence plus
 # normal network/deploy jitter. The adapter also enforces the closed-candle
 # boundary so a running candle can never reach the signal engine.
-_LOCAL_TTL = 120
-_LOCAL_DATA_TTL = 150
+_LOCAL_TTL = 50
+_LOCAL_DATA_TTL = 75
 _LOCAL_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}
 _LOCAL_TICK_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}
 _LOCAL_ACTIVE_ASSET: tuple[float, str] | None = None
@@ -98,7 +98,7 @@ def ingest_local_candles(payload: Any) -> int:
         # Prefer the collector's sent_at clock so a small Render/collector clock
         # skew cannot accidentally admit the current running candle.
         server_closed_before = pd.Timestamp.now(tz="UTC").floor("min")
-        closed_before = min(sent_at_utc, server_closed_before) if sent_at_utc is not None else server_closed_before
+        closed_before = sent_at_utc if sent_at_utc is not None else server_closed_before
         accepted = 0
         # Refresh the selected/visible OTC market as soon as a valid market
         # identity arrives. The collector may send a still-forming candle;
@@ -232,11 +232,6 @@ def _local_candles(asset: str, count: int) -> pd.DataFrame | None:
     # candle after ingest.
     closed_before = pd.Timestamp.now(tz="UTC").floor("min")
     df = df[df["timestamp"] + pd.Timedelta(seconds=PERIOD) <= closed_before].reset_index(drop=True)
-    if df.empty:
-        return None
-    latest_age = max(0.0, (closed_before - df["timestamp"].iloc[-1]).total_seconds())
-    if latest_age > _LOCAL_DATA_TTL:
-        return None
     return df.tail(count).reset_index(drop=True) if len(df) >= 8 else None
 
 
@@ -277,18 +272,31 @@ def local_candles_payload(asset: str | None = None, count: int = 240) -> dict:
 
 def quotex_status(asset: str) -> dict:
     started = time.time()
-    local = local_stream_status(asset)
-    match = next((x for x in local.get("assets", []) if x["asset"] == asset), None)
-    if match and match.get("fresh"):
+    canonical = asset if asset in OTC_PAIRS else normalize_detected_market(asset)
+    now = time.monotonic()
+    with _LOCAL_LOCK:
+        tick_cached = _LOCAL_TICK_CACHE.get(canonical)
+        candle_cached = _LOCAL_CACHE.get(canonical)
+        tick_age = (now - tick_cached[0]) if tick_cached else None
+        candle_age = (now - candle_cached[0]) if candle_cached else None
+        candle_count = len(candle_cached[1]) if candle_cached else 0
+    tick_connected = tick_age is not None and tick_age <= 15
+    candle_connected = candle_age is not None and candle_age <= _LOCAL_DATA_TTL
+    if tick_connected or candle_connected:
         return {
-            "ok": True, "connected": True, "asset": asset, "timeframe": "1m",
-            "closed_candles": match["candles"],
+            "ok": True, "connected": True, "asset": canonical or asset, "timeframe": "1m",
+            "closed_candles": candle_count,
+            "tick_age_seconds": round(max(0.0, tick_age), 1) if tick_age is not None else None,
+            "candle_age_seconds": round(max(0.0, candle_age), 1) if candle_age is not None else None,
+            "heartbeat": "live_tick" if tick_connected else "candle_ingest",
             "source": "Quotex local browser WebSocket collector",
             "latency_ms": int((time.time() - started) * 1000),
         }
     return {
-        "ok": False, "connected": False, "asset": asset, "timeframe": "1m",
+        "ok": False, "connected": False, "asset": canonical or asset, "timeframe": "1m",
         "error": "Quotex local WebSocket collector is not connected or data is stale.",
+        "tick_age_seconds": round(max(0.0, tick_age), 1) if tick_age is not None else None,
+        "candle_age_seconds": round(max(0.0, candle_age), 1) if candle_age is not None else None,
         "source": "Quotex local browser WebSocket collector",
         "latency_ms": int((time.time() - started) * 1000),
     }
