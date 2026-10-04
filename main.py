@@ -1,8 +1,17 @@
 """Application entry point for Render/web deployment and local MMC server."""
+import os
+
+if os.getenv("MMC_LOCAL_SERVER", "0") == "1":
+    from pathlib import Path
+    from dotenv import load_dotenv
+
+    # Keep explicit process environment overrides (for example the Render
+    # ingest target) while still loading local development defaults.
+    load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+
 from web.app import app
 from market_status import init_market_status
 from quotex_browser_ingest import init_quotex_browser_ingest
-import os
 
 init_market_status(app)
 init_quotex_browser_ingest(app)
@@ -33,4 +42,5 @@ if __name__ == "__main__":
         os.execvp("gunicorn", ["gunicorn", "--bind", f"0.0.0.0:{port}", "--workers", "1", "--threads", "4", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "main:app"])
     if os.getenv("MMC_LOCAL_SERVER", "0") == "1":
         _start_embedded_quotex_collector()
-    app.run(host="0.0.0.0", port=port, debug=False)
+    host = "127.0.0.1" if os.getenv("MMC_LOCAL_SERVER", "0") == "1" else "0.0.0.0"
+    app.run(host=host, port=port, debug=False)
