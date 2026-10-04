@@ -143,8 +143,10 @@ def init_quotex_browser_ingest(app):
         payload = request.get_json(silent=True) or {}
         try:
             sent_at = payload.get("sent_at")
-            if sent_at is not None and abs(time.time() - float(sent_at)) > 30: return jsonify({"ok": False, "error": "Stale collector payload."}), 408
-        except (TypeError, ValueError): return jsonify({"ok": False, "error": "Invalid sent_at."}), 400
+            if sent_at is not None and abs(time.time() - float(sent_at)) > 30:
+                return jsonify({"ok": False, "error": "Stale collector payload."}), 408
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "Invalid sent_at."}), 400
         return jsonify({"ok": True, "accepted": _store_real_market(payload)})
 
     @app.route("/quotex/real-market", methods=["GET"])
@@ -218,20 +220,11 @@ def init_quotex_browser_ingest(app):
     def auto_signal_dynamic():
         mode = session.get("selected_mode", "").strip().lower()
         if mode == "quotex_otc":
-            # At the exact minute boundary the browser collector can update
-            # its active-asset marker a little later than the closed-candle
-            # cache. Use the live asset when available, otherwise keep the
-            # user's selected pair. Do not block the boundary on this marker.
             asset = local_active_asset()
             pair = display_for_asset(asset) if asset else (session.get("selected_pair") or "").strip().upper()
             if pair not in OTC_DISPLAY_PAIRS:
                 return jsonify({"ok": False, "error": "বর্তমান Quotex OTC মার্কেট শনাক্ত হয়নি।"}), 409
             session["selected_mode"] = "quotex_otc"; session["selected_pair"] = pair
-
-            # Try immediately at the candle boundary. If the closed candle
-            # has not reached the server yet, retry briefly without changing
-            # market/strategy logic. This prevents a transient collector race
-            # from becoming a 502 while keeping the first attempt on time.
             last_exc = None
             for attempt in range(9):
                 cache_status = local_stream_status(asset) if asset else local_stream_status()
@@ -241,9 +234,7 @@ def init_quotex_browser_ingest(app):
                 ) if asset else None
                 logger.info(
                     "AUTO_SIGNAL_OTC_ATTEMPT pair=%s asset=%s attempt=%s cache_age=%s closed_candles=%s latest_closed=%s fresh=%s",
-                    pair,
-                    asset,
-                    attempt + 1,
+                    pair, asset, attempt + 1,
                     cache_asset.get("age_seconds") if cache_asset else None,
                     cache_asset.get("candles") if cache_asset else None,
                     cache_asset.get("latest_closed") if cache_asset else None,
@@ -251,24 +242,21 @@ def init_quotex_browser_ingest(app):
                 )
                 try:
                     result = get_signal(pair, "quotex_otc", automatic=True)
+                    from web.app import _record_signal_performance
+                    _record_signal_performance(result)
                     return jsonify({"ok": True, "result": result})
                 except RuntimeError as exc:
                     last_exc = exc
                     if "local WebSocket collector" not in str(exc):
                         break
-                    if attempt < 8:
-                        time.sleep(0.25)
+                    if attempt < 8: time.sleep(0.25)
                 except Exception as exc:
                     last_exc = exc
                     break
-
             exc = last_exc or RuntimeError("OTC signal generation failed.")
             logger.error(
                 "AUTO_SIGNAL_OTC_FAILED pair=%s asset=%s error_type=%s error=%s",
-                pair,
-                asset,
-                type(exc).__name__,
-                str(exc),
+                pair, asset, type(exc).__name__, str(exc),
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
             return jsonify({"ok": False, "error": str(exc), "error_type": type(exc).__name__}), 502
@@ -290,7 +278,7 @@ def init_quotex_browser_ingest(app):
         if not (response.content_type or "").startswith("text/html"): return response
         html = response.get_data(as_text=True)
         if "QUOTEX_AUTO_MARKET_SYNC" in html: return response
-        script = """<script id=\"QUOTEX_AUTO_MARKET_SYNC\">(()=>{const mode=document.getElementById('mode'),pair=document.getElementById('pair');let lastSyncedPair='';async function sync(){if(!mode||!pair||mode.value!=='quotex_otc')return;try{const r=await fetch('/quotex/current-market',{cache:'no-store',credentials:'same-origin'}),d=await r.json();if(!d.ok||!d.pair)return;const changed=d.pair!==lastSyncedPair;if(changed){let o=Array.from(pair.options).find(x=>x.value===d.pair);if(!o){o=document.createElement('option');o.value=d.pair;o.textContent=d.pair;o.dataset.market='quotex_otc';pair.appendChild(o)}pair.value=d.pair;lastSyncedPair=d.pair;await fetch('/select-market',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},credentials:'same-origin',body:new URLSearchParams({mode:'quotex_otc',pair:d.pair})})}}catch(_){}}sync();setInterval(sync,3000);const s=document.createElement('script');s.src='/static/quotex_real_chart.js';s.defer=true;document.body.appendChild(s);if(typeof state!=='undefined'){state.floatingAuto=false;state.floatingAutoTimer=null;const box=document.createElement('div');box.id='mmc-floating-auto';box.innerHTML='<button id="mmc-float-main" type="button">MMC</button><div id="mmc-float-panel"><div id="mmc-float-market">বর্তমান মার্কেট: —</div><label><input id="mmc-float-toggle" type="checkbox"> Floating Auto</label><div id="mmc-float-status">বন্ধ</div></div>';Object.assign(box.style,{position:'fixed',right:'14px',bottom:'90px',zIndex:'2147483647',fontFamily:'Arial,sans-serif'});const main=box.querySelector('#mmc-float-main'),panel=box.querySelector('#mmc-float-panel'),toggle=box.querySelector('#mmc-float-toggle'),market=box.querySelector('#mmc-float-market'),status=box.querySelector('#mmc-float-status');Object.assign(main.style,{border:'0',borderRadius:'999px',padding:'10px 14px',fontWeight:'700',cursor:'pointer',boxShadow:'0 4px 16px rgba(0,0,0,.35)'});Object.assign(panel.style,{display:'none',marginTop:'8px',padding:'10px',minWidth:'190px',borderRadius:'12px',background:'#111827',color:'#fff',boxShadow:'0 6px 22px rgba(0,0,0,.4)',fontSize:'12px'});box.querySelector('label').style.display='block';box.querySelector('label').style.marginTop='8px';status.style.marginTop='7px';document.body.appendChild(box);main.onclick=()=>{panel.style.display=panel.style.display==='none'?'block':'none'};const stopExistingAuto=()=>{state.auto=false;clearTimeout(state.autoTimer);clearInterval(state.autoTimer);if(auto){auto.checked=false;auto.dispatchEvent(new Event('change'))}else{const st=document.getElementById('auto-status');if(st)st.textContent='AUTO SIGNAL বন্ধ'}};const runFloating=async()=>{if(!state.floatingAuto)return;try{const r=await fetch('/auto-signal',{credentials:'same-origin',cache:'no-store'}),d=await r.json();if(r.ok&&d.ok){if(typeof renderResult==='function')renderResult(d.result);if(window.alertForSignal)window.alertForSignal(d.result);status.textContent='চালু • '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}else{status.textContent='Signal অপেক্ষমাণ'}}catch(_){status.textContent='সংযোগ অপেক্ষমাণ'}};const scheduleFloating=()=>{clearTimeout(state.floatingAutoTimer);if(!state.floatingAuto)return;const now=Date.now(),minute=Math.floor(now/60000)*60000,next=minute+60000-3000;state.floatingAutoTimer=setTimeout(async()=>{if(!state.floatingAuto)return;await runFloating();scheduleFloating()},Math.max(50,next-now))};toggle.onchange=()=>{state.floatingAuto=toggle.checked;clearTimeout(state.floatingAutoTimer);if(state.floatingAuto){stopExistingAuto();status.textContent='চালু • বর্তমান Auto বন্ধ করা হয়েছে';scheduleFloating()}else{status.textContent='বন্ধ'}};setInterval(()=>{market.textContent='বর্তমান মার্কেট: '+((state.pair||document.getElementById('pair')?.value||'—'))},1000)}})();</script>"""
+        script = """<script id="QUOTEX_AUTO_MARKET_SYNC">(()=>{const mode=document.getElementById('mode'),pair=document.getElementById('pair');let lastSyncedPair='';async function sync(){if(!mode||!pair||mode.value!=='quotex_otc')return;try{const r=await fetch('/quotex/current-market',{cache:'no-store',credentials:'same-origin'}),d=await r.json();if(!d.ok||!d.pair)return;const changed=d.pair!==lastSyncedPair;if(changed){let o=Array.from(pair.options).find(x=>x.value===d.pair);if(!o){o=document.createElement('option');o.value=d.pair;o.textContent=d.pair;o.dataset.market='quotex_otc';pair.appendChild(o)}pair.value=d.pair;lastSyncedPair=d.pair;await fetch('/select-market',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},credentials:'same-origin',body:new URLSearchParams({mode:'quotex_otc',pair:d.pair})})}}catch(_){}}sync();setInterval(sync,3000);const s=document.createElement('script');s.src='/static/quotex_real_chart.js';s.defer=true;document.body.appendChild(s);if(typeof state!=='undefined'){state.floatingAuto=false;state.floatingAutoTimer=null;const box=document.createElement('div');box.id='mmc-floating-auto';box.innerHTML='<button id="mmc-float-main" type="button">MMC</button><div id="mmc-float-panel"><div id="mmc-float-market">বর্তমান মার্কেট: —</div><label><input id="mmc-float-toggle" type="checkbox"> Floating Auto</label><div id="mmc-float-status">বন্ধ</div></div>';Object.assign(box.style,{position:'fixed',right:'14px',bottom:'90px',zIndex:'2147483647',fontFamily:'Arial,sans-serif'});const main=box.querySelector('#mmc-float-main'),panel=box.querySelector('#mmc-float-panel'),toggle=box.querySelector('#mmc-float-toggle'),market=box.querySelector('#mmc-float-market'),status=box.querySelector('#mmc-float-status');Object.assign(main.style,{border:'0',borderRadius:'999px',padding:'10px 14px',fontWeight:'700',cursor:'pointer',boxShadow:'0 4px 16px rgba(0,0,0,.35)'});Object.assign(panel.style,{display:'none',marginTop:'8px',padding:'10px',minWidth:'190px',borderRadius:'12px',background:'#111827',color:'#fff',boxShadow:'0 6px 22px rgba(0,0,0,.4)',fontSize:'12px'});box.querySelector('label').style.display='block';box.querySelector('label').style.marginTop='8px';status.style.marginTop='7px';document.body.appendChild(box);main.onclick=()=>{panel.style.display=panel.style.display==='none'?'block':'none'};const stopExistingAuto=()=>{state.auto=false;clearTimeout(state.autoTimer);clearInterval(state.autoTimer);if(auto){auto.checked=false;auto.dispatchEvent(new Event('change'))}else{const st=document.getElementById('auto-status');if(st)st.textContent='AUTO SIGNAL বন্ধ'}};const runFloating=async()=>{if(!state.floatingAuto)return;try{const r=await fetch('/auto-signal',{credentials:'same-origin',cache:'no-store'}),d=await r.json();if(r.ok&&d.ok){if(typeof renderResult==='function')renderResult(d.result);if(window.alertForSignal)window.alertForSignal(d.result);status.textContent='চালু • '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}else{status.textContent='Signal অপেক্ষমাণ'}}catch(_){status.textContent='সংযোগ অপেক্ষমাণ'}};const scheduleFloating=()=>{clearTimeout(state.floatingAutoTimer);if(!state.floatingAuto)return;const now=Date.now(),minute=Math.floor(now/60000)*60000,next=minute+60000-3000;state.floatingAutoTimer=setTimeout(async()=>{if(!state.floatingAuto)return;await runFloating();scheduleFloating()},Math.max(50,next-now))};toggle.onchange=()=>{state.floatingAuto=toggle.checked;clearTimeout(state.floatingAutoTimer);if(state.floatingAuto){stopExistingAuto();status.textContent='চালু • বর্তমান Auto বন্ধ করা হয়েছে';scheduleFloating()}else{status.textContent='বন্ধ'}};setInterval(()=>{market.textContent='বর্তমান মার্কেট: '+((state.pair||document.getElementById('pair')?.value||'—'))},1000)}})();</script>"""
         if "</body>" in html: response.set_data(html.replace("</body>", script + "</body>", 1))
         return response
     return app
