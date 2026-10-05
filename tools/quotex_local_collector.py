@@ -210,8 +210,13 @@ def _price_from_payload(payload: Any) -> tuple[str | None, float | None, float |
 
 
 class Collector:
-    def __init__(self) -> None:
+    def __init__(self, history_asset_by_index: dict[int, str] | None = None) -> None:
         self.partial: dict[str, dict[str, Any]] = {}
+        # Quotex can echo a base symbol (e.g. EURUSD) in a history response
+        # even when the request was explicitly for EURUSD_otc. Correlate the
+        # unique history request index back to the requested OTC asset so OTC
+        # candles are never misclassified as real-market candles.
+        self.history_asset_by_index = history_asset_by_index or {}
         # Keep a rolling closed-candle history locally so every ingest can
         # refresh Render with enough historical bars.
         self.closed_history: dict[str, dict[int, dict[str, Any]]] = {}
@@ -401,12 +406,27 @@ class Collector:
         if VERBOSE:
             log(f"event: {event_name}")
         if name == "history/list/v2":
+            fallback_asset = None
+            if isinstance(payload, dict):
+                try:
+                    fallback_asset = self.history_asset_by_index.get(int(payload.get("index")))
+                except (TypeError, ValueError):
+                    fallback_asset = None
             rows = _normalise_history(payload)
+            if fallback_asset and rows and fallback_asset in OTC_PAIRS:
+                for row in rows:
+                    row["asset"] = fallback_asset
             if rows:
                 self._send(rows)
             return
         if name in {"candle", "candles", "history/list", "history/load", "chart_notification/get"}:
-            rows = _normalise_candle(payload)
+            fallback_asset = None
+            if isinstance(payload, dict):
+                try:
+                    fallback_asset = self.history_asset_by_index.get(int(payload.get("index")))
+                except (TypeError, ValueError):
+                    fallback_asset = None
+            rows = _normalise_candle(payload, fallback_asset=fallback_asset)
             if rows:
                 self._send(rows)
             return
@@ -464,9 +484,14 @@ async def run() -> None:
             "for(const a of assets) for(const x of s) { try{x.send(msg(a))}catch(_){}}",
             "for(let i=0;i<assets.length;i++) for(let w=0;w<4;w++) { const a=assets[i], id=index+i*4+w, t=now-w*3600; for(const x of s) setTimeout(()=>{try{x.send(msg(a,id,t))}catch(_){}},(i*4+w)*250); }",
         )
+        history_asset_by_index = {
+            index + i * 4 + w: asset
+            for i, asset in enumerate(sorted(OTC_PAIRS))
+            for w in range(4)
+        }
         result = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": request_js, "returnByValue": True})
         log(f"Requested OTC history backfill: {result.get('result',{}).get('result',{}).get('value',{})}")
-        collector = Collector()
+        collector = Collector(history_asset_by_index)
         pending_event: str | None = None
         last_frame_at = time.monotonic()
         while True:
