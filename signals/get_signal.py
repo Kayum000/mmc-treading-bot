@@ -40,6 +40,8 @@ def _hold_condition(reason: str, regime: str = "", strategy: str = "") -> str:
 
 def _real_signal(pair: str, automatic: bool) -> dict:
     from quotex_browser_ingest import _REAL_MARKET, _REAL_MARKET_LOCK, real_market_ticks
+    asset = "".join(ch for ch in pair.upper() if ch.isalnum() or ch in "._-")
+
     # Reject cached Real-Market data when the PC collector has stopped sending updates.
     from quotex_browser_ingest import REAL_MARKET_MAX_AGE_SECONDS
     with _REAL_MARKET_LOCK:
