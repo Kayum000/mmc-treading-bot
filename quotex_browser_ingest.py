@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _REAL_MARKET_LOCK = threading.Lock()
 _REAL_MARKET: dict[str, dict] = {}
+REAL_MARKET_MAX_AGE_SECONDS = 60
 
 
 def _collector_secret_valid() -> bool:
@@ -154,7 +155,19 @@ def init_quotex_browser_ingest(app):
         asset = _real_asset(request.args.get("asset")) or _real_asset(session.get("selected_pair", ""))
         with _REAL_MARKET_LOCK:
             state = _REAL_MARKET.get(asset, {"bars": [], "quote": None})
-            return jsonify({"ok": bool(state.get("bars") or state.get("quote")), "asset": asset, "bars": list(state.get("bars") or []), "quote": state.get("quote"), "updated_at": state.get("updated_at"), "source": "Quotex browser WebSocket"})
+            updated_at = state.get("updated_at")
+            age_seconds = (time.time() - float(updated_at)) if updated_at is not None else None
+            fresh = age_seconds is not None and age_seconds <= REAL_MARKET_MAX_AGE_SECONDS
+            return jsonify({
+                "ok": bool((state.get("bars") or state.get("quote")) and fresh),
+                "asset": asset,
+                "bars": list(state.get("bars") or []),
+                "quote": state.get("quote"),
+                "updated_at": updated_at,
+                "age_seconds": round(age_seconds, 1) if age_seconds is not None else None,
+                "fresh": fresh,
+                "source": "Quotex browser WebSocket",
+            })
 
     @app.route("/quotex/otc-market", methods=["GET"])
     def quotex_otc_market():
