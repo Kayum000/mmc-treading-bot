@@ -18,7 +18,9 @@ import asyncio
 import base64
 import json
 import os
+import queue
 import sys
+import threading
 import time
 from typing import Any
 
@@ -216,7 +218,46 @@ class Collector:
         self.session = requests.Session()
         self.last_signature = ""
         self.last_send = 0.0
-        self.last_partial_send: dict[str, float] = {}\n        self.last_partial_flush_bucket: dict[str, int] = {}\n        self.last_quote_send: dict[str, float] = {}
+        self.last_partial_send: dict[str, float] = {}
+        self.last_quote_send: dict[str, float] = {}
+        self.last_data_at = time.monotonic()
+        self.last_market_data_at = time.monotonic()
+        # Network uploads never run on the CDP/WebSocket event loop. A bounded
+        # queue keeps short Render latency spikes from blocking market capture
+        # while also preventing an outage from growing memory without limit.
+        self._candle_queue: queue.Queue[list[dict[str, Any]]] = queue.Queue(maxsize=50)
+        self._quote_queue: queue.Queue[tuple[str, str, dict[str, Any]]] = queue.Queue(maxsize=250)
+        self._upload_stop = threading.Event()
+        self._upload_thread = threading.Thread(
+            target=self._upload_worker,
+            name="mmc-quotex-upload-worker",
+            daemon=True,
+        )
+        self._upload_thread.start()
+        log("non-blocking upload worker started (bounded candle=50, quote=250)")
+
+    def _upload_worker(self) -> None:
+        while not self._upload_stop.is_set():
+            try:
+                rows = self._candle_queue.get(timeout=0.2)
+            except queue.Empty:
+                try:
+                    kind, endpoint, payload = self._quote_queue.get_nowait()
+                except queue.Empty:
+                    continue
+                try:
+                    self._post(endpoint, payload)
+                except Exception as exc:
+                    log(f"queued {kind} upload failed; stream stays alive: {exc}")
+                finally:
+                    self._quote_queue.task_done()
+                continue
+            try:
+                self._send_now(rows)
+            except Exception as exc:
+                log(f"queued candle upload failed; stream stays alive: {exc}")
+            finally:
+                self._candle_queue.task_done()
 
     def _post(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
         if not INGEST_SECRET:
@@ -253,24 +294,36 @@ class Collector:
                 continue
             history = self.closed_history.setdefault(asset, {})
             history[bucket] = {k: v for k, v in row.items() if k != "bucket"}
-            if len(history) > 2000:
-                for old_bucket in sorted(history)[:-2000]:
+            # Signal generation needs 80 closed candles. Keep a larger local
+            # safety window, but do not rebuild/upload thousands of bars on
+            # every refresh; that only adds Render latency and bandwidth.
+            if len(history) > 300:
+                for old_bucket in sorted(history)[:-300]:
                     history.pop(old_bucket, None)
 
-    def _send(self, rows: list[dict[str, Any]], force: bool = False, include_history: bool = False) -> None:
+    def _send(self, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
+        try:
+            self._candle_queue.put_nowait(rows)
+        except queue.Full:
+            log("candle upload queue full; preserving WebSocket stream and dropping queued refresh")
+
+    def _send_now(self, rows: list[dict[str, Any]]) -> None:
         if not rows:
             return
         self._remember_closed(rows)
-        if include_history:
-            expanded: list[dict[str, Any]] = []
-            for asset in sorted({str(r.get("asset") or "") for r in rows if r.get("asset")}):
-                history = self.closed_history.get(asset, {})
-                expanded.extend(list(history.values())[-500:])
-            rows = expanded or rows
+        expanded: list[dict[str, Any]] = []
+        for asset in sorted({str(r.get("asset") or "") for r in rows if r.get("asset")}):
+            history = self.closed_history.get(asset, {})
+            # 120 closed candles covers the 80-candle signal window plus a
+            # healthy safety margin while keeping each refresh small.
+            expanded.extend(list(history.values())[-120:])
+        rows = expanded or rows
         otc_rows = [r for r in rows if r.get("asset") in OTC_PAIRS]
         real_rows = [r for r in rows if r.get("asset") not in OTC_PAIRS]
         signature = "|".join(f"{r['asset']}:{r['timestamp']}:{r['close']}" for r in rows[-5:])
-        if not force and signature == self.last_signature and time.monotonic() - self.last_send < 45:
+        if signature == self.last_signature and time.monotonic() - self.last_send < 45:
             return
         accepted = 0
         if otc_rows:
@@ -293,35 +346,27 @@ class Collector:
 
     def _send_quote(self, asset: str, price: float, ts: float) -> None:
         now = time.monotonic()
-        if asset in OTC_PAIRS:
-            if now - self.last_quote_send.get(asset, 0.0) < 1.0:
-                return
-            try:
-                self._post("/quotex/tick-ingest", {
-                    "sent_at": time.time(), "asset": asset,
-                    "ticks": [{"price": price, "timestamp": ts}],
-                })
-                self.last_quote_send[asset] = now
-            except Exception as exc:
-                log(f"live OTC tick upload failed; keeping Quotex stream open: {exc}")
-            return
         if now - self.last_quote_send.get(asset, 0.0) < 1.0:
             return
+        endpoint = "/quotex/tick-ingest" if asset in OTC_PAIRS else "/quotex/real-ingest"
+        payload = (
+            {"sent_at": time.time(), "asset": asset, "ticks": [{"price": price, "timestamp": ts}]}
+            if asset in OTC_PAIRS
+            else {"sent_at": time.time(), "quotes": [{"asset": asset, "price": price, "timestamp": ts}]}
+        )
         try:
-            data = self._post("/quotex/real-ingest", {
-                "sent_at": time.time(),
-                "quotes": [{"asset": asset, "price": price, "timestamp": ts}],
-            })
+            self._quote_queue.put_nowait(("OTC tick" if asset in OTC_PAIRS else "real quote", endpoint, payload))
             self.last_quote_send[asset] = now
-        except Exception as exc:
-            log(f"live real-market tick upload failed; keeping Quotex stream open: {exc}")
-            return
-        if VERBOSE:
-            log(f"sent live real-market quote for {asset}: accepted={data.get('accepted', 0)}")
+        except queue.Full:
+            # Quotes are disposable between ticks; candles remain in their
+            # separate queue so a temporary Render outage cannot starve them.
+            log(f"quote upload queue full; dropping transient quote for {asset}")
+        return
 
     def _add_price(self, asset: str, price: float, ts: float) -> None:
         if not asset:
             return
+        self.last_market_data_at = time.monotonic()
         bucket = int(ts // PERIOD) * PERIOD
         state = self.partial.get(asset)
         if not state or state["bucket"] != bucket:
@@ -341,21 +386,13 @@ class Collector:
         self._send_quote(asset, price, ts)
 
     def flush_partials(self) -> None:
-        boundary = int(time.time() // PERIOD) * PERIOD
+        now = time.monotonic()
         for asset, state in list(self.partial.items()):
-            # Never upload a still-running candle as a closed candle. If the
-            # browser stops sending ticks exactly at the minute boundary,
-            # flush the just-completed bucket once so the server does not wait
-            # for a later quote to discover that the candle has closed.
-            bucket = int(state.get("bucket", 0))
-            if bucket + PERIOD > boundary:
-                continue
-            if self.last_partial_flush_bucket.get(asset) == bucket:
+            if now - self.last_partial_send.get(asset, 0.0) < 10:
                 continue
             row = {k: v for k, v in state.items() if k != "bucket"}
-            self._send([row], force=True)
-            self.last_partial_flush_bucket[asset] = bucket
-            self.last_partial_send[asset] = time.monotonic()
+            self._send([row])
+            self.last_partial_send[asset] = now
 
     def handle(self, event_name: str | None, payload: Any) -> None:
         if not event_name:
@@ -366,12 +403,12 @@ class Collector:
         if name == "history/list/v2":
             rows = _normalise_history(payload)
             if rows:
-                self._send(rows, include_history=True)
+                self._send(rows)
             return
         if name in {"candle", "candles", "history/list", "history/load", "chart_notification/get"}:
             rows = _normalise_candle(payload)
             if rows:
-                self._send(rows, include_history=True)
+                self._send(rows)
             return
         if name == "quotes/stream":
             rows = payload if isinstance(payload, list) else [payload]
@@ -457,10 +494,8 @@ async def run() -> None:
                 pending_event = event_name
                 continue
             collector.handle(event_name, data)
-            # Run the minute-boundary flush even when the WebSocket is busy
-            # delivering continuous frames; otherwise the timeout branch may
-            # never execute and closed candles can be delayed indefinitely.
-            collector.flush_partials()
+            if time.monotonic() - collector.last_market_data_at >= 60:
+                raise RuntimeError("No usable Quotex market data for 60s; reconnecting to the chart.")
 
 
 def main() -> int:
