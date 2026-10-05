@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
+import time
 
 import pandas as pd
 
@@ -39,6 +40,14 @@ def _hold_condition(reason: str, regime: str = "", strategy: str = "") -> str:
 
 def _real_signal(pair: str, automatic: bool) -> dict:
     from quotex_browser_ingest import _REAL_MARKET, _REAL_MARKET_LOCK, real_market_ticks
+    # Reject cached Real-Market data when the PC collector has stopped sending updates.
+    from quotex_browser_ingest import REAL_MARKET_MAX_AGE_SECONDS
+    with _REAL_MARKET_LOCK:
+        state_age = (_REAL_MARKET.get(asset) or {}).get("updated_at")
+    age_seconds = (time.time() - float(state_age)) if state_age is not None else None
+    if age_seconds is None or age_seconds > REAL_MARKET_MAX_AGE_SECONDS:
+        raise RuntimeError("Quotex Real Market collector is not connected or has no fresh data.")
+
     # During minute N, analyze only the fully closed candle N-1.
     # Minute N is the next 1-minute candle and therefore the entry candle.
     signal_at_utc = datetime.now(timezone.utc)
