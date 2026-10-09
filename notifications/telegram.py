@@ -121,19 +121,27 @@ def notify_signal(result: dict[str, Any]) -> bool:
     signal_number = result.get("signal_number", "—")
     wins = int(result.get("wins") or 0)
     losses = int(result.get("losses") or 0)
+    strategy = str(result.get("strategy") or "Adaptive").replace("_", " ").strip()
+    regime = str(result.get("regime") or "").replace("_", " ").strip()
+    strategy_line = f"🧠 Strategy: {strategy}" + (f" • {regime}" if regime and regime.upper() != "N/A" else "")
     message = (
-        f"{'🟢 BUY' if action == 'BUY' else '🔴 SELL'} SIGNAL — MMC\n"
-        f"Signal No: #{signal_number}\n"
-        f"Pair: {pair}\n"
-        f"Market: {mode}\n"
-        f"📊 Total WIN: {wins} | Total LOSS: {losses}\n"
-        f"Source: {result.get('source') or '—'}\n"
-        f"Entry reference: {price_text}\n"
-        f"Entry time (BD): {entry_time or 'N/A'}\n"
-        f"Confidence: {confidence_text}\n"
-        f"Strategy: {result.get('strategy') or 'adaptive'} / {result.get('regime') or 'N/A'}\n"
-        f"Reason: {reason[:700]}\n\n"
-        "⚠️ Signal only, not a guarantee of profit. Verify the market and manage risk."
+        "👑 MMC ELITE VIP\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"{'🟢 BUY' if action == 'BUY' else '🔴 SELL'} SIGNAL  •  PREMIUM ALERT\n"
+        f"🔢 Signal ID: #{signal_number}\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"💱 Pair: {pair}\n"
+        f"🏦 Market: {mode}\n"
+        f"🎯 Direction: {'BUY 🟢' if action == 'BUY' else 'SELL 🔴'}\n"
+        f"💵 Entry Price: {price_text}\n"
+        f"⏳ Expiry: 1 Minute\n"
+        f"🕒 Signal Time (BD): {entry_time or 'N/A'}\n"
+        f"📡 Source: {result.get('source') or '—'}\n"
+        f"{strategy_line}\n"
+        f"📈 Confidence: {confidence_text}\n"
+        f"📝 Reason: {reason[:500]}\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "⚠️ Signal only; outcomes are not guaranteed. Manage your risk."
     )
     try:
         _post_message(message)
@@ -171,16 +179,33 @@ def notify_signal_result(result: dict[str, Any]) -> bool:
     signal_number = result.get("signal_number", "—")
     wins = int(result.get("wins") or 0)
     losses = int(result.get("losses") or 0)
+    total_decided = wins + losses
+    win_rate = f"{(wins / total_decided) * 100:.1f}%" if total_decided else "N/A"
+    entry_price = result.get("entry_price")
+    try:
+        entry_price_text = f"{float(entry_price):.8f}".rstrip("0").rstrip(".") if entry_price is not None else "N/A"
+    except (TypeError, ValueError):
+        entry_price_text = str(entry_price)
+    strategy = str(result.get("strategy") or "").replace("_", " ").strip()
+    strategy_line = f"🧠 Strategy: {strategy}\n" if strategy else ""
     message = (
-        f"{label} — MMC SIGNAL RESULT\n"
-        f"Signal No: #{signal_number}\n"
-        f"Pair: {pair}\n"
-        f"Market: {mode}\n"
-        f"Signal: {signal}\n"
-        f"📊 Total WIN: {wins} | Total LOSS: {losses}\n"
-        f"Entry candle (UTC): {entry_time or 'N/A'}\n"
-        f"Close price: {price_text}\n"
-        f"Basis: completed 1-minute candle open-to-close"
+        "👑 MMC ELITE RESULT\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"{label}\n"
+        f"🔢 Signal ID: #{signal_number}\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"💱 Pair: {pair}\n"
+        f"🏦 Market: {mode}\n"
+        f"🎯 Direction: {signal or 'N/A'}\n"
+        f"💵 Entry Price: {entry_price_text}\n"
+        f"🏁 Result Price: {price_text}\n"
+        f"🕒 Entry Candle (UTC): {entry_time or 'N/A'}\n"
+        f"{strategy_line}"
+        "📊 PERFORMANCE STATS\n"
+        f"🟢 Total WIN: {wins}   🔴 Total LOSS: {losses}\n"
+        f"🏆 Win Rate: {win_rate}\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "Result based on the completed 1-minute candle."
     )
     _post_message(message)
     return True
