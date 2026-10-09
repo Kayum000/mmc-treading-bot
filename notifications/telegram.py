@@ -14,6 +14,7 @@ import requests
 _API = "https://api.telegram.org"
 _LOCK = threading.Lock()
 _SENT: set[str] = set()
+_SENDING: set[str] = set()
 _SENT_ORDER: list[str] = []
 _MAX_REMEMBERED = 2000
 
@@ -91,8 +92,9 @@ def notify_signal(result: dict[str, Any]) -> bool:
     analysis_time = str(result.get("analysis_candle_time_utc") or "")
     key = "|".join((pair, mode, action, entry_time, analysis_time))
     with _LOCK:
-        if key in _SENT:
+        if key in _SENT or key in _SENDING:
             return False
+        _SENDING.add(key)
 
     confidence = result.get("confidence")
     try:
@@ -116,8 +118,14 @@ def notify_signal(result: dict[str, Any]) -> bool:
         f"Reason: {reason[:700]}\n\n"
         "⚠️ Signal only, not a guarantee of profit. Verify the market and manage risk."
     )
-    _post_message(message)
+    try:
+        _post_message(message)
+    except Exception:
+        with _LOCK:
+            _SENDING.discard(key)
+        raise
     with _LOCK:
+        _SENDING.discard(key)
         _SENT.add(key)
         _SENT_ORDER.append(key)
         while len(_SENT_ORDER) > _MAX_REMEMBERED:
