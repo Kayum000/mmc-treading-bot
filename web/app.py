@@ -48,6 +48,9 @@ def _performance_db():
         result TEXT NOT NULL, signal_created_utc TEXT, signal_created_bd TEXT,
         outcome_price REAL, outcome_candle_time_utc TEXT, outcome_basis TEXT,
         market_mode TEXT NOT NULL DEFAULT 'real',
+        strategy TEXT NOT NULL DEFAULT 'UNKNOWN',
+        regime TEXT NOT NULL DEFAULT 'UNKNOWN',
+        strategy_mode TEXT NOT NULL DEFAULT 'adaptive',
         result_notified INTEGER NOT NULL DEFAULT 0,
         updated_at REAL NOT NULL
     )""")
@@ -57,6 +60,12 @@ def _performance_db():
         con.execute("ALTER TABLE performance ADD COLUMN market_mode TEXT NOT NULL DEFAULT 'real'")
     if "result_notified" not in columns:
         con.execute("ALTER TABLE performance ADD COLUMN result_notified INTEGER NOT NULL DEFAULT 0")
+    if "strategy" not in columns:
+        con.execute("ALTER TABLE performance ADD COLUMN strategy TEXT NOT NULL DEFAULT 'UNKNOWN'")
+    if "regime" not in columns:
+        con.execute("ALTER TABLE performance ADD COLUMN regime TEXT NOT NULL DEFAULT 'UNKNOWN'")
+    if "strategy_mode" not in columns:
+        con.execute("ALTER TABLE performance ADD COLUMN strategy_mode TEXT NOT NULL DEFAULT 'adaptive'")
     return con
 
 def _performance_row(row):
@@ -120,6 +129,9 @@ def _record_signal_performance(result: dict) -> None:
         "time": result.get("signal_created_bd") or result.get("signal_created_utc") or signal_time,
         "pair": pair,
         "market_mode": mode,
+        "strategy": str(result.get("strategy") or "UNKNOWN"),
+        "regime": str(result.get("regime") or "UNKNOWN"),
+        "strategy_mode": str(result.get("strategy_mode") or "adaptive"),
         "signal": signal,
         "entry_price": result.get("entry_price"),
         "candle_color": result.get("signal_candle_color") or "—",
@@ -134,17 +146,20 @@ def _record_signal_performance(result: dict) -> None:
     }
     con = _performance_db()
     try:
-        cols = ["id","time","pair","signal","entry_price","candle_color","signal_time_utc","analysis_candle_time_utc","result","signal_created_utc","signal_created_bd","outcome_price","outcome_candle_time_utc","outcome_basis","market_mode"]
+        cols = ["id","time","pair","signal","entry_price","candle_color","signal_time_utc","analysis_candle_time_utc","result","signal_created_utc","signal_created_bd","outcome_price","outcome_candle_time_utc","outcome_basis","market_mode","strategy","regime","strategy_mode"]
         vals = [row.get(c) for c in cols]
         con.execute("""INSERT INTO performance
             (id,time,pair,signal,entry_price,candle_color,signal_time_utc,analysis_candle_time_utc,
-             result,signal_created_utc,signal_created_bd,outcome_price,outcome_candle_time_utc,outcome_basis,market_mode,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             result,signal_created_utc,signal_created_bd,outcome_price,outcome_candle_time_utc,outcome_basis,market_mode,strategy,regime,strategy_mode,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET
              entry_price=COALESCE(excluded.entry_price,performance.entry_price),
              candle_color=COALESCE(excluded.candle_color,performance.candle_color),
              signal_created_utc=COALESCE(excluded.signal_created_utc,performance.signal_created_utc),
              signal_created_bd=COALESCE(excluded.signal_created_bd,performance.signal_created_bd),
+             strategy=CASE WHEN performance.strategy='UNKNOWN' THEN excluded.strategy ELSE performance.strategy END,
+             regime=CASE WHEN performance.regime='UNKNOWN' THEN excluded.regime ELSE performance.regime END,
+             strategy_mode=excluded.strategy_mode,
              updated_at=excluded.updated_at""", vals + [time.time()])
         con.commit()
     finally:
@@ -435,7 +450,25 @@ def performance():
     try:
         if request.method == "GET":
             rows = con.execute("SELECT * FROM performance ORDER BY time DESC, updated_at DESC LIMIT 200").fetchall()
-            return jsonify({"ok": True, "rows": [_performance_row(r) for r in rows]})
+            stats_rows = con.execute("""
+                SELECT COALESCE(NULLIF(strategy, ''), 'UNKNOWN') AS strategy,
+                       COUNT(*) AS total,
+                       SUM(CASE WHEN result='লাভ' THEN 1 ELSE 0 END) AS wins,
+                       SUM(CASE WHEN result='লস' THEN 1 ELSE 0 END) AS losses,
+                       SUM(CASE WHEN result='DOJI' THEN 1 ELSE 0 END) AS doji,
+                       SUM(CASE WHEN result='অপেক্ষমাণ' THEN 1 ELSE 0 END) AS pending
+                FROM performance
+                GROUP BY COALESCE(NULLIF(strategy, ''), 'UNKNOWN')
+                ORDER BY losses DESC, total DESC
+            """).fetchall()
+            strategy_stats = []
+            for item in stats_rows:
+                d = dict(item)
+                settled = int(d["wins"] or 0) + int(d["losses"] or 0)
+                d["decided"] = settled
+                d["loss_rate"] = round((int(d["losses"] or 0) / settled) * 100, 2) if settled else 0.0
+                strategy_stats.append(d)
+            return jsonify({"ok": True, "rows": [_performance_row(r) for r in rows], "strategy_stats": strategy_stats})
         if request.method == "DELETE":
             con.execute("DELETE FROM performance")
             con.commit()
@@ -443,13 +476,16 @@ def performance():
         payload = request.get_json(silent=True) or {}
         if not payload.get("id") or str(payload.get("signal", "")).upper() not in {"BUY", "SELL"}:
             return jsonify({"ok": False, "error": "Invalid performance row"}), 400
-        cols = ["id","time","pair","signal","entry_price","candle_color","signal_time_utc","analysis_candle_time_utc","result","signal_created_utc","signal_created_bd","outcome_price","outcome_candle_time_utc","outcome_basis","market_mode"]
+        cols = ["id","time","pair","signal","entry_price","candle_color","signal_time_utc","analysis_candle_time_utc","result","signal_created_utc","signal_created_bd","outcome_price","outcome_candle_time_utc","outcome_basis","market_mode","strategy","regime","strategy_mode"]
         vals = [payload.get(c) for c in cols]
-        vals[-1] = payload.get("market_mode") or "real"
+        vals[14] = payload.get("market_mode") or "real"
+        vals[15] = payload.get("strategy") or "UNKNOWN"
+        vals[16] = payload.get("regime") or "UNKNOWN"
+        vals[17] = payload.get("strategy_mode") or "adaptive"
         con.execute("""INSERT INTO performance
             (id,time,pair,signal,entry_price,candle_color,signal_time_utc,analysis_candle_time_utc,
-             result,signal_created_utc,signal_created_bd,outcome_price,outcome_candle_time_utc,outcome_basis,market_mode,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             result,signal_created_utc,signal_created_bd,outcome_price,outcome_candle_time_utc,outcome_basis,market_mode,strategy,regime,strategy_mode,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET
              time=excluded.time,pair=excluded.pair,signal=excluded.signal,entry_price=excluded.entry_price,
              candle_color=excluded.candle_color,signal_time_utc=excluded.signal_time_utc,
@@ -457,6 +493,9 @@ def performance():
              signal_created_utc=excluded.signal_created_utc,signal_created_bd=excluded.signal_created_bd,
              outcome_price=excluded.outcome_price,outcome_candle_time_utc=excluded.outcome_candle_time_utc,
              outcome_basis=excluded.outcome_basis,market_mode=COALESCE(excluded.market_mode,performance.market_mode),
+             strategy=CASE WHEN performance.strategy='UNKNOWN' THEN excluded.strategy ELSE performance.strategy END,
+             regime=CASE WHEN performance.regime='UNKNOWN' THEN excluded.regime ELSE performance.regime END,
+             strategy_mode=COALESCE(excluded.strategy_mode,performance.strategy_mode),
              updated_at=excluded.updated_at""",
             vals + [time.time()])
         con.commit()
