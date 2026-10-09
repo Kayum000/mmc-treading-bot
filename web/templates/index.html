@@ -353,7 +353,7 @@ function openPerformance(){
       toast('Performance আপডেট হয়নি');
     }
   };
-  $('performance-clear').onclick=()=>{if(!performanceHistory().length){toast('Performance history already empty');return}if(confirm('সব Performance history মুছে ফেলবেন?')){localStorage.removeItem(PERF_KEY);renderPerformanceSummary();$('performance-modal-body').innerHTML=performanceTable();toast('Performance history cleared')}};
+  $('performance-clear').onclick=async()=>{if(!performanceHistory().length){toast('Performance history already empty');return}if(confirm('সব Performance history মুছে ফেলবেন?')){try{const r=await fetch('/performance',{method:'DELETE',credentials:'same-origin',cache:'no-store'});const d=await readJsonResponse(r);if(!r.ok||!d.ok)throw Error(d.error||'Clear failed');localStorage.removeItem(PERF_KEY);renderPerformanceSummary();$('performance-modal-body').innerHTML=performanceTable();toast('Performance history cleared')}catch(e){toast('History clear হয়নি: '+e.message)}}};
 }
 $('performance-card').onclick=openPerformance;
 document.addEventListener('click',e=>{const card=e.target.closest?.('#performance-card');if(card){e.preventDefault();e.stopPropagation();if(e.target.closest?.('#performance-refresh-card'))return;openPerformance()}});
