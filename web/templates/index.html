@@ -292,7 +292,13 @@ function resolvePerformanceResults(){
   if(!rows.length||!bars.length)return;
   let changed=false;
   const now=Number(window.__mmcChartMarketNow||Date.now());
+  const activeMode=String(state.mode||'real').toLowerCase();
+  const activePair=String(state.pair||$('pair')?.value||'');
   for(const row of rows){
+    // Only score a signal against candles for the same market and pair.
+    // The chart contains only the currently selected market's candles.
+    if(String(row.pair||'')!==activePair)continue;
+    if(row.mode&&String(row.mode).toLowerCase()!==activeMode)continue;
     const signalMs=Date.parse(row.signal_time_utc||'');
     if(!Number.isFinite(signalMs))continue;
 
@@ -342,9 +348,10 @@ function replacePerformanceTable(preserveScroll=false){
 function recordPerformance(r){
   if(!r||!r.signal)return;
   const row={
-    id:[r.pair,r.signal,r.signal_time_utc,r.analysis_candle_time_utc].join('|'),
+    id:[r.market_mode||state.mode||'real',r.pair,r.signal,r.signal_time_utc,r.analysis_candle_time_utc].join('|'),
     time:r.signal_created_bd||r.signal_created_utc||r.signal_time_bd||r.signal_time_utc||'—',
     pair:r.pair||state.pair||'—',
+    mode:String(r.market_mode||state.mode||'real').toLowerCase(),
     signal:String(r.signal).toUpperCase(),
     entry_price:r.entry_price??null,
     candle_color:r.signal_candle_color||'—',
