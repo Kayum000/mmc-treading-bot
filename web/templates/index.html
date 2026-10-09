@@ -302,7 +302,8 @@ function replacePerformanceTable(preserveScroll=false){
   }
 }
 function recordPerformance(r){
-  if(!r||!r.signal)return;
+  // Only persist actual directional signals; HOLD/WAIT/neutral results are not performance rows.
+  if(!r||!['BUY','SELL'].includes(String(r.signal||'').toUpperCase()))return;
   const row={
     id:[r.market_mode||state.mode||'real',r.pair,r.signal,r.signal_time_utc,r.analysis_candle_time_utc].join('|'),
     time:r.signal_created_bd||r.signal_created_utc||r.signal_time_bd||r.signal_time_utc||'—',
