@@ -35,15 +35,26 @@ def _post_message(text: str) -> dict[str, Any]:
     token, chat_id = _config()
     if not token or not chat_id:
         raise RuntimeError("Telegram is not configured: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.")
-    response = requests.post(
-        f"{_API}/bot{token}/sendMessage",
-        json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
-        timeout=12,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if not payload.get("ok"):
-        raise RuntimeError(str(payload.get("description") or "Telegram sendMessage failed"))
+    try:
+        response = requests.post(
+            f"{_API}/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
+            timeout=12,
+        )
+    except requests.RequestException as exc:
+        # Do not include the exception text: requests may include the bot token URL.
+        raise RuntimeError(f"Telegram sendMessage request failed ({type(exc).__name__}).") from None
+
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+
+    if not response.ok or not payload.get("ok"):
+        # Telegram's description (e.g. "chat not found") is useful for diagnosis.
+        # Never raise HTTPError here, because its message includes the token-bearing URL.
+        description = str(payload.get("description") or "Telegram returned no error description.")
+        raise RuntimeError(f"Telegram sendMessage failed (HTTP {response.status_code}): {description}")
     return payload
 
 
