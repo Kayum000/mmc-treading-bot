@@ -420,6 +420,7 @@ def performance():
             return jsonify({"ok": False, "error": "Invalid performance row"}), 400
         cols = ["id","time","pair","signal","entry_price","candle_color","signal_time_utc","analysis_candle_time_utc","result","signal_created_utc","signal_created_bd","outcome_price","outcome_candle_time_utc","outcome_basis","market_mode"]
         vals = [payload.get(c) for c in cols]
+        vals[-1] = payload.get("market_mode") or "real"
         con.execute("""INSERT INTO performance
             (id,time,pair,signal,entry_price,candle_color,signal_time_utc,analysis_candle_time_utc,
              result,signal_created_utc,signal_created_bd,outcome_price,outcome_candle_time_utc,outcome_basis,market_mode,updated_at)
