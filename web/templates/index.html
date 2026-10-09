@@ -284,54 +284,10 @@ async function loadOtcPerformanceBars(){
   finally{otcPerformanceLoading=false;}
 }
 function resolvePerformanceResults(){
-  const rows=performanceHistory();
-  if(String(state.mode||'').toLowerCase()==='quotex_otc')loadOtcPerformanceBars();
-  const bars=String(state.mode||'').toLowerCase()==='quotex_otc'
-    ? otcPerformanceBars
-    : (Array.isArray(window.__mmcChartBars)?window.__mmcChartBars:[]);
-  if(!rows.length||!bars.length)return;
-  let changed=false;
-  const now=Number(window.__mmcChartMarketNow||Date.now());
-  const activeMode=String(state.mode||'real').toLowerCase();
-  const activePair=String(state.pair||$('pair')?.value||'');
-  for(const row of rows){
-    // Only score a signal against candles for the same market and pair.
-    // The chart contains only the currently selected market's candles.
-    if(String(row.pair||'')!==activePair)continue;
-    if(row.mode&&String(row.mode).toLowerCase()!==activeMode)continue;
-    const signalMs=Date.parse(row.signal_time_utc||'');
-    if(!Number.isFinite(signalMs))continue;
-
-    // Real Market and OTC use the same performance rule: the signal is generated
-    // from a closed 1-minute candle, and the result is measured on the exact entry
-    // 1-minute candle identified by signal_time_utc. The signal creation time is
-    // stored separately and is never used as the entry-candle lookup timestamp.
-    // OTC bars come from the authenticated local collector cache.
-    // Resolve the result only after that exact entry candle has fully closed.
-    const entryMinuteMs=Math.floor(signalMs/60000)*60000;
-    const signalBar=bars.find(b=>Number.isFinite(Number(b?.t)) && Math.floor(Number(b.t)/60000)*60000===entryMinuteMs);
-    if(!signalBar)continue;
-
-    const signalBarMs=entryMinuteMs;
-    if(now < signalBarMs+60000)continue;
-
-    const close=Number(signalBar.c);
-    const open=Number(signalBar.o);
-    if(!Number.isFinite(close)||!Number.isFinite(open))continue;
-
-    // Performance follows the documented 1-minute candle rule:
-    // BUY + bullish close = লাভ, SELL + bearish close = লাভ, Open == Close = DOJI.
-    const move=close-open;
-    row.result=move>0?(row.signal==='BUY'?'লাভ':'লস'):move<0?(row.signal==='SELL'?'লাভ':'লস'):'DOJI';
-    row.outcome_price=close;
-    row.outcome_candle_time_utc=new Date(signalBarMs).toISOString();
-    row.outcome_basis='এন্ট্রি ১-মিনিট candle-এর সম্পূর্ণ open-to-close ফলাফল';
-    changed=true;
-  }
-  if(changed){try{localStorage.setItem(PERF_KEY,JSON.stringify(rows.slice(0,200)))}catch(_){}}
+  // Server owns outcome scoring; the active chart must never score other pairs.
   renderPerformanceSummary();
-  const performanceBody=$('performance-modal-body');
-  if(changed&&performanceBody)replacePerformanceTable(true);
+  const body=$('performance-modal-body');
+  if(body)replacePerformanceTable(true);
 }
 function replacePerformanceTable(preserveScroll=false){
   const body=$('performance-modal-body');
@@ -352,18 +308,16 @@ function recordPerformance(r){
     time:r.signal_created_bd||r.signal_created_utc||r.signal_time_bd||r.signal_time_utc||'—',
     pair:r.pair||state.pair||'—',
     mode:String(r.market_mode||state.mode||'real').toLowerCase(),
-    signal:String(r.signal).toUpperCase(),
-    entry_price:r.entry_price??null,
-    candle_color:r.signal_candle_color||'—',
-    signal_time_utc:r.signal_time_utc||new Date().toISOString(),
+    market_mode:String(r.market_mode||state.mode||'real').toLowerCase(),
+    signal:String(r.signal).toUpperCase(),entry_price:r.entry_price??null,
+    candle_color:r.signal_candle_color||'—',signal_time_utc:r.signal_time_utc||new Date().toISOString(),
     analysis_candle_time_utc:r.analysis_candle_time_utc||null,
     result:(r.result==='লাভ'||r.result==='লস'||r.result==='DOJI')?r.result:'অপেক্ষমাণ',
-    signal_created_utc:r.signal_created_utc||null,
-    signal_created_bd:r.signal_created_bd||null
+    signal_created_utc:r.signal_created_utc||null,signal_created_bd:r.signal_created_bd||null
   };
-  const rows=performanceHistory().filter(x=>x.id!==row.id);
-  rows.unshift(row);
+  const rows=performanceHistory().filter(x=>x.id!==row.id);rows.unshift(row);
   try{localStorage.setItem(PERF_KEY,JSON.stringify(rows.slice(0,200)))}catch(_){}
+  fetch('/performance',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(row),cache:'no-store'}).then(()=>loadPerformance()).catch(()=>{});
   renderPerformanceSummary();
 }
 function renderPerformanceSummary(){
@@ -387,8 +341,8 @@ function openPerformance(){
     btn.disabled=true;btn.textContent='⟳ Refresh হচ্ছে…';
     if(body)body.innerHTML='<div class="performance-empty">ডেটা আপডেট হচ্ছে…</div>';
     try{
-      loadPerformance();
-      await new Promise(r=>setTimeout(r,300));
+      await loadPerformance();
+      await new Promise(r=>setTimeout(r,100));
       if(body)body.innerHTML=performanceTable();
       btn.textContent='✓ আপডেট হয়েছে';
       toast('Performance ডেটা আপডেট হয়েছে');
@@ -413,8 +367,8 @@ if(perfRefreshCard)perfRefreshCard.onclick=async e=>{
   try{
     const card=document.getElementById('performance-card');
     if(card){card.classList.remove('mmc-refresh-pulse');void card.offsetWidth;card.classList.add('mmc-refresh-pulse');setTimeout(()=>card.classList.remove('mmc-refresh-pulse'),500)}
-    loadPerformance();
-    await new Promise(r=>setTimeout(r,250));
+    await loadPerformance();
+    await new Promise(r=>setTimeout(r,100));
     if(label)label.textContent='✓ সর্বশেষ আপডেট: '+new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
     if(status)status.textContent='✓ Performance আপডেট হয়েছে';
     btn.textContent='✓ Done';
@@ -425,7 +379,18 @@ if(perfRefreshCard)perfRefreshCard.onclick=async e=>{
     btn.disabled=false;btn.textContent='↻ Refresh';
   }
 };
-function loadPerformance(){resolvePerformanceResults();renderPerformanceSummary();}
+let performanceLoadInFlight=false;
+async function loadPerformance(){
+  if(performanceLoadInFlight)return;performanceLoadInFlight=true;
+  try{
+    const r=await fetch('/performance',{credentials:'same-origin',headers:{'Accept':'application/json'},cache:'no-store'});
+    const d=await readJsonResponse(r);
+    if(!r.ok||!d.ok||!Array.isArray(d.rows))throw Error(d.error||'Performance history unavailable');
+    const rows=d.rows.filter(x=>['BUY','SELL'].includes(String(x.signal||'').toUpperCase())).map(x=>({...x,mode:String(x.market_mode||x.mode||'real').toLowerCase()}));
+    try{localStorage.setItem(PERF_KEY,JSON.stringify(rows.slice(0,200)))}catch(_){}
+    renderPerformanceSummary();const body=$('performance-modal-body');if(body)replacePerformanceTable(true);
+  }catch(e){renderPerformanceSummary()}finally{performanceLoadInFlight=false}
+}
 function ensurePerformanceCard(){
   const section=$('performance');
   if(!section||$('performance-card'))return;
@@ -433,7 +398,7 @@ function ensurePerformanceCard(){
   $('performance-card').onclick=openPerformance;
   renderPerformanceSummary();
 }
-setInterval(resolvePerformanceResults,2000);
+setInterval(loadPerformance,10000);
 const performanceDomGuard=new MutationObserver(()=>{if(!$('performance-card'))ensurePerformanceCard()});
 performanceDomGuard.observe(document.body,{childList:true,subtree:true});
 ensurePerformanceCard();
