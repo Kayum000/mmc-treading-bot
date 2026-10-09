@@ -63,10 +63,35 @@ def _performance_row(row):
     d = dict(row)
     return d
 
+def _telegram_performance_stats(signal_id: str | None = None) -> dict:
+    """Read stable signal numbering and cumulative WIN/LOSS totals from the performance DB."""
+    con = _performance_db()
+    try:
+        total = int(con.execute("SELECT COUNT(*) FROM performance").fetchone()[0] or 0)
+        wins = int(con.execute("SELECT COUNT(*) FROM performance WHERE result='લાભ'").fetchone()[0] or 0)
+        losses = int(con.execute("SELECT COUNT(*) FROM performance WHERE result='લસ'").fetchone()[0] or 0)
+        number = total
+        if signal_id:
+            row = con.execute("SELECT COUNT(*) FROM performance WHERE rowid <= (SELECT rowid FROM performance WHERE id=?)", (signal_id,)).fetchone()
+            number = int(row[0] or total) if row else total
+        return {"signal_number": number, "wins": wins, "losses": losses, "total_signals": total}
+    finally:
+        con.close()
+
+
 def _notify_telegram_safely(result: dict) -> None:
     """Telegram failures must not break signal generation or dashboard requests."""
     try:
-        sent = notify_signal(result)
+        payload = dict(result)
+        signal = str(payload.get("signal") or "").strip().upper()
+        signal_time = payload.get("signal_time_utc") or payload.get("entry_candle_time_utc")
+        if signal in {"BUY", "SELL"} and signal_time:
+            pair = str(payload.get("pair") or "").strip().upper()
+            mode = str(payload.get("market_mode") or "real").strip().lower()
+            analysis_time = payload.get("analysis_candle_time_utc")
+            signal_id = "|".join([mode, pair, signal, str(signal_time), str(analysis_time or "")])
+            payload.update(_telegram_performance_stats(signal_id))
+        sent = notify_signal(payload)
         if sent:
             print("[MMC Telegram] New BUY/SELL signal sent.", flush=True)
     except Exception as exc:
@@ -536,6 +561,7 @@ def _score_pending_performance_once() -> None:
                 con.close()
         if row.get("result") in {"লাভ", "লস", "DOJI"} and not int(row.get("result_notified") or 0):
             try:
+                row.update(_telegram_performance_stats(row.get("id")))
                 sent = notify_signal_result(row)
                 if sent:
                     con = _performance_db()
