@@ -68,8 +68,8 @@ def _telegram_performance_stats(signal_id: str | None = None) -> dict:
     con = _performance_db()
     try:
         total = int(con.execute("SELECT COUNT(*) FROM performance").fetchone()[0] or 0)
-        wins = int(con.execute("SELECT COUNT(*) FROM performance WHERE result='લાભ'").fetchone()[0] or 0)
-        losses = int(con.execute("SELECT COUNT(*) FROM performance WHERE result='લસ'").fetchone()[0] or 0)
+        wins = int(con.execute("SELECT COUNT(*) FROM performance WHERE result='লাভ'").fetchone()[0] or 0)
+        losses = int(con.execute("SELECT COUNT(*) FROM performance WHERE result='লস'").fetchone()[0] or 0)
         number = total
         if signal_id:
             row = con.execute("SELECT COUNT(*) FROM performance WHERE rowid <= (SELECT rowid FROM performance WHERE id=?)", (signal_id,)).fetchone()
