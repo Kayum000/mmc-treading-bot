@@ -502,10 +502,25 @@ def _outcome_candles(mode: str, pair: str) -> list[dict]:
             state = dict(_REAL_MARKET.get(asset) or {})
             bars = list(state.get("bars") or [])
             updated_at = state.get("updated_at")
-        if updated_at is None or time.time() - float(updated_at) > 60:
+        now_epoch = time.time()
+        if updated_at is None or now_epoch - float(updated_at) > 60:
             return []
-        return [{"t": float(row["timestamp"]), "o": float(row["open"]), "c": float(row["close"])}
-                for row in bars if all(row.get(k) is not None for k in ("timestamp", "open", "close"))]
+        # Never score a still-forming Real-Market candle. Normalize millisecond
+        # timestamps defensively, then require the full 60-second candle to end.
+        closed_bars = []
+        for row in bars:
+            if not all(row.get(k) is not None for k in ("timestamp", "open", "close")):
+                continue
+            try:
+                stamp = float(row["timestamp"])
+                if stamp > 10_000_000_000:
+                    stamp /= 1000.0
+                op, close = float(row["open"]), float(row["close"])
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if stamp + 60 <= now_epoch:
+                closed_bars.append({"t": stamp, "o": op, "c": close})
+        return closed_bars
     return []
 
 
@@ -539,7 +554,13 @@ def _score_pending_performance_once() -> None:
                 print(f"[MMC Performance] candle lookup failed mode={mode} pair={pair}: {exc}", flush=True)
                 candle_cache[key] = []
         target_minute = int(entry_epoch // 60) * 60
-        candle = next((b for b in candle_cache[key] if int(float(b["t"]) // 60) * 60 == target_minute), None)
+        # Match the exact entry-minute candle and independently verify it has
+        # fully closed; missing/stale candle data must remain pending, never guessed.
+        candle = next((
+            b for b in candle_cache[key]
+            if int(float(b["t"]) // 60) * 60 == target_minute
+            and float(b["t"]) + 60 <= now
+        ), None)
         if not candle:
             continue
         if row.get("result") == "অপেক্ষমাণ":
