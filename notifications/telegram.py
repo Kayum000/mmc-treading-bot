@@ -118,10 +118,15 @@ def notify_signal(result: dict[str, Any]) -> bool:
     except (TypeError, ValueError):
         price_text = str(entry_price)
     reason = str(result.get("reason") or "—").strip()
+    signal_number = result.get("signal_number", "—")
+    wins = int(result.get("wins") or 0)
+    losses = int(result.get("losses") or 0)
     message = (
         f"{'🟢 BUY' if action == 'BUY' else '🔴 SELL'} SIGNAL — MMC\n"
+        f"Signal No: #{signal_number}\n"
         f"Pair: {pair}\n"
         f"Market: {mode}\n"
+        f"📊 Total WIN: {wins} | Total LOSS: {losses}\n"
         f"Source: {result.get('source') or '—'}\n"
         f"Entry reference: {price_text}\n"
         f"Entry time (BD): {entry_time or 'N/A'}\n"
@@ -163,11 +168,16 @@ def notify_signal_result(result: dict[str, Any]) -> bool:
         price_text = f"{float(price):.8f}".rstrip("0").rstrip(".") if price is not None else "N/A"
     except (TypeError, ValueError):
         price_text = str(price)
+    signal_number = result.get("signal_number", "—")
+    wins = int(result.get("wins") or 0)
+    losses = int(result.get("losses") or 0)
     message = (
         f"{label} — MMC SIGNAL RESULT\n"
+        f"Signal No: #{signal_number}\n"
         f"Pair: {pair}\n"
         f"Market: {mode}\n"
         f"Signal: {signal}\n"
+        f"📊 Total WIN: {wins} | Total LOSS: {losses}\n"
         f"Entry candle (UTC): {entry_time or 'N/A'}\n"
         f"Close price: {price_text}\n"
         f"Basis: completed 1-minute candle open-to-close"
