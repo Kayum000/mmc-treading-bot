@@ -153,12 +153,12 @@ def notify_signal_result(result: dict[str, Any]) -> bool:
     except (TypeError, ValueError):
         price_text = str(price)
     message = (
-        f"{label} — MMC SIGNAL RESULT\\n"
-        f"Pair: {pair}\\n"
-        f"Market: {mode}\\n"
-        f"Signal: {signal}\\n"
-        f"Entry candle (UTC): {entry_time or 'N/A'}\\n"
-        f"Close price: {price_text}\\n"
+        f"{label} — MMC SIGNAL RESULT\n"
+        f"Pair: {pair}\n"
+        f"Market: {mode}\n"
+        f"Signal: {signal}\n"
+        f"Entry candle (UTC): {entry_time or 'N/A'}\n"
+        f"Close price: {price_text}\n"
         f"Basis: completed 1-minute candle open-to-close"
     )
     _post_message(message)
