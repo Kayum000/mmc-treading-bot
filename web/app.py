@@ -14,6 +14,7 @@ from data.news_direction import get_news_direction_for_pair
 from data.news_events import get_weekly_news_events_for_pair
 from data.all_news_events import get_all_news_events
 from data.otc_markets import OTC_DISPLAY_PAIRS
+from data.binance_crypto import CRYPTO_DISPLAY_PAIRS, fetch_crypto_candles, binance_symbol_for_pair
 from notifications.telegram import get_recent_chats, notify_signal, send_test_message, telegram_enabled
 
 app = Flask(__name__)
@@ -31,6 +32,7 @@ REAL_PAIRS = [
     "AUD/CAD", "NZD/CAD",
 ]
 QUOTEX_OTC_PAIRS = list(OTC_DISPLAY_PAIRS)
+CRYPTO_PAIRS = list(CRYPTO_DISPLAY_PAIRS)
 
 PERFORMANCE_DB = Path(os.getenv("MMC_PERFORMANCE_DB") or (Path(__file__).resolve().parent.parent / "data" / "performance.sqlite3"))
 
@@ -155,7 +157,7 @@ def _valid_strategy_modes():
     return {"normal", "candle_reaction"}
 
 def _valid_pairs(mode: str):
-    return REAL_PAIRS if mode == "real" else QUOTEX_OTC_PAIRS if mode == "quotex_otc" else []
+    return REAL_PAIRS if mode == "real" else QUOTEX_OTC_PAIRS if mode == "quotex_otc" else CRYPTO_PAIRS if mode == "crypto" else []
 
 def _settings():
     value = dict(_DEFAULT_SETTINGS)
@@ -259,7 +261,7 @@ def index():
         mode = session.get("selected_mode", saved.get("market_mode", ""))
         pair = session.get("selected_pair", saved.get("pair", ""))
         strategy_mode = saved.get("strategy_mode", "normal")
-    if mode not in {"real", "quotex_otc"}:
+    if mode not in {"real", "quotex_otc", "crypto"}:
         mode, pair = "", ""
     if strategy_mode not in _valid_strategy_modes():
         strategy_mode = "normal"
@@ -280,6 +282,7 @@ def index():
         "index.html",
         real_pairs=REAL_PAIRS,
         otc_pairs=QUOTEX_OTC_PAIRS,
+        crypto_pairs=CRYPTO_PAIRS,
         mode=mode,
         pair=pair,
         strategy_mode=strategy_mode,
@@ -342,6 +345,35 @@ def future_signals():
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
 
+@app.route("/api/crypto-market", methods=["GET"])
+def crypto_market():
+    pair = request.args.get("pair", "").strip().upper()
+    interval = request.args.get("interval", "1m").strip()
+    if pair not in CRYPTO_PAIRS:
+        return jsonify({"ok": False, "error": "অবৈধ crypto market।"}), 400
+    try:
+        candles = fetch_crypto_candles(pair, interval=interval, limit=240)
+        bars = [
+            {
+                "t": int(row["timestamp"].timestamp() * 1000),
+                "o": float(row["open"]),
+                "h": float(row["high"]),
+                "l": float(row["low"]),
+                "c": float(row["close"]),
+            }
+            for _, row in candles.iterrows()
+        ]
+        return jsonify({
+            "ok": True,
+            "pair": pair,
+            "symbol": binance_symbol_for_pair(pair),
+            "source": "Binance Spot public API",
+            "bars": bars,
+        })
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
+
 @app.route("/news-alert", methods=["GET"])
 def news_alert():
     mode = session.get("selected_mode", "").strip().lower()
@@ -350,6 +382,8 @@ def news_alert():
         return jsonify({"ok": False, "unselected": True, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"})
     if mode == "quotex_otc":
         return jsonify({"ok": True, "market_mode": mode, "selected_pair": pair, "checked_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "events": [], "alert_events": [], "total_events": 0, "source": "Quotex OTC — economic news filter not used"})
+    if mode == "crypto":
+        return jsonify({"ok": True, "market_mode": mode, "selected_pair": pair, "checked_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "events": [], "alert_events": [], "total_events": 0, "source": "Crypto market — Binance Spot data; forex economic calendar not applicable"})
     try:
         return jsonify(get_all_news_events(mode, REAL_PAIRS))
     except Exception:
@@ -397,8 +431,9 @@ def news_direction():
     pair = session.get("selected_pair", "").strip().upper()
     if pair not in _valid_pairs(mode):
         return jsonify({"ok": False, "unselected": True, "needed": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"})
-    if mode == "quotex_otc":
-        return jsonify({"ok": True, "needed": False, "pair": pair, "events": [], "source": "Quotex OTC"})
+    if mode in {"quotex_otc", "crypto"}:
+        source = "Binance Spot crypto" if mode == "crypto" else "Quotex OTC"
+        return jsonify({"ok": True, "needed": False, "pair": pair, "events": [], "source": source})
     try:
         return jsonify(get_news_direction_for_pair(mode, pair))
     except Exception as exc:
