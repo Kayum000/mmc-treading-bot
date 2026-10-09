@@ -418,19 +418,20 @@ def performance():
         payload = request.get_json(silent=True) or {}
         if not payload.get("id") or str(payload.get("signal", "")).upper() not in {"BUY", "SELL"}:
             return jsonify({"ok": False, "error": "Invalid performance row"}), 400
-        cols = ["id","time","pair","signal","entry_price","candle_color","signal_time_utc","analysis_candle_time_utc","result","signal_created_utc","signal_created_bd","outcome_price","outcome_candle_time_utc","outcome_basis"]
+        cols = ["id","time","pair","signal","entry_price","candle_color","signal_time_utc","analysis_candle_time_utc","result","signal_created_utc","signal_created_bd","outcome_price","outcome_candle_time_utc","outcome_basis","market_mode"]
         vals = [payload.get(c) for c in cols]
         con.execute("""INSERT INTO performance
             (id,time,pair,signal,entry_price,candle_color,signal_time_utc,analysis_candle_time_utc,
-             result,signal_created_utc,signal_created_bd,outcome_price,outcome_candle_time_utc,outcome_basis,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             result,signal_created_utc,signal_created_bd,outcome_price,outcome_candle_time_utc,outcome_basis,market_mode,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET
              time=excluded.time,pair=excluded.pair,signal=excluded.signal,entry_price=excluded.entry_price,
              candle_color=excluded.candle_color,signal_time_utc=excluded.signal_time_utc,
              analysis_candle_time_utc=excluded.analysis_candle_time_utc,result=excluded.result,
              signal_created_utc=excluded.signal_created_utc,signal_created_bd=excluded.signal_created_bd,
              outcome_price=excluded.outcome_price,outcome_candle_time_utc=excluded.outcome_candle_time_utc,
-             outcome_basis=excluded.outcome_basis,updated_at=excluded.updated_at""",
+             outcome_basis=excluded.outcome_basis,market_mode=COALESCE(excluded.market_mode,performance.market_mode),
+             updated_at=excluded.updated_at""",
             vals + [time.time()])
         con.commit()
         return jsonify({"ok": True})
