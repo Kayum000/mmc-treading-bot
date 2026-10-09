@@ -320,7 +320,7 @@ def telegram_chats():
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
 
-@app.route("/api/telegram-test", methods=["POST"])
+@app.route("/api/telegram-test", methods=["GET", "POST"])
 def telegram_test():
     try:
         send_test_message()
