@@ -111,6 +111,7 @@ def notify_signal(result: dict[str, Any]) -> bool:
         f"{'🟢 BUY' if action == 'BUY' else '🔴 SELL'} SIGNAL — MMC\n"
         f"Pair: {pair}\n"
         f"Market: {mode}\n"
+        f"Source: {result.get('source') or '—'}\n"
         f"Entry reference: {price_text}\n"
         f"Entry time (BD): {entry_time or 'N/A'}\n"
         f"Confidence: {confidence_text}\n"
