@@ -5,6 +5,8 @@ import hmac
 import os
 import time
 import sqlite3
+import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request, redirect, url_for, session
 
@@ -15,7 +17,7 @@ from data.news_events import get_weekly_news_events_for_pair
 from data.all_news_events import get_all_news_events
 from data.otc_markets import OTC_DISPLAY_PAIRS
 from data.binance_crypto import CRYPTO_DISPLAY_PAIRS, fetch_crypto_candles, binance_symbol_for_pair
-from notifications.telegram import get_recent_chats, notify_signal, send_test_message, telegram_enabled
+from notifications.telegram import get_recent_chats, notify_signal, notify_signal_result, send_test_message, telegram_enabled
 
 app = Flask(__name__)
 app.secret_key = os.getenv("APP_SECRET_KEY") or os.urandom(32)
@@ -45,8 +47,16 @@ def _performance_db():
         candle_color TEXT, signal_time_utc TEXT, analysis_candle_time_utc TEXT,
         result TEXT NOT NULL, signal_created_utc TEXT, signal_created_bd TEXT,
         outcome_price REAL, outcome_candle_time_utc TEXT, outcome_basis TEXT,
+        market_mode TEXT NOT NULL DEFAULT 'real',
+        result_notified INTEGER NOT NULL DEFAULT 0,
         updated_at REAL NOT NULL
     )""")
+    # Safe, idempotent migration for databases created by earlier versions.
+    columns = {row[1] for row in con.execute("PRAGMA table_info(performance)").fetchall()}
+    if "market_mode" not in columns:
+        con.execute("ALTER TABLE performance ADD COLUMN market_mode TEXT NOT NULL DEFAULT 'real'")
+    if "result_notified" not in columns:
+        con.execute("ALTER TABLE performance ADD COLUMN result_notified INTEGER NOT NULL DEFAULT 0")
     return con
 
 def _performance_row(row):
@@ -79,10 +89,12 @@ def _record_signal_performance(result: dict) -> None:
         return
     pair = str(result.get("pair") or "").strip().upper()
     analysis_time = result.get("analysis_candle_time_utc")
+    mode = str(result.get("market_mode") or "real").strip().lower()
     row = {
-        "id": "|".join([pair, signal, str(signal_time), str(analysis_time or "")]),
+        "id": "|".join([mode, pair, signal, str(signal_time), str(analysis_time or "")]),
         "time": result.get("signal_created_bd") or result.get("signal_created_utc") or signal_time,
         "pair": pair,
+        "market_mode": mode,
         "signal": signal,
         "entry_price": result.get("entry_price"),
         "candle_color": result.get("signal_candle_color") or "—",
@@ -97,12 +109,12 @@ def _record_signal_performance(result: dict) -> None:
     }
     con = _performance_db()
     try:
-        cols = ["id","time","pair","signal","entry_price","candle_color","signal_time_utc","analysis_candle_time_utc","result","signal_created_utc","signal_created_bd","outcome_price","outcome_candle_time_utc","outcome_basis"]
+        cols = ["id","time","pair","signal","entry_price","candle_color","signal_time_utc","analysis_candle_time_utc","result","signal_created_utc","signal_created_bd","outcome_price","outcome_candle_time_utc","outcome_basis","market_mode"]
         vals = [row.get(c) for c in cols]
         con.execute("""INSERT INTO performance
             (id,time,pair,signal,entry_price,candle_color,signal_time_utc,analysis_candle_time_utc,
-             result,signal_created_utc,signal_created_bd,outcome_price,outcome_candle_time_utc,outcome_basis,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             result,signal_created_utc,signal_created_bd,outcome_price,outcome_candle_time_utc,outcome_basis,market_mode,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET
              entry_price=COALESCE(excluded.entry_price,performance.entry_price),
              candle_color=COALESCE(excluded.candle_color,performance.candle_color),
