@@ -42,6 +42,8 @@ def binance_symbol_for_pair(pair: str) -> str:
 def fetch_crypto_candles(pair: str, interval: str = "1m", limit: int = 200) -> pd.DataFrame:
     """Fetch only fully closed Binance Spot candles, normalized for MMC strategies."""
     symbol = binance_symbol_for_pair(pair)
+    if interval == "1D":
+        interval = "1d"
     if interval not in _INTERVALS:
         raise ValueError(f"Unsupported Binance candle interval: {interval}")
     count = max(60, min(int(limit), 1000))
