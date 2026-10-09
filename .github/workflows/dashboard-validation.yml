@@ -2,7 +2,7 @@ name: Dashboard Validation
 
 on:
   push:
-    branches: [ui/sk-dashboard]
+    branches: [main, ui/sk-dashboard]
   pull_request:
     branches: [main]
 
