@@ -194,6 +194,9 @@ def init_quotex_browser_ingest(app):
                 result = get_signal(pair, "real", automatic=True)
             else:
                 return jsonify({"ok": False, "error": "অসমর্থিত মার্কেট মোড।"}), 400
+            from web.app import _record_signal_performance, _notify_telegram_safely
+            _record_signal_performance(result)
+            _notify_telegram_safely(result)
             return jsonify({"ok": True, "result": result})
         except Exception as exc:
             logger.exception("FLOATING_SIGNAL_FAILED mode=%s pair=%s", mode, pair)
@@ -206,6 +209,9 @@ def init_quotex_browser_ingest(app):
             return jsonify({"ok": False, "error": "অসমর্থিত OTC মার্কেট।"}), 400
         try:
             result = get_signal(pair, "quotex_otc", automatic=True)
+            from web.app import _record_signal_performance, _notify_telegram_safely
+            _record_signal_performance(result)
+            _notify_telegram_safely(result)
             return jsonify({"ok": True, "result": result})
         except Exception as exc:
             logger.exception("FLOATING_OTC_SIGNAL_FAILED pair=%s", pair)
@@ -255,8 +261,9 @@ def init_quotex_browser_ingest(app):
                 )
                 try:
                     result = get_signal(pair, "quotex_otc", automatic=True)
-                    from web.app import _record_signal_performance
+                    from web.app import _record_signal_performance, _notify_telegram_safely
                     _record_signal_performance(result)
+                    _notify_telegram_safely(result)
                     return jsonify({"ok": True, "result": result})
                 except RuntimeError as exc:
                     last_exc = exc
