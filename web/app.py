@@ -437,6 +437,129 @@ def performance():
     finally:
         con.close()
 
+
+def _utc_epoch(value) -> float | None:
+    try:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        return stamp.timestamp()
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _outcome_candles(mode: str, pair: str) -> list[dict]:
+    """Fetch the correct market's closed candles for server-side result scoring."""
+    if mode == "crypto":
+        frame = fetch_crypto_candles(pair, interval="1m", limit=240)
+        return [{"t": row["timestamp"].timestamp(), "o": float(row["open"]), "c": float(row["close"])}
+                for _, row in frame.iterrows()]
+    if mode == "quotex_otc":
+        from data.quotex_otc import fetch_quotex_candles
+        from data.otc_markets import asset_for_display
+        asset = asset_for_display(pair)
+        if not asset:
+            return []
+        frame = fetch_quotex_candles(asset, interval="1m", count=240)
+        return [{"t": row["timestamp"].timestamp(), "o": float(row["open"]), "c": float(row["close"])}
+                for _, row in frame.iterrows()]
+    if mode == "real":
+        # Real Market signals use the authenticated Quotex browser collector cache.
+        from quotex_browser_ingest import _REAL_MARKET, _REAL_MARKET_LOCK
+        asset = "".join(ch for ch in pair.upper() if ch.isalnum() or ch in "._-")
+        with _REAL_MARKET_LOCK:
+            state = dict(_REAL_MARKET.get(asset) or {})
+            bars = list(state.get("bars") or [])
+            updated_at = state.get("updated_at")
+        if updated_at is None or time.time() - float(updated_at) > 60:
+            return []
+        return [{"t": float(row["timestamp"]), "o": float(row["open"]), "c": float(row["close"])}
+                for row in bars if all(row.get(k) is not None for k in ("timestamp", "open", "close"))]
+    return []
+
+
+def _score_pending_performance_once() -> None:
+    con = _performance_db()
+    try:
+        rows = [dict(r) for r in con.execute(
+            "SELECT * FROM performance WHERE result='অপেক্ষমাণ' OR (result IN ('লাভ','লস','DOJI') AND result_notified=0) ORDER BY updated_at DESC LIMIT 200"
+        ).fetchall()]
+    finally:
+        con.close()
+    if not rows:
+        return
+    now = time.time()
+    candle_cache: dict[tuple[str, str], list[dict]] = {}
+    for row in rows:
+        mode = str(row.get("market_mode") or "real").lower()
+        pair = str(row.get("pair") or "").strip()
+        signal = str(row.get("signal") or "").upper()
+        entry_epoch = _utc_epoch(row.get("signal_time_utc"))
+        if signal not in {"BUY", "SELL"} or not pair or entry_epoch is None:
+            continue
+        key = (mode, pair)
+        # Do not request data until the entry candle has completely closed.
+        if row.get("result") == "অপেক্ষমাণ" and now < entry_epoch + 60:
+            continue
+        if key not in candle_cache:
+            try:
+                candle_cache[key] = _outcome_candles(mode, pair)
+            except Exception as exc:
+                print(f"[MMC Performance] candle lookup failed mode={mode} pair={pair}: {exc}", flush=True)
+                candle_cache[key] = []
+        target_minute = int(entry_epoch // 60) * 60
+        candle = next((b for b in candle_cache[key] if int(float(b["t"]) // 60) * 60 == target_minute), None)
+        if not candle:
+            continue
+        if row.get("result") == "অপেক্ষমাণ":
+            op, close = float(candle["o"]), float(candle["c"])
+            outcome = "লাভ" if (close > op and signal == "BUY") or (close < op and signal == "SELL") else "লস" if close != op else "DOJI"
+            con = _performance_db()
+            try:
+                con.execute(
+                    "UPDATE performance SET result=?, outcome_price=?, outcome_candle_time_utc=?, outcome_basis=?, updated_at=? WHERE id=? AND result='অপেক্ষমাণ'",
+                    (outcome, close, datetime.fromtimestamp(target_minute, timezone.utc).isoformat(), "সম্পূর্ণ entry ১-মিনিট candle open-to-close", time.time(), row["id"])
+                )
+                con.commit()
+                row["result"] = outcome
+                row["outcome_price"] = close
+                row["outcome_candle_time_utc"] = datetime.fromtimestamp(target_minute, timezone.utc).isoformat()
+                row["outcome_basis"] = "সম্পূর্ণ entry ১-মিনিট candle open-to-close"
+                print(f"[MMC Performance] scored mode={mode} pair={pair} signal={signal} result={outcome}", flush=True)
+            finally:
+                con.close()
+        if row.get("result") in {"লাভ", "লস", "DOJI"} and not int(row.get("result_notified") or 0):
+            try:
+                sent = notify_signal_result(row)
+                if sent:
+                    con = _performance_db()
+                    try:
+                        con.execute("UPDATE performance SET result_notified=1, updated_at=? WHERE id=? AND result_notified=0", (time.time(), row["id"]))
+                        con.commit()
+                    finally:
+                        con.close()
+                    print(f"[MMC Telegram] Outcome sent mode={mode} pair={pair} result={row['result']}", flush=True)
+            except Exception as exc:
+                print(f"[MMC Telegram] Outcome notification failed mode={mode} pair={pair}: {exc}", flush=True)
+
+
+def _performance_worker() -> None:
+    while True:
+        try:
+            _score_pending_performance_once()
+        except Exception as exc:
+            print(f"[MMC Performance] background worker error: {exc}", flush=True)
+        time.sleep(10)
+
+
+# Runs independently of the dashboard tab so finalized outcomes can reach Telegram.
+threading.Thread(target=_performance_worker, name="mmc-performance-worker", daemon=True).start()
+
+
 @app.route("/news-direction", methods=["GET"])
 def news_direction():
     mode = session.get("selected_mode", "").strip().lower()
