@@ -14,6 +14,7 @@ from data.news_direction import get_news_direction_for_pair
 from data.news_events import get_weekly_news_events_for_pair
 from data.all_news_events import get_all_news_events
 from data.otc_markets import OTC_DISPLAY_PAIRS
+from notifications.telegram import get_recent_chats, notify_signal, send_test_message, telegram_enabled
 
 app = Flask(__name__)
 app.secret_key = os.getenv("APP_SECRET_KEY") or os.urandom(32)
@@ -49,6 +50,16 @@ def _performance_db():
 def _performance_row(row):
     d = dict(row)
     return d
+
+def _notify_telegram_safely(result: dict) -> None:
+    """Telegram failures must not break signal generation or dashboard requests."""
+    try:
+        sent = notify_signal(result)
+        if sent:
+            print("[MMC Telegram] New BUY/SELL signal sent.", flush=True)
+    except Exception as exc:
+        print(f"[MMC Telegram] Signal notification failed: {exc}", flush=True)
+
 
 def _record_signal_performance(result: dict) -> None:
     """Persist every generated BUY/SELL signal on the server immediately.
@@ -262,6 +273,7 @@ def index():
             try:
                 result = get_signal(pair, mode, strategy_mode=strategy_mode)
                 _record_signal_performance(result)
+                _notify_telegram_safely(result)
             except Exception as exc:
                 error = str(exc)
     return render_template(
@@ -287,7 +299,32 @@ def auto_signal():
     try:
         result = get_signal(pair, mode, automatic=True, strategy_mode=strategy_mode)
         _record_signal_performance(result)
+        _notify_telegram_safely(result)
         return jsonify({"ok": True, "result": result})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
+@app.route("/api/telegram-status", methods=["GET"])
+def telegram_status():
+    return jsonify({
+        "ok": True,
+        "enabled": telegram_enabled(),
+        "configured": bool((os.getenv("TELEGRAM_BOT_TOKEN") or "").strip() and (os.getenv("TELEGRAM_CHAT_ID") or "").strip()),
+        "instructions": "Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in the hosting environment; secrets are never returned.",
+    })
+
+@app.route("/api/telegram-chats", methods=["GET"])
+def telegram_chats():
+    try:
+        return jsonify({"ok": True, "chats": get_recent_chats()})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
+@app.route("/api/telegram-test", methods=["POST"])
+def telegram_test():
+    try:
+        send_test_message()
+        return jsonify({"ok": True, "message": "Telegram test message sent."})
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
 
