@@ -133,3 +133,34 @@ def notify_signal(result: dict[str, Any]) -> bool:
             expired = _SENT_ORDER.pop(0)
             _SENT.discard(expired)
     return True
+
+def notify_signal_result(result: dict[str, Any]) -> bool:
+    """Send a finalized signal outcome once the matching entry candle closes."""
+    if not telegram_enabled() or not isinstance(result, dict):
+        return False
+    outcome = str(result.get("result") or "").strip()
+    labels = {"লাভ": "🟢 WIN", "লস": "🔴 LOSS", "DOJI": "🟡 DOJI"}
+    label = labels.get(outcome)
+    if not label:
+        return False
+    pair = str(result.get("pair") or "Unknown pair").strip()
+    mode = str(result.get("market_mode") or "unknown").replace("_", " ").upper()
+    signal = str(result.get("signal") or "").strip().upper()
+    entry_time = str(result.get("signal_time_utc") or "")
+    price = result.get("outcome_price")
+    try:
+        price_text = f"{float(price):.8f}".rstrip("0").rstrip(".") if price is not None else "N/A"
+    except (TypeError, ValueError):
+        price_text = str(price)
+    message = (
+        f"{label} — MMC SIGNAL RESULT\\n"
+        f"Pair: {pair}\\n"
+        f"Market: {mode}\\n"
+        f"Signal: {signal}\\n"
+        f"Entry candle (UTC): {entry_time or 'N/A'}\\n"
+        f"Close price: {price_text}\\n"
+        f"Basis: completed 1-minute candle open-to-close"
+    )
+    _post_message(message)
+    return True
+
