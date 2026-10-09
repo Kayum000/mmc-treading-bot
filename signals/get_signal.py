@@ -7,6 +7,7 @@ import time
 import pandas as pd
 
 from data.quotex_otc import fetch_quotex_candles, OTC_PAIRS, local_active_asset, local_ticks
+from data.binance_crypto import fetch_crypto_candles, binance_symbol_for_pair
 from data.otc_markets import display_for_asset, asset_for_display
 from strategy.otc_candle_pressure import generate_signal as generate_otc_signal
 from strategy.adaptive_real import generate_adaptive_signal
@@ -200,6 +201,52 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
     }
 
 
+def _crypto_signal(pair: str, automatic: bool) -> dict:
+    """Generate a 1-minute crypto signal from Binance Spot candles."""
+    candles = fetch_crypto_candles(pair, interval="1m", limit=200)
+    if len(candles) < 60:
+        raise RuntimeError("Binance থেকে অন্তত ৬০টি closed 1-minute candle পাওয়া যায়নি।")
+    result = generate_adaptive_signal(candles, ticks=None)
+    signal_at_utc = datetime.now(timezone.utc)
+    current_minute = signal_at_utc.replace(second=0, microsecond=0)
+    signal_candle = current_minute + timedelta(minutes=1)
+    last = candles.iloc[-1]
+    analysis_time = pd_timestamp_utc(last["timestamp"])
+    signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
+    is_entry = result.action in {"BUY", "SELL"}
+    score = int(round(float(result.confidence) * 100)) if is_entry else 0
+    open_price, close_price = float(last["open"]), float(last["close"])
+    return {
+        "pair": pair, "requested_pair": pair, "market_mode": "crypto",
+        "source": f"Binance Spot public API ({binance_symbol_for_pair(pair)})",
+        "binance_symbol": binance_symbol_for_pair(pair),
+        "signal": result.action, "market_bias": result.action, "entry_signal": result.action,
+        "buy_score": score if result.action == "BUY" else 0,
+        "sell_score": score if result.action == "SELL" else 0,
+        "reason": _bengali_reason(f"[{result.regime} / {result.strategy}] {result.reason}"),
+        "hold_condition": _hold_condition(result.reason, result.regime, result.strategy) if result.action == "HOLD" else None,
+        "signal_created_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None,
+        "signal_created_bd": signal_at_utc.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
+        "signal_time_utc": signal_candle.isoformat(timespec="seconds"),
+        "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
+        "candle_time": signal_candle.isoformat(timespec="seconds") if is_entry else None,
+        "analysis_candle_time_utc": analysis_time,
+        "signal_candle_open": open_price, "signal_candle_close": close_price,
+        "signal_candle_color": "green" if close_price > open_price else "red" if close_price < open_price else "doji",
+        "entry_price": close_price, "entry_price_type": "latest_closed_binance_spot_candle_reference",
+        "entry_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
+        "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
+        "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
+        "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
+        "entry_delay_seconds": 0 if is_entry else None,
+        "timeframe": f"1-minute/{result.strategy.lower()}",
+        "entry_timeframe": "next 1-minute candle after closed-candle analysis",
+        "automatic": automatic, "confidence": result.confidence,
+        "mmc_level_type": None, "mmc_level_price": None,
+        "regime": result.regime, "strategy": result.strategy, "strategy_mode": "adaptive",
+    }
+
+
 def pd_timestamp_utc(value) -> str:
     stamp = value.to_pydatetime(warn=False) if hasattr(value, "to_pydatetime") else value
     stamp = stamp.astimezone(timezone.utc)
@@ -215,6 +262,8 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False, st
         return _real_signal(pair, automatic)
     if mode == "quotex_otc":
         return _otc_signal(pair, automatic)
+    if mode == "crypto":
+        return _crypto_signal(pair, automatic)
     raise ValueError("Unsupported market mode")
 
 
@@ -242,6 +291,9 @@ def get_future_signals(pair: str, market_mode: str = "real") -> dict:
             raise RuntimeError("বর্তমান Quotex OTC মার্কেট শনাক্ত করা যায়নি।")
         candles = fetch_quotex_candles(asset, count=300)
         ticks = local_ticks(asset)
+    elif mode == "crypto":
+        candles = fetch_crypto_candles(pair, interval="1m", limit=300)
+        ticks = None
     else:
         raise ValueError("Unsupported market mode")
     result = scan_future_opportunities(candles, ticks=ticks)
