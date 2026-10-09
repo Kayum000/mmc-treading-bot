@@ -28,6 +28,11 @@
       const asset=encodeURIComponent(pair);
       return {history:`/quotex/otc-market?asset=${asset}&count=240`,latest:`/quotex/otc-market?asset=${asset}&count=240`};
     }
+    if(mode==='crypto'){
+      const asset=encodeURIComponent(pair);
+      const interval=encodeURIComponent(S.interval||'1m');
+      return {history:`/api/crypto-market?pair=${asset}&interval=${interval}`,latest:`/api/crypto-market?pair=${asset}&interval=${interval}`};
+    }
     const asset=encodeURIComponent(String(pair).replace(/[^A-Za-z0-9._-]/g,''));
     return {history:`/quotex/real-market?asset=${asset}`,latest:`/quotex/real-market?asset=${asset}`};
   }
@@ -76,7 +81,7 @@
       draw();
     }catch(e){console.warn('MMC backend latest',e);updateLiveInfo();}
   }
-  function startFallback(){clearInterval(S.poll);S.poll=setInterval(latest,2000);latest();}
+  function startFallback(){clearInterval(S.poll);S.poll=setInterval(latest,selectedMode()==='crypto'?10000:2000);latest();}
   function stopFallback(){clearInterval(S.poll);S.poll=null;}
   async function stop(){clearTimeout(S.timer);S.timer=null;stopFallback();S.c=null;}
   async function connect(){startFallback();}
