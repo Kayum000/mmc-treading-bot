@@ -5,6 +5,7 @@ The bot sends signals only; it never places trades.
 """
 from __future__ import annotations
 
+import html
 import os
 import threading
 from typing import Any
@@ -38,7 +39,7 @@ def _post_message(text: str) -> dict[str, Any]:
     try:
         response = requests.post(
             f"{_API}/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
+            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
             timeout=12,
         )
     except requests.RequestException as exc:
@@ -123,23 +124,23 @@ def notify_signal(result: dict[str, Any]) -> bool:
     losses = int(result.get("losses") or 0)
     strategy = str(result.get("strategy") or "Adaptive").replace("_", " ").strip()
     regime = str(result.get("regime") or "").replace("_", " ").strip()
-    strategy_line = f"🧠 Strategy: {strategy}" + (f" • {regime}" if regime and regime.upper() != "N/A" else "")
+    strategy_line = f"🧠 <b>Strategy:</b> {html.escape(strategy)}" + (f" • {html.escape(regime)}" if regime and regime.upper() != "N/A" else "")
     message = (
-        "👑 MMC ELITE VIP\n"
+        "👑 <b>MMC ELITE VIP</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        f"{'🟢 BUY' if action == 'BUY' else '🔴 SELL'} SIGNAL  •  PREMIUM ALERT\n"
-        f"🔢 Signal ID: #{signal_number}\n"
+        f"<b>{'🟢 BUY' if action == 'BUY' else '🔴 SELL'} SIGNAL  •  PREMIUM ALERT</b>\n"
+        f"🔢 <b>Signal ID:</b> #{html.escape(str(signal_number))}\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        f"💱 Pair: {pair}\n"
-        f"🏦 Market: {mode}\n"
-        f"🎯 Direction: {'BUY 🟢' if action == 'BUY' else 'SELL 🔴'}\n"
-        f"💵 Entry Price: {price_text}\n"
-        f"⏳ Expiry: 1 Minute\n"
-        f"🕒 Signal Time (BD): {entry_time or 'N/A'}\n"
-        f"📡 Source: {result.get('source') or '—'}\n"
+        f"💱 <b>Pair:</b> {html.escape(pair)}\n"
+        f"🏦 <b>Market:</b> {html.escape(mode)}\n"
+        f"🎯 <b>Direction:</b> {'BUY 🟢' if action == 'BUY' else 'SELL 🔴'}\n"
+        f"💵 <b>Entry Price:</b> {html.escape(price_text)}\n"
+        f"⏳ <b>Expiry:</b> 1 Minute\n"
+        f"🕒 <b>Signal Time (BD):</b> {html.escape(entry_time or 'N/A')}\n"
+        f"📡 <b>Source:</b> {html.escape(str(result.get('source') or '—'))}\n"
         f"{strategy_line}\n"
-        f"📈 Confidence: {confidence_text}\n"
-        f"📝 Reason: {reason[:500]}\n"
+        f"📈 <b>Confidence:</b> {html.escape(confidence_text)}\n"
+        f"📝 <b>Reason:</b> {html.escape(reason[:500])}\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "⚠️ Signal only; outcomes are not guaranteed. Manage your risk."
     )
@@ -187,23 +188,23 @@ def notify_signal_result(result: dict[str, Any]) -> bool:
     except (TypeError, ValueError):
         entry_price_text = str(entry_price)
     strategy = str(result.get("strategy") or "").replace("_", " ").strip()
-    strategy_line = f"🧠 Strategy: {strategy}\n" if strategy else ""
+    strategy_line = f"🧠 <b>Strategy:</b> {html.escape(strategy)}\n" if strategy else ""
     message = (
-        "👑 MMC ELITE RESULT\n"
+        "👑 <b>MMC ELITE RESULT</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        f"{label}\n"
+        f"<b>{label}</b>\n"
         f"🔢 Signal ID: #{signal_number}\n"
         "━━━━━━━━━━━━━━━━━━\n"
         f"💱 Pair: {pair}\n"
         f"🏦 Market: {mode}\n"
-        f"🎯 Direction: {signal or 'N/A'}\n"
-        f"💵 Entry Price: {entry_price_text}\n"
-        f"🏁 Result Price: {price_text}\n"
-        f"🕒 Entry Candle (UTC): {entry_time or 'N/A'}\n"
+        f"🎯 <b>Direction:</b> {html.escape(signal or 'N/A')}\n"
+        f"💵 <b>Entry Price:</b> {html.escape(entry_price_text)}\n"
+        f"🏁 <b>Result Price:</b> {html.escape(price_text)}\n"
+        f"🕒 <b>Entry Candle (UTC):</b> {html.escape(entry_time or 'N/A')}\n"
         f"{strategy_line}"
-        "📊 PERFORMANCE STATS\n"
-        f"🟢 Total WIN: {wins}   🔴 Total LOSS: {losses}\n"
-        f"🏆 Win Rate: {win_rate}\n"
+        "📊 <b>PERFORMANCE STATS</b>\n"
+        f"🟢 <b>Total WIN:</b> {wins}   🔴 <b>Total LOSS:</b> {losses}\n"
+        f"🏆 <b>Win Rate:</b> {win_rate}\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "Result based on the completed 1-minute candle."
     )
