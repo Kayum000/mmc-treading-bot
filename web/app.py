@@ -530,7 +530,7 @@ def performance():
             """).fetchall()
             strategy_stats = []
             for item in stats_rows:
-                d = dict(item)
+                d = _performance_row(item)
                 settled = int(d["wins"] or 0) + int(d["losses"] or 0)
                 d["decided"] = settled
                 d["loss_rate"] = round((int(d["losses"] or 0) / settled) * 100, 2) if settled else 0.0
