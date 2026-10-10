@@ -127,15 +127,16 @@ body{background:var(--mmc-bg)!important;color:var(--mmc-text)!important}
 .setting-toggle{min-width:54px}
 .setting-toggle[aria-pressed="true"]{background:linear-gradient(135deg,#08795e,#08a47d);border-color:#08b887;color:#fff}
 
-/* Make the moved topbar actions obvious, full-size Settings rows. */
-.settings-action-list{display:grid;gap:9px;margin:12px 0}
-.settings-action{width:100%;display:grid;grid-template-columns:42px minmax(0,1fr) 18px;align-items:center;gap:11px;padding:12px;border:1px solid #214c72;border-radius:9px;background:linear-gradient(110deg,#0a2947,#081f38);color:#e8f2ff;text-align:left;cursor:pointer}
+/* Keep Settings usable on short screens and put the two moved controls first. */
+.modal-card:not(.performance-modal){max-height:calc(100vh - 36px);max-height:calc(100dvh - 36px);overflow-y:auto;overscroll-behavior:contain}
+.settings-action-list{display:grid;gap:10px;margin:8px 0 14px}
+.settings-action{width:100%;min-height:72px;display:grid;grid-template-columns:46px minmax(0,1fr) 18px;align-items:center;gap:12px;padding:14px;border:2px solid #28659a;border-radius:10px;background:linear-gradient(110deg,#0a2947,#081f38);color:#e8f2ff;text-align:left;cursor:pointer}
 .settings-action:hover{border-color:#1684ee;background:linear-gradient(110deg,#10395f,#0a2643)}
-.settings-action-icon{width:38px;height:38px;display:grid;place-items:center;border:1px solid #28659a;border-radius:8px;background:#0d3154;color:#7bc8ff;font-size:25px;line-height:1}
+.settings-action-icon{width:42px;height:42px;display:grid;place-items:center;border:1px solid #28659a;border-radius:9px;background:#0d3154;color:#7bc8ff;font-size:27px;line-height:1}
 .settings-action-text{display:grid;gap:4px;min-width:0}
-.settings-action-text b{font-size:13px;color:#eef7ff}
-.settings-action-text small{font-size:11px;font-weight:400;color:#94b0ca}
-.settings-action-arrow{font-size:24px;text-align:right;color:#72baff}
+.settings-action-text b{font-size:14px;color:#eef7ff}
+.settings-action-text small{font-size:11px;font-weight:400;color:#b4cbe0}
+.settings-action-arrow{font-size:26px;text-align:right;color:#72baff}
 </style>
 <style>
 .performance-modal #modal-extra{display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden}
@@ -491,14 +492,14 @@ function openThemeSettings(){
 function openSettings(){
   const compact=getDashboardPreference(COMPACT_SIDEBAR_KEY);
   const autoNews=getDashboardPreference(AUTO_REFRESH_NEWS_KEY);
-  const rows='<div class="setting-row"><span>Compact sidebar</span><button type="button" class="mini-btn setting-toggle" id="settings-compact-sidebar" aria-pressed="'+compact+'">'+(compact?'On':'Off')+'</button></div>'
-    +'<div class="setting-row"><span>Auto refresh news <small>(every 5 minutes)</small></span><button type="button" class="mini-btn setting-toggle" id="settings-auto-refresh-news" aria-pressed="'+autoNews+'">'+(autoNews?'On':'Off')+'</button></div>'
-    +'<div class="settings-action-list">'
+  const actions='<div class="settings-action-list">'
     +'<button type="button" class="settings-action" id="settings-notifications"><span class="settings-action-icon" aria-hidden="true">♧</span><span class="settings-action-text"><b>Notifications</b><small>Notifications and alerts</small></span><span class="settings-action-arrow" aria-hidden="true">›</span></button>'
     +'<button type="button" class="settings-action" id="settings-theme"><span class="settings-action-icon" aria-hidden="true">☼</span><span class="settings-action-text"><b>Theme Color</b><small>Choose dashboard colors · 10 themes</small></span><span class="settings-action-arrow" aria-hidden="true">›</span></button>'
-    +'</div>'
+    +'</div>';
+  const preferences='<div class="setting-row"><span>Compact sidebar</span><button type="button" class="mini-btn setting-toggle" id="settings-compact-sidebar" aria-pressed="'+compact+'">'+(compact?'On':'Off')+'</button></div>'
+    +'<div class="setting-row"><span>Auto refresh news <small>(every 5 minutes)</small></span><button type="button" class="mini-btn setting-toggle" id="settings-auto-refresh-news" aria-pressed="'+autoNews+'">'+(autoNews?'On':'Off')+'</button></div>'
     +'<div class="setting-row"><span>Signal Alerts</span><button type="button" class="mini-btn" id="settings-alerts">Enable</button></div>';
-  modalOpen('Settings','Dashboard preferences are stored only in this browser.',rows);
+  modalOpen('Settings','Notifications and Theme Color are at the top. Preferences are stored only in this browser.',actions+preferences);
   $('settings-compact-sidebar').onclick=()=>{
     saveDashboardPreference(COMPACT_SIDEBAR_KEY,!getDashboardPreference(COMPACT_SIDEBAR_KEY));
     applyCompactSidebar();
