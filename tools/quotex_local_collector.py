@@ -267,6 +267,8 @@ class Collector:
         self.last_send = 0.0
         self.last_partial_send: dict[str, float] = {}
         self.last_quote_send: dict[str, float] = {}
+        self.last_quote_clock_diag: dict[str, float] = {}
+        self.last_quote_bucket_seen: dict[str, int] = {}
         self.last_data_at = time.monotonic()
         self.last_market_data_at = time.monotonic()
         self.last_status_write = 0.0
@@ -288,6 +290,21 @@ class Collector:
         )
         self._upload_thread.start()
         log("non-blocking upload worker started (bounded candle=50, quote=250)")
+
+    def close(self) -> None:
+        """Stop the upload worker when this WebSocket session is discarded."""
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and (not self._candle_queue.empty() or not self._quote_queue.empty()):
+            time.sleep(0.05)
+        self._upload_stop.set()
+        try:
+            self._upload_thread.join(timeout=1.0)
+        except RuntimeError:
+            pass
+        try:
+            self.session.close()
+        except Exception:
+            pass
 
     def _write_status(self, state: str, data_type: str, asset: str) -> None:
         now = time.time()
@@ -488,8 +505,32 @@ class Collector:
     def _add_price(self, asset: str, price: float, ts: float) -> None:
         if not asset:
             return
+        # Keep receive-time status separate from source-time candle freshness.
+        # Some browser quote frames may repeat an old timestamp while still
+        # being delivered; expose that condition without rewriting timestamps
+        # or manufacturing newer candles from stale data.
+        now_wall = time.time()
+        try:
+            source_age = now_wall - float(ts)
+            now_mono = time.monotonic()
+            last_diag = self.last_quote_clock_diag.get(asset, 0.0)
+            if (source_age > 90 or source_age < -10) and now_mono - last_diag >= 30:
+                source_bucket = int(float(ts) // PERIOD) * PERIOD
+                current_bucket = int(now_wall // PERIOD) * PERIOD
+                source_label = datetime.fromtimestamp(source_bucket, tz=timezone.utc).isoformat(timespec="minutes")
+                current_label = datetime.fromtimestamp(current_bucket, tz=timezone.utc).isoformat(timespec="minutes")
+                log(f"selected quote source timestamp offset={source_age:.1f}s (asset={asset}, source_minute={source_label}, local_minute={current_label}); timestamp retained, no synthetic candle time")
+                self.last_quote_clock_diag[asset] = now_mono
+        except (TypeError, ValueError, OverflowError, OSError):
+            pass
         self._mark_data(asset, "tick")
         bucket = int(ts // PERIOD) * PERIOD
+        previous_bucket = self.last_quote_bucket_seen.get(asset)
+        if previous_bucket != bucket:
+            source_label = datetime.fromtimestamp(bucket, tz=timezone.utc).isoformat(timespec="minutes")
+            local_label = datetime.fromtimestamp(int(time.time() // PERIOD) * PERIOD, tz=timezone.utc).isoformat(timespec="minutes")
+            log(f"selected quote candle bucket asset={asset} source_minute={source_label} local_minute={local_label}")
+            self.last_quote_bucket_seen[asset] = bucket
         state = self.partial.get(asset)
         if not state or state["bucket"] != bucket:
             if state:
@@ -680,55 +721,71 @@ async def run() -> None:
         pending_event: str | None = None
         last_frame_at = time.monotonic()
         last_selection_check = 0.0
-        while True:
-            now_mono = time.monotonic()
-            if now_mono - last_selection_check >= 2.0:
-                last_selection_check = now_mono
-                probe = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": "document.body.innerText", "returnByValue": True})
-                visible = probe.get("result", {}).get("result", {}).get("value", "")
-                new_asset = _selected_asset_from_text(visible)
-                if new_asset and new_asset != collector.selected_asset:
-                    collector.set_selected_asset(new_asset)
-                    log(f"market selection changed -> {new_asset}; old market data is discarded")
-                    await request_selected_history(new_asset)
-            try:
-                message = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
-            except asyncio.TimeoutError:
-                collector.flush_partials()
-                if time.monotonic() - last_frame_at >= 30:
-                    log("No Quotex WebSocket frames for 30s; reloading the page to recover the stream.")
-                    await _cdp_command(ws, counter, "Page.reload", {"ignoreCache": False})
-                    # Wait for the page-created WebSocket to be captured by
-                    # the CDP bridge, then re-subscribe/backfill only the
-                    # currently selected market. A reload alone is not enough
-                    # to restore our explicit history requests.
-                    await asyncio.sleep(6)
+        next_partial_flush = time.monotonic() + 10.0
+        next_history_refresh = time.monotonic() + 45.0
+        try:
+            while True:
+                now_mono = time.monotonic()
+                if now_mono >= next_partial_flush:
+                    collector.flush_partials()
+                    next_partial_flush = now_mono + 10.0
+                # Explicitly refresh the selected market's history regularly;
+                # otherwise the startup backfill can be the only large history
+                # response for the lifetime of this browser WebSocket.
+                if now_mono >= next_history_refresh:
+                    await request_selected_history(collector.selected_asset)
+                    next_history_refresh = time.monotonic() + 45.0
+
+                if now_mono - last_selection_check >= 2.0:
+                    last_selection_check = now_mono
                     probe = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": "document.body.innerText", "returnByValue": True})
                     visible = probe.get("result", {}).get("result", {}).get("value", "")
-                    reloaded_asset = _selected_asset_from_text(visible)
-                    if reloaded_asset and reloaded_asset != collector.selected_asset:
-                        collector.set_selected_asset(reloaded_asset)
-                        log(f"market selection after recovery reload -> {reloaded_asset}")
-                    await request_selected_history(collector.selected_asset)
-                    last_frame_at = time.monotonic()
-                continue
-            if message.get("method") != "Network.webSocketFrameReceived":
-                continue
-            last_frame_at = time.monotonic()
-            response = message.get("params", {}).get("response", {})
-            payload = response.get("payloadData", "")
-            opcode = int(response.get("opcode", 1))
-            event_name, data = _decode_socket_message(payload, opcode)
-            if opcode != 1 and pending_event and data is not None:
-                if event_name is None:
-                    event_name = pending_event
-                pending_event = None
-            if event_name and isinstance(data, dict) and data.get("_placeholder"):
-                pending_event = event_name
-                continue
-            collector.handle(event_name, data)
-            if time.monotonic() - collector.last_market_data_at >= 60:
-                raise RuntimeError("No usable Quotex market data for 60s; reconnecting to the chart.")
+                    new_asset = _selected_asset_from_text(visible)
+                    if new_asset and new_asset != collector.selected_asset:
+                        collector.set_selected_asset(new_asset)
+                        log(f"market selection changed -> {new_asset}; old market data is discarded")
+                        await request_selected_history(new_asset)
+                        next_history_refresh = time.monotonic() + 45.0
+                try:
+                    message = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+                except asyncio.TimeoutError:
+                    if time.monotonic() - last_frame_at >= 30:
+                        log("No Quotex WebSocket frames for 30s; reloading the page to recover the stream.")
+                        await _cdp_command(ws, counter, "Page.reload", {"ignoreCache": False})
+                        # Wait for the page-created WebSocket to be captured by
+                        # the CDP bridge, then re-subscribe/backfill only the
+                        # currently selected market. A reload alone is not enough
+                        # to restore our explicit history requests.
+                        await asyncio.sleep(6)
+                        probe = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": "document.body.innerText", "returnByValue": True})
+                        visible = probe.get("result", {}).get("result", {}).get("value", "")
+                        reloaded_asset = _selected_asset_from_text(visible)
+                        if reloaded_asset and reloaded_asset != collector.selected_asset:
+                            collector.set_selected_asset(reloaded_asset)
+                            log(f"market selection after recovery reload -> {reloaded_asset}")
+                        await request_selected_history(collector.selected_asset)
+                        next_history_refresh = time.monotonic() + 45.0
+                        last_frame_at = time.monotonic()
+                    continue
+                if message.get("method") != "Network.webSocketFrameReceived":
+                    continue
+                last_frame_at = time.monotonic()
+                response = message.get("params", {}).get("response", {})
+                payload = response.get("payloadData", "")
+                opcode = int(response.get("opcode", 1))
+                event_name, data = _decode_socket_message(payload, opcode)
+                if opcode != 1 and pending_event and data is not None:
+                    if event_name is None:
+                        event_name = pending_event
+                    pending_event = None
+                if event_name and isinstance(data, dict) and data.get("_placeholder"):
+                    pending_event = event_name
+                    continue
+                collector.handle(event_name, data)
+                if time.monotonic() - collector.last_market_data_at >= 60:
+                    raise RuntimeError("No usable Quotex market data for 60s; reconnecting to the chart.")
+        finally:
+            collector.close()
 
 
 def main() -> int:
