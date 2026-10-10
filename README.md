@@ -2,18 +2,10 @@
 
 A market-signal engine for selected Real Forex and Quotex OTC 1-minute markets.
 
-## Crypto market
-
-- The dashboard has a separate **CRYPTO** mode with 13 Quotex-style display labels: BTC/USD, ETH/USD, LTC/USD, XRP/USD, BCH/USD, ADA/USD, DOT/USD, LINK/USD, UNI/USD, SOL/USD, AVAX/USD, DOGE/USD, and SHIB/USD.
-- Crypto candles and chart history use Binance Spot's public market-data API; no Binance API key is required for these public endpoints.
-- Display labels stay in Quotex format, while the adapter maps them to Binance USDT symbols (for example, BTC/USD → BTCUSDT). Binance and Quotex prices may differ.
-- Crypto signal generation uses the shared adaptive strategy on fully closed 1-minute candles. This is signal-only and does not place trades.
-
 ## Live signal pipeline
 
 - **Real Forex:** prefers the selected pair's fresh Quotex browser WebSocket feed. If that feed is missing or older than 60 seconds, signal generation falls back to BiQuote's public Forex candles and explicitly labels the signal source; provider prices can differ from Quotex.
 - **Quotex OTC:** uses the selected OTC market from the authenticated collector attached to a user-opened Quotex chart. OTC is not substituted with Forex or crypto prices.
-- **Crypto:** uses Binance Spot public market data for the supported crypto pairs and analyzes fully closed 1-minute candles.
 - All three paths use the adaptive strategy in `strategy/adaptive_real.py`. The signal request fetches fresh provider candles; this is live/on-demand analysis, not a claim that every market is continuously streamed or that the OTC collector is always connected.
 - The adaptive engine selects its logic from the detected market regime (for example TREND, BREAKOUT, RANGE, or HIGH_VOLATILITY).
 - **Tick Pressure** remains available as a fallback when the adaptive engine has suitable fresh tick data; it is not the primary strategy.
