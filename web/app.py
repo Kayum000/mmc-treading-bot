@@ -507,7 +507,7 @@ def performance():
             """).fetchone())
             summary = {key: int(summary.get(key) or 0) for key in ("total", "wins", "losses", "doji", "pending")}
             summary["decided"] = summary["wins"] + summary["losses"] + summary["doji"]
-            return jsonify({"ok": True, "rows": [_performance_row(r) for r in rows], "strategy_stats": strategy_stats})
+            return jsonify({"ok": True, "rows": [_performance_row(r) for r in rows], "summary": summary, "strategy_stats": strategy_stats})
         if request.method == "DELETE":
             con.execute("DELETE FROM performance")
             con.commit()
