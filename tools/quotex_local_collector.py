@@ -418,7 +418,8 @@ class Collector:
         return data
 
     def _remember_closed(self, rows: list[dict[str, Any]]) -> None:
-        boundary = int(time.time() // PERIOD) * PERIOD
+        # Permit the observed small source-clock lead; Render applies its own sent_at close check.
+        boundary = int((time.time() + 10.0) // PERIOD) * PERIOD
         for row in rows:
             try:
                 asset = str(row.get("asset") or "")
