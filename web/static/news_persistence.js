@@ -134,7 +134,7 @@
       const pairNode = item.querySelector('.pair');
       if (pairNode) {
         const small = pairNode.querySelector('small');
-        if (small) small.textContent = String(small.textContent || '').toUpperCase() === 'CRYPTO' ? 'CRYPTO MARKET' : 'REAL MARKET';
+        if (small) small.textContent = 'REAL MARKET';
       }
       const signal = item.querySelector('.signal-buy, .signal-sell');
       if (signal) signal.textContent = signal.textContent.trim() === 'BUY' ? 'BUY' : signal.textContent.trim() === 'SELL' ? 'SELL' : signal.textContent;
