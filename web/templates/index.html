@@ -104,6 +104,28 @@ body{background:var(--mmc-bg)!important;color:var(--mmc-text)!important}
 :root[data-theme="white"] .status-row{border-color:#e2e8f0!important}
 
 
+
+/* Remove the empty desktop header gap; keep a small mobile row for the menu button. */
+@media(min-width:761px){.topbar{display:none!important}}
+@media(max-width:760px){.topbar{height:40px!important;padding:0 10px!important;border-bottom:0!important;justify-content:flex-start!important}.content{padding-top:2px!important}}
+/* Compact sidebar: icons remain visible and labels are available as tooltips. */
+@media(min-width:761px){
+  .app.compact-sidebar{grid-template-columns:78px minmax(0,1fr)!important}
+  .app.compact-sidebar .sidebar{padding:18px 6px}
+  .app.compact-sidebar .nav{gap:6px}
+  .app.compact-sidebar .nav button{font-size:0!important;text-align:center!important;padding:12px 2px!important;min-height:42px}
+  .app.compact-sidebar .nav button::before{display:block;font-size:19px!important;line-height:1.2;color:currentColor}
+  .app.compact-sidebar .nav button[data-scroll="top"]::before{content:"⌂"}
+  .app.compact-sidebar .nav button[data-action="auto"]::before{content:"◉"}
+  .app.compact-sidebar .nav button[data-action="signal"]::before{content:"◇"}
+  .app.compact-sidebar .nav button[data-scroll="performance"]::before{content:"▥"}
+  .app.compact-sidebar .nav button[data-action="market"]::before{content:"♢"}
+  .app.compact-sidebar .nav button[data-scroll="news"]::before{content:"▤"}
+  .app.compact-sidebar .nav button[data-scroll="chart"]::before{content:"⌁"}
+  .app.compact-sidebar .nav button[data-action="settings"]::before{content:"⚙"}
+}
+.setting-toggle{min-width:54px}
+.setting-toggle[aria-pressed="true"]{background:linear-gradient(135deg,#08795e,#08a47d);border-color:#08b887;color:#fff}
 </style>
 <style>
 .performance-modal #modal-extra{display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden}
@@ -170,6 +192,19 @@ const $=id=>document.getElementById(id), pair=$('pair'), modal=$('modal'), toast
 const AUTO_SIGNAL_KEY='mmc_auto_signal_enabled_v1';
 let savedAutoSignal=false;try{savedAutoSignal=localStorage.getItem(AUTO_SIGNAL_KEY)==='1'}catch(_){}
 const state={mode:{{ mode|tojson }},pair:{{ pair|tojson }},auto:savedAutoSignal,autoTimer:null,news:[]};
+const COMPACT_SIDEBAR_KEY='mmc_dashboard_compact_sidebar_v1';
+const AUTO_REFRESH_NEWS_KEY='mmc_dashboard_auto_refresh_news_v1';
+function getDashboardPreference(key){try{return localStorage.getItem(key)==='1'}catch(_){return false}}
+function saveDashboardPreference(key,value){try{localStorage.setItem(key,value?'1':'0');return true}catch(_){toast('Browser could not save this preference.');return false}}
+function applyCompactSidebar(){
+  const enabled=getDashboardPreference(COMPACT_SIDEBAR_KEY);
+  document.querySelector('.app')?.classList.toggle('compact-sidebar',enabled);
+  document.querySelectorAll('.nav button').forEach(btn=>{
+    const target=btn.dataset.scroll,action=btn.dataset.action;
+    const label=target==='top'?'Dashboard':target==='performance'?'Performance':target==='news'?'News & Events':target==='chart'?'Live Chart':action==='auto'?'Auto Signal':action==='signal'?'Get Signal':action==='market'?'Market Selection':action==='settings'?'Settings':'Navigation';
+    btn.title=label;
+  });
+}
 const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(m){toastEl.textContent=m;toastEl.classList.add('show');clearTimeout(toastEl._t);toastEl._t=setTimeout(()=>toastEl.classList.remove('show'),2600)}
 function modalOpen(title,body,extra=''){window.__mmcModalPageScrollY=window.scrollY;$('modal-title').textContent=title;$('modal-body').textContent=body;$('modal-extra').innerHTML=extra;modal.querySelector('.modal-card')?.classList.remove('performance-modal');modal.classList.add('open')}
@@ -243,8 +278,14 @@ async function runAuto(){if(!state.auto||!state.pair)return;try{const r=await fe
 $('enable-alerts').onclick=async()=>{if(window.enableSignalAudio)window.enableSignalAudio();toast('Signal alerts enabled for this browser when permission is granted.')};
 function updateStatus(){const p=state.pair,m=state.mode;const label=p||'Select a market';$('status-pair').textContent=label;if(!p){['status-session','status-activity','status-window','status-news','status-news-time'].forEach(id=>$(id).textContent='—');return}if(m==='quotex_otc'){$('status-session').textContent='24/7 OTC';$('status-activity').textContent='HIGH';$('status-window').textContent='24/7 OTC Market';$('status-news').textContent='LOW';$('status-news-time').textContent='No scheduled news';return}const d=new Date(),day=d.getUTCDay(),h=d.getUTCHours();let s='New York',a='MEDIUM',w='London session';if(day===0||day===6){s='Market Closed';a='LOW';w='Next Forex session'}else if(h<7){s='Asia';a='MEDIUM';w='London / New York overlap'}else if(h<12){s='London';a='HIGH';w='London / New York overlap'}else if(h<17){s='London / New York';a='HIGH';w='London / New York overlap'}$('status-session').textContent=s;$('status-activity').textContent=a;$('status-window').textContent=w;$('status-news').textContent='LOW';$('status-news-time').textContent='No scheduled news'}
 function newsHtml(events){if(!events?.length)return '<div class="empty">No scheduled news for this market.</div>';return `<div class="news-items">${events.slice(0,6).map((e,i)=>`<div class="news-item"><span class="news-dot">${i%2?'₿':'▣'}</span><div><b>${esc(e.title||e.name||'Economic Event')}</b><p>${esc(e.description||e.impact||'Market event')}</p></div><span class="news-time">${esc(e.time||e.datetime||e.date||'')}</span></div>`).join('')}</div>`}
-async function loadNews(){if(!state.pair){$('news-items').innerHTML='<div class="empty">Select a market to load news & events.</div>';return}$('news-items').innerHTML='<div class="empty">Loading news…</div>';try{const r=await fetch('/news-alert',{credentials:'same-origin',cache:'no-store'});const d=await readJsonResponse(r);if(!r.ok||d.ok===false)throw Error(d.error||'News unavailable');state.news=d.events||d.alert_events||[];$('news-items').innerHTML=newsHtml(state.news);$('news-source').textContent=d.source||'MMC News Engine'}catch(e){$('news-items').innerHTML=`<div class="empty">${esc(e.message)}</div>`;$('news-source').textContent='Unavailable'}}
-$('news-refresh').onclick=loadNews;$('news-more').onclick=()=>modalOpen('News & Events',state.news.length?state.news.map(e=>`${e.title||e.name||'Event'} — ${e.description||e.impact||''}`).join('\n'):'No scheduled news for this market.');
+let lastNewsLoadAt=0;
+async function loadNews(){lastNewsLoadAt=Date.now();if(!state.pair){$('news-items').innerHTML='<div class="empty">Select a market to load news & events.</div>';return}$('news-items').innerHTML='<div class="empty">Loading news…</div>';try{const r=await fetch('/news-alert',{credentials:'same-origin',cache:'no-store'});const d=await readJsonResponse(r);if(!r.ok||d.ok===false)throw Error(d.error||'News unavailable');state.news=d.events||d.alert_events||[];$('news-items').innerHTML=newsHtml(state.news);$('news-source').textContent=d.source||'MMC News Engine'}catch(e){$('news-items').innerHTML=`<div class="empty">${esc(e.message)}</div>`;$('news-source').textContent='Unavailable'}}
+$('news-refresh').onclick=loadNews;
+function autoRefreshNewsTick(){
+  if(!getDashboardPreference(AUTO_REFRESH_NEWS_KEY)||document.visibilityState==='hidden'||!state.pair)return;
+  if(Date.now()-lastNewsLoadAt>=5*60*1000)loadNews();
+}
+setInterval(autoRefreshNewsTick,15000);$('news-more').onclick=()=>modalOpen('News & Events',state.news.length?state.news.map(e=>`${e.title||e.name||'Event'} — ${e.description||e.impact||''}`).join('\n'):'No scheduled news for this market.');
 const PERF_KEY='mmc_performance_history_v2';
 function performanceHistory(){try{const rows=JSON.parse(localStorage.getItem(PERF_KEY)||'[]');return Array.isArray(rows)?rows.filter(x=>String(x?.signal||'').toUpperCase()==='BUY'||String(x?.signal||'').toUpperCase()==='SELL'):[]}catch(_){return[]}}
 function performanceResult(r){
@@ -438,12 +479,30 @@ function openThemeSettings(){
   });
 }
 function openSettings(){
-  modalOpen('Settings','Dashboard settings', '<div class="setting-row"><span>♧ Notifications</span><button type="button" class="mini-btn" id="settings-notifications">Open</button></div><div class="setting-row"><span>☼ Theme Color</span><button type="button" class="mini-btn" id="settings-theme">10 Themes</button></div><div class="setting-row"><span>Signal Alerts</span><button type="button" class="mini-btn" id="settings-alerts">Enable</button></div>');
+  const compact=getDashboardPreference(COMPACT_SIDEBAR_KEY);
+  const autoNews=getDashboardPreference(AUTO_REFRESH_NEWS_KEY);
+  const rows='<div class="setting-row"><span>Compact sidebar</span><button type="button" class="mini-btn setting-toggle" id="settings-compact-sidebar" aria-pressed="'+compact+'">'+(compact?'On':'Off')+'</button></div>'
+    +'<div class="setting-row"><span>Auto refresh news <small>(every 5 minutes)</small></span><button type="button" class="mini-btn setting-toggle" id="settings-auto-refresh-news" aria-pressed="'+autoNews+'">'+(autoNews?'On':'Off')+'</button></div>'
+    +'<div class="setting-row"><span>♧ Notifications</span><button type="button" class="mini-btn" id="settings-notifications">Open</button></div>'
+    +'<div class="setting-row"><span>☼ Theme Color</span><button type="button" class="mini-btn" id="settings-theme">10 Themes</button></div>'
+    +'<div class="setting-row"><span>Signal Alerts</span><button type="button" class="mini-btn" id="settings-alerts">Enable</button></div>';
+  modalOpen('Settings','Dashboard preferences are stored only in this browser.',rows);
+  $('settings-compact-sidebar').onclick=()=>{
+    saveDashboardPreference(COMPACT_SIDEBAR_KEY,!getDashboardPreference(COMPACT_SIDEBAR_KEY));
+    applyCompactSidebar();
+    openSettings();
+  };
+  $('settings-auto-refresh-news').onclick=()=>{
+    const enabled=!getDashboardPreference(AUTO_REFRESH_NEWS_KEY);
+    saveDashboardPreference(AUTO_REFRESH_NEWS_KEY,enabled);
+    if(enabled){lastNewsLoadAt=0;loadNews()}
+    openSettings();
+  };
   $('settings-notifications').onclick=()=>modalOpen('Notifications','No new critical notifications. Signal alerts can be enabled with the 🔔 Enable Alerts button.');
   $('settings-theme').onclick=openThemeSettings;
   $('settings-alerts').onclick=()=>{$('enable-alerts')?.click();closeModal()};
 }
-window.addEventListener('load',()=>{applySavedTheme();activeMode(state.mode||'real');setMode(state.mode||'real');if(state.pair)pair.value=state.pair;updateStatus();loadNews();loadPerformance();bindResult()});
+window.addEventListener('load',()=>{applyCompactSidebar();applySavedTheme();activeMode(state.mode||'real');setMode(state.mode||'real');if(state.pair)pair.value=state.pair;updateStatus();loadNews();loadPerformance();bindResult()});
 })();
 </script>
 </body>
