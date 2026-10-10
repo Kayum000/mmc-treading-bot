@@ -71,65 +71,27 @@ def _performance_db():
         raw = psycopg2.connect(database_url, connect_timeout=10)
         con = _PostgresPerformanceConnection(raw)
         try:
-            con.execute("""CREATE TABLE IF NOT EXISTS public.performance (
-                id TEXT PRIMARY KEY,
-                time TEXT,
-                pair TEXT,
-                signal TEXT,
-                entry_price DOUBLE PRECISION,
-                candle_color TEXT,
-                signal_time_utc TEXT,
-                analysis_candle_time_utc TEXT,
-                result TEXT NOT NULL,
-                signal_created_utc TEXT,
-                signal_created_bd TEXT,
-                outcome_price DOUBLE PRECISION,
-                outcome_candle_time_utc TEXT,
-                outcome_basis TEXT,
-                market_mode TEXT NOT NULL DEFAULT 'real',
-                strategy TEXT NOT NULL DEFAULT 'UNKNOWN',
-                regime TEXT NOT NULL DEFAULT 'UNKNOWN',
-                strategy_mode TEXT NOT NULL DEFAULT 'adaptive',
-                result_notified INTEGER NOT NULL DEFAULT 0,
-                updated_at DOUBLE PRECISION NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())
-            )""")
             columns = {
                 row[0] for row in con.execute(
                     "SELECT column_name FROM information_schema.columns "
                     "WHERE table_schema='public' AND table_name='performance'"
                 ).fetchall()
             }
-            # Additive, idempotent migrations for any database created by an
-            # earlier dashboard version. Do not drop or overwrite existing rows.
-            migrations = {
-                "time": "TEXT",
-                "pair": "TEXT",
-                "signal": "TEXT",
-                "entry_price": "DOUBLE PRECISION",
-                "candle_color": "TEXT",
-                "signal_time_utc": "TEXT",
-                "analysis_candle_time_utc": "TEXT",
-                "result": "TEXT NOT NULL DEFAULT 'অপেক্ষমাণ'",
-                "signal_created_utc": "TEXT",
-                "signal_created_bd": "TEXT",
-                "outcome_price": "DOUBLE PRECISION",
-                "outcome_candle_time_utc": "TEXT",
-                "outcome_basis": "TEXT",
-                "market_mode": "TEXT NOT NULL DEFAULT 'real'",
-                "strategy": "TEXT NOT NULL DEFAULT 'UNKNOWN'",
-                "regime": "TEXT NOT NULL DEFAULT 'UNKNOWN'",
-                "strategy_mode": "TEXT NOT NULL DEFAULT 'adaptive'",
-                "result_notified": "INTEGER NOT NULL DEFAULT 0",
-                "updated_at": "DOUBLE PRECISION NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())",
+            required = {
+                "id", "time", "pair", "signal", "entry_price", "candle_color",
+                "signal_time_utc", "analysis_candle_time_utc", "result",
+                "signal_created_utc", "signal_created_bd", "outcome_price",
+                "outcome_candle_time_utc", "outcome_basis", "market_mode",
+                "strategy", "regime", "strategy_mode", "result_notified", "updated_at",
             }
-            for column, declaration in migrations.items():
-                if column not in columns:
-                    con.execute(f"ALTER TABLE public.performance ADD COLUMN {column} {declaration}")
-            con.execute(
-                "CREATE INDEX IF NOT EXISTS performance_time_updated_idx "
-                "ON public.performance (time DESC, updated_at DESC)"
-            )
-            con.execute("DELETE FROM public.performance WHERE lower(market_mode) = 'crypto'")
+            missing = required - columns
+            if missing:
+                raise RuntimeError(
+                    "Performance PostgreSQL schema is incomplete; missing columns: "
+                    + ", ".join(sorted(missing))
+                )
+            # Schema changes are applied separately; the app runtime only needs
+            # table read/write access, not database-owner DDL privileges.
             con.commit()
             return con
         except Exception:
