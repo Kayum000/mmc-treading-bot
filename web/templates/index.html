@@ -145,7 +145,7 @@ body{background:var(--mmc-bg)!important;color:var(--mmc-text)!important}
 .settings-action-text{display:grid;gap:4px;min-width:0}
 .settings-action-text b{font-size:14px;color:#eef7ff}
 .settings-action-text small{font-size:11px;font-weight:400;color:#b4cbe0}
-.settings-action-arrow{font-size:26px;text-align:right;color:#72baff}
+.settings-action-arrow{font-size:26px;text-align:right;color:#72baff}.settings-page{max-width:900px;margin:0 auto;padding:4px 0 30px}.content.settings-mode>:not(#settings-page){display:none!important}.content.settings-mode>#settings-page{display:block!important}.settings-page-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin:5px 0 18px;padding:16px;border:1px solid var(--mmc-border);border-radius:12px;background:var(--mmc-panel)}.settings-page-head h1{font-size:25px;margin:6px 0}.settings-page-head p,.settings-page-block>p{color:#94b0ca;font-size:12px;line-height:1.6}.settings-page-block{margin:0 0 16px;padding:16px;border:1px solid var(--mmc-border);border-radius:12px;background:var(--mmc-panel)}.settings-page-block h2{margin:0 0 5px;font-size:16px}.settings-page .settings-action{min-height:74px}.settings-page .settings-action-text b{font-size:15px}.settings-page .setting-row{font-size:13px}.settings-page .setting-toggle,.settings-page #settings-alerts{min-width:64px;padding:8px 12px;font-size:12px}@media(max-width:600px){.settings-page-head{flex-direction:column}.settings-page-block{padding:12px}.settings-page .settings-action{grid-template-columns:42px minmax(0,1fr) 16px;padding:10px;gap:9px}}
 </style>
 <style>
 .performance-modal #modal-extra{display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden}
@@ -173,6 +173,20 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
 <main class="main" id="top">
 <header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="mobile-menu" id="menu">☰</button></div></header>
 <div class="content">
+<section class="settings-page section" id="settings-page" hidden aria-labelledby="settings-page-title">
+  <header class="settings-page-head"><div><div style="font-size:10px;font-weight:900;letter-spacing:1.4px;color:var(--mmc-accent)">DASHBOARD PREFERENCES</div><h1 id="settings-page-title">Settings</h1><p>Notifications and dashboard appearance. Preferences are saved in this browser.</p></div><button type="button" class="mini-btn" id="settings-back-dashboard">← Back to Dashboard</button></header>
+  <section class="settings-page-block"><h2>Quick Settings</h2><p>Notifications এবং dashboard-এর রং এখান থেকে পরিবর্তন করুন।</p>
+    <div class="settings-action-list">
+      <button type="button" class="settings-action" id="settings-notifications"><span class="settings-action-icon" aria-hidden="true">♧</span><span class="settings-action-text"><b>Notifications</b><small>Notifications and alerts</small></span><span class="settings-action-arrow" aria-hidden="true">›</span></button>
+      <button type="button" class="settings-action" id="settings-theme"><span class="settings-action-icon" aria-hidden="true">☼</span><span class="settings-action-text"><b>Theme Color</b><small>Choose dashboard colors · 10 themes</small></span><span class="settings-action-arrow" aria-hidden="true">›</span></button>
+    </div>
+  </section>
+  <section class="settings-page-block"><h2>Dashboard Preferences</h2><p>এই পছন্দগুলো শুধু এই browser-এ সংরক্ষিত হবে।</p>
+    <div class="setting-row"><span>Compact sidebar</span><button type="button" class="mini-btn setting-toggle" id="settings-compact-sidebar" aria-pressed="false">Off</button></div>
+    <div class="setting-row"><span>Auto refresh news <small>(every 5 minutes)</small></span><button type="button" class="mini-btn setting-toggle" id="settings-auto-refresh-news" aria-pressed="false">Off</button></div>
+    <div class="setting-row"><span>Signal Alerts</span><button type="button" class="mini-btn" id="settings-alerts">Enable</button></div>
+  </section>
+</section>
 <section class="hero" id="signal-section">
   <div class="market-wrap"><label>Select Market</label><div class="market-select"><select id="pair" aria-label="Select market"><option value="">Select market</option>{% for p in real_pairs %}<option value="{{p}}" data-mode="real" {% if mode=='real' and pair==p %}selected{% endif %}>{{p}}</option>{% endfor %}{% for p in otc_pairs %}<option value="{{p}}" data-mode="quotex_otc" {% if mode=='quotex_otc' and pair==p %}selected{% endif %}>{{p}}</option>{% endfor %}</select></div><div class="mode-row"><button type="button" class="mode-btn {% if mode=='real' or not mode %}active{% endif %}" data-mode="real">REAL</button><button type="button" class="mode-btn {% if mode=='quotex_otc' %}active{% endif %}" data-mode="quotex_otc">QUOTEX OTC</button></div></div>
   <button type="button" class="primary" id="get-signal">⚡ Get Signal</button><button type="button" class="secondary" id="auto-signal">◉ Auto Signal</button>
@@ -246,6 +260,8 @@ function handleSidebarNav(e){
   const action=btn.dataset.action;
   const target=btn.dataset.scroll;
   const closeMobile=()=>{if(window.innerWidth<=760)$('sidebar').classList.remove('open')};
+  if(action==='settings'){closeMobile();openSettings();return;}
+  const settingsPage=$('settings-page');if(settingsPage){settingsPage.hidden=true;document.querySelector('.content')?.classList.remove('settings-mode')}
   if(target==='top'){
     $('top')?.scrollIntoView({behavior:'smooth',block:'start'});
     closeMobile();
@@ -520,6 +536,26 @@ function openThemeSettings(){
   });
 }
 function openSettings(){
+  const content=document.querySelector('.content'), page=$('settings-page');
+  if(content&&page){
+    content.classList.add('settings-mode');page.hidden=false;
+    document.querySelectorAll('.nav button').forEach(btn=>btn.classList.toggle('active',btn.dataset.action==='settings'));
+    const compact=getDashboardPreference(COMPACT_SIDEBAR_KEY), autoNews=getDashboardPreference(AUTO_REFRESH_NEWS_KEY);
+    const cb=$('settings-compact-sidebar'), nb=$('settings-auto-refresh-news');
+    cb.textContent=compact?'On':'Off';cb.setAttribute('aria-pressed',String(compact));
+    nb.textContent=autoNews?'On':'Off';nb.setAttribute('aria-pressed',String(autoNews));
+    $('settings-back-dashboard').onclick=()=>{
+      content.classList.remove('settings-mode');page.hidden=true;
+      document.querySelectorAll('.nav button').forEach(btn=>btn.classList.toggle('active',btn.dataset.scroll==='top'));
+    };
+    cb.onclick=()=>{const v=!getDashboardPreference(COMPACT_SIDEBAR_KEY);saveDashboardPreference(COMPACT_SIDEBAR_KEY,v);applyCompactSidebar();cb.textContent=v?'On':'Off';cb.setAttribute('aria-pressed',String(v))};
+    nb.onclick=()=>{const v=!getDashboardPreference(AUTO_REFRESH_NEWS_KEY);saveDashboardPreference(AUTO_REFRESH_NEWS_KEY,v);if(v){lastNewsLoadAt=0;loadNews()}nb.textContent=v?'On':'Off';nb.setAttribute('aria-pressed',String(v))};
+    $('settings-notifications').onclick=()=>modalOpen('Notifications','No new critical notifications. Signal alerts can be enabled with the 🔔 Enable Alerts button.');
+    $('settings-theme').onclick=openThemeSettings;
+    $('settings-alerts').onclick=()=>$('enable-alerts')?.click();
+    window.scrollTo({top:0,behavior:'auto'});
+    return;
+  }
   const compact=getDashboardPreference(COMPACT_SIDEBAR_KEY);
   const autoNews=getDashboardPreference(AUTO_REFRESH_NEWS_KEY);
   const actions='<div class="settings-action-list">'
@@ -545,7 +581,7 @@ function openSettings(){
   $('settings-theme').onclick=openThemeSettings;
   $('settings-alerts').onclick=()=>{$('enable-alerts')?.click();closeModal()};
 }
-window.addEventListener('load',()=>{applyCompactSidebar();applySavedTheme();activeMode(state.mode||'real');setMode(state.mode||'real');if(state.pair)pair.value=state.pair;updateStatus();loadNews();loadPerformance();bindResult()});
+window.addEventListener('load',()=>{applyCompactSidebar();applySavedTheme();activeMode(state.mode||'real');setMode(state.mode||'real');if(state.pair)pair.value=state.pair;updateStatus();loadNews();loadPerformance();bindResult();if(SETTINGS_SAFE_VIEW)openSettings()});
 })();
 </script>
 </body>
