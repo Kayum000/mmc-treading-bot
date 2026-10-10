@@ -201,8 +201,15 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
 'use strict';
 const $=id=>document.getElementById(id), pair=$('pair'), modal=$('modal'), toastEl=$('toast');
 const AUTO_SIGNAL_KEY='mmc_auto_signal_enabled_v1';
-let savedAutoSignal=false;try{savedAutoSignal=localStorage.getItem(AUTO_SIGNAL_KEY)==='1'}catch(_){}
+// A safe settings-check tab must not start a second AUTO SIGNAL loop.
+const SETTINGS_SAFE_VIEW=new URLSearchParams(window.location.search).get('settingsfix')==='1';
+let savedAutoSignal=false;try{savedAutoSignal=!SETTINGS_SAFE_VIEW&&localStorage.getItem(AUTO_SIGNAL_KEY)==='1'}catch(_){}
 const state={mode:{{ mode|tojson }},pair:{{ pair|tojson }},auto:savedAutoSignal,autoTimer:null,news:[]};
+if(SETTINGS_SAFE_VIEW){
+  $('auto-toggle').disabled=true;
+  $('auto-signal').disabled=true;
+  $('auto-status').textContent='Preview tab: AUTO SIGNAL paused here; existing tab unchanged';
+}
 const COMPACT_SIDEBAR_KEY='mmc_dashboard_compact_sidebar_v1';
 const AUTO_REFRESH_NEWS_KEY='mmc_dashboard_auto_refresh_news_v1';
 function getDashboardPreference(key){try{return localStorage.getItem(key)==='1'}catch(_){return false}}
