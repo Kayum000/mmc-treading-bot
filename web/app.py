@@ -497,6 +497,16 @@ def performance():
                 d["decided"] = settled
                 d["loss_rate"] = round((int(d["losses"] or 0) / settled) * 100, 2) if settled else 0.0
                 strategy_stats.append(d)
+            summary = _performance_row(con.execute("""
+                SELECT COUNT(*) AS total,
+                       SUM(CASE WHEN result='লাভ' THEN 1 ELSE 0 END) AS wins,
+                       SUM(CASE WHEN result='লস' THEN 1 ELSE 0 END) AS losses,
+                       SUM(CASE WHEN result='DOJI' THEN 1 ELSE 0 END) AS doji,
+                       SUM(CASE WHEN result='অপেক্ষমাণ' THEN 1 ELSE 0 END) AS pending
+                FROM performance
+            """).fetchone())
+            summary = {key: int(summary.get(key) or 0) for key in ("total", "wins", "losses", "doji", "pending")}
+            summary["decided"] = summary["wins"] + summary["losses"] + summary["doji"]
             return jsonify({"ok": True, "rows": [_performance_row(r) for r in rows], "strategy_stats": strategy_stats})
         if request.method == "DELETE":
             con.execute("DELETE FROM performance")
