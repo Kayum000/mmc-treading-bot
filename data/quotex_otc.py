@@ -197,6 +197,7 @@ def local_active_asset() -> str | None:
 
 def local_stream_status(asset: str | None = None) -> dict:
     now = time.monotonic()
+    now_utc = pd.Timestamp.now(tz="UTC")
     with _LOCAL_LOCK:
         names = [asset] if asset else list(_LOCAL_CACHE)
         assets = []
@@ -206,11 +207,23 @@ def local_stream_status(asset: str | None = None) -> dict:
                 continue
             age = max(0.0, now - cached[0])
             latest_closed = None
+            latest_closed_age = None
+            candle_fresh = False
             if not cached[1].empty:
-                latest_closed = cached[1]["timestamp"].iloc[-1].isoformat()
+                latest_ts = pd.Timestamp(cached[1]["timestamp"].iloc[-1])
+                latest_closed = latest_ts.isoformat()
+                # The stored timestamp is the candle's opening minute. Judge
+                # freshness against its actual close boundary, not against the
+                # most recent ingest time (which may just resend old history).
+                latest_closed_age = (now_utc - (latest_ts + pd.Timedelta(seconds=PERIOD))).total_seconds()
+                candle_fresh = -10.0 <= latest_closed_age <= 120.0
+            ingest_fresh = age <= _LOCAL_DATA_TTL
             assets.append({
                 "asset": name,
-                "fresh": age <= _LOCAL_DATA_TTL,
+                "fresh": ingest_fresh and candle_fresh,
+                "ingest_fresh": ingest_fresh,
+                "candle_fresh": candle_fresh,
+                "latest_closed_age_seconds": round(latest_closed_age, 1) if latest_closed_age is not None else None,
                 "age_seconds": round(age, 1),
                 "candles": len(cached[1]),
                 "latest_closed": latest_closed,
@@ -227,12 +240,19 @@ def _local_candles(asset: str, count: int) -> pd.DataFrame | None:
         df = cached[1].copy(deep=True)
     if df.empty:
         return None
-    # Enforce the full candle-age boundary again at read time. This protects
-    # against stale cache contents or a collector/source that sends a running
-    # candle after ingest.
-    closed_before = pd.Timestamp.now(tz="UTC").floor("min")
+    # Enforce both the closed-candle boundary and source timestamp freshness.
+    # A recent HTTP ingest/cache write is not proof that its candle data is
+    # recent: the collector can legitimately resend the same old history.
+    now_utc = pd.Timestamp.now(tz="UTC")
+    closed_before = now_utc.floor("min")
     df = df[df["timestamp"] + pd.Timedelta(seconds=PERIOD) <= closed_before].reset_index(drop=True)
-    return df.tail(count).reset_index(drop=True) if len(df) >= 8 else None
+    if len(df) < 8:
+        return None
+    latest_ts = pd.Timestamp(df["timestamp"].iloc[-1])
+    latest_closed_age = (now_utc - (latest_ts + pd.Timedelta(seconds=PERIOD))).total_seconds()
+    if latest_closed_age < -10.0 or latest_closed_age > 120.0:
+        return None
+    return df.tail(count).reset_index(drop=True)
 
 
 def fetch_quotex_candles(asset: str, interval: str = "1m", count: int = 240) -> pd.DataFrame:
