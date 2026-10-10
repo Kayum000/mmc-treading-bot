@@ -36,7 +36,108 @@ QUOTEX_OTC_PAIRS = list(OTC_DISPLAY_PAIRS)
 
 PERFORMANCE_DB = Path(os.getenv("MMC_PERFORMANCE_DB") or (Path(__file__).resolve().parent.parent / "data" / "performance.sqlite3"))
 
+
+class _PostgresPerformanceConnection:
+    """Small DB-API adapter so the existing performance code works on SQLite or PostgreSQL."""
+    backend = "postgres"
+
+    def __init__(self, connection):
+        self._connection = connection
+
+    def execute(self, sql, params=()):
+        from psycopg2.extras import DictCursor
+
+        cursor = self._connection.cursor(cursor_factory=DictCursor)
+        # The app's SQL uses SQLite-style qmark placeholders. Translate only
+        # the placeholders; all user values still go through bound parameters.
+        cursor.execute(sql.replace("?", "%s"), tuple(params or ()))
+        return cursor
+
+    def commit(self):
+        self._connection.commit()
+
+    def rollback(self):
+        self._connection.rollback()
+
+    def close(self):
+        self._connection.close()
+
+
 def _performance_db():
+    database_url = (os.getenv("MMC_PERFORMANCE_DATABASE_URL") or os.getenv("DATABASE_URL") or "").strip()
+    if database_url:
+        import psycopg2
+
+        raw = psycopg2.connect(database_url, connect_timeout=10)
+        con = _PostgresPerformanceConnection(raw)
+        try:
+            con.execute("""CREATE TABLE IF NOT EXISTS public.performance (
+                id TEXT PRIMARY KEY,
+                time TEXT,
+                pair TEXT,
+                signal TEXT,
+                entry_price DOUBLE PRECISION,
+                candle_color TEXT,
+                signal_time_utc TEXT,
+                analysis_candle_time_utc TEXT,
+                result TEXT NOT NULL,
+                signal_created_utc TEXT,
+                signal_created_bd TEXT,
+                outcome_price DOUBLE PRECISION,
+                outcome_candle_time_utc TEXT,
+                outcome_basis TEXT,
+                market_mode TEXT NOT NULL DEFAULT 'real',
+                strategy TEXT NOT NULL DEFAULT 'UNKNOWN',
+                regime TEXT NOT NULL DEFAULT 'UNKNOWN',
+                strategy_mode TEXT NOT NULL DEFAULT 'adaptive',
+                result_notified INTEGER NOT NULL DEFAULT 0,
+                updated_at DOUBLE PRECISION NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())
+            )""")
+            columns = {
+                row[0] for row in con.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema='public' AND table_name='performance'"
+                ).fetchall()
+            }
+            # Additive, idempotent migrations for any database created by an
+            # earlier dashboard version. Do not drop or overwrite existing rows.
+            migrations = {
+                "time": "TEXT",
+                "pair": "TEXT",
+                "signal": "TEXT",
+                "entry_price": "DOUBLE PRECISION",
+                "candle_color": "TEXT",
+                "signal_time_utc": "TEXT",
+                "analysis_candle_time_utc": "TEXT",
+                "result": "TEXT NOT NULL DEFAULT 'অপেক্ষমাণ'",
+                "signal_created_utc": "TEXT",
+                "signal_created_bd": "TEXT",
+                "outcome_price": "DOUBLE PRECISION",
+                "outcome_candle_time_utc": "TEXT",
+                "outcome_basis": "TEXT",
+                "market_mode": "TEXT NOT NULL DEFAULT 'real'",
+                "strategy": "TEXT NOT NULL DEFAULT 'UNKNOWN'",
+                "regime": "TEXT NOT NULL DEFAULT 'UNKNOWN'",
+                "strategy_mode": "TEXT NOT NULL DEFAULT 'adaptive'",
+                "result_notified": "INTEGER NOT NULL DEFAULT 0",
+                "updated_at": "DOUBLE PRECISION NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())",
+            }
+            for column, declaration in migrations.items():
+                if column not in columns:
+                    con.execute(f"ALTER TABLE public.performance ADD COLUMN {column} {declaration}")
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS performance_time_updated_idx "
+                "ON public.performance (time DESC, updated_at DESC)"
+            )
+            con.execute("DELETE FROM public.performance WHERE lower(market_mode) = 'crypto'")
+            con.commit()
+            return con
+        except Exception:
+            con.rollback()
+            con.close()
+            raise
+
+    # Local development remains compatible with the original SQLite file.
     PERFORMANCE_DB.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(PERFORMANCE_DB)
     con.row_factory = sqlite3.Row
@@ -64,13 +165,18 @@ def _performance_db():
         con.execute("ALTER TABLE performance ADD COLUMN regime TEXT NOT NULL DEFAULT 'UNKNOWN'")
     if "strategy_mode" not in columns:
         con.execute("ALTER TABLE performance ADD COLUMN strategy_mode TEXT NOT NULL DEFAULT 'adaptive'")
-    # Purge persisted crypto signal history as part of full crypto removal.
     con.execute("DELETE FROM performance WHERE lower(market_mode) = 'crypto'")
+    con.commit()
     return con
 
+
 def _performance_row(row):
-    d = dict(row)
-    return d
+    if row is None:
+        return {}
+    if hasattr(row, "keys"):
+        return {key: row[key] for key in row.keys()}
+    return dict(row)
+
 
 def _telegram_performance_stats(signal_id: str | None = None) -> dict:
     """Read stable signal numbering and cumulative WIN/LOSS totals from the performance DB."""
@@ -81,7 +187,14 @@ def _telegram_performance_stats(signal_id: str | None = None) -> dict:
         losses = int(con.execute("SELECT COUNT(*) FROM performance WHERE result='লস'").fetchone()[0] or 0)
         number = total
         if signal_id:
-            row = con.execute("SELECT COUNT(*) FROM performance WHERE rowid <= (SELECT rowid FROM performance WHERE id=?)", (signal_id,)).fetchone()
+            if getattr(con, "backend", "sqlite") == "postgres":
+                row = con.execute(
+                    """SELECT COUNT(*) FROM performance p
+                       WHERE (p.time, p.id) <= (SELECT s.time, s.id FROM performance s WHERE s.id=?)""",
+                    (signal_id,),
+                ).fetchone()
+            else:
+                row = con.execute("SELECT COUNT(*) FROM performance WHERE rowid <= (SELECT rowid FROM performance WHERE id=?)", (signal_id,)).fetchone()
             number = int(row[0] or total) if row else total
         return {"signal_number": number, "wins": wins, "losses": losses, "total_signals": total}
     finally:
@@ -516,7 +629,7 @@ def _outcome_candles(mode: str, pair: str) -> list[dict]:
 def _score_pending_performance_once() -> None:
     con = _performance_db()
     try:
-        rows = [dict(r) for r in con.execute(
+        rows = [_performance_row(r) for r in con.execute(
             "SELECT * FROM performance WHERE result='অপেক্ষমাণ' OR (result IN ('লাভ','লস','DOJI') AND result_notified=0) ORDER BY updated_at DESC LIMIT 200"
         ).fetchall()]
     finally:
