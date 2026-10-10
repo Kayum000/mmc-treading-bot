@@ -129,10 +129,10 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
   </nav>
 </aside>
 <main class="main" id="top">
-<header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="mobile-menu" id="menu">☰</button></div><div class="top-actions"><button class="desktop-only" id="notify-btn" title="Notifications">♧</button><button id="theme-btn" title="Theme Color" aria-label="Theme Color">☼</button><div class="avatar"><span class="initials">MMC</span></div></div></header>
+<header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="mobile-menu" id="menu">☰</button></div></header>
 <div class="content">
 <section class="hero" id="signal-section">
-  <div class="market-wrap"><label>Select Market</label><div class="market-select"><select id="pair" aria-label="Select market"><option value="">Select market</option>{% for p in real_pairs %}<option value="{{p}}" data-mode="real" {% if mode=='real' and pair==p %}selected{% endif %}>{{p}}</option>{% endfor %}{% for p in otc_pairs %}<option value="{{p}}" data-mode="quotex_otc" {% if mode=='quotex_otc' and pair==p %}selected{% endif %}>{{p}}</option>{% endfor %}</select></div><div class="mode-row"><button type="button" class="mode-btn {% if mode=='real' or not mode %}active{% endif %}" data-mode="real">REAL</button><button type="button" class="mode-btn {% if mode=='quotex_otc' %}active{% endif %}" data-mode="quotex_otc">QUOTEX OTC</button></div><div class="mode-row" aria-label="Strategy"><span class="mode-btn active" aria-current="true">ADAPTIVE</span></div></div>
+  <div class="market-wrap"><label>Select Market</label><div class="market-select"><select id="pair" aria-label="Select market"><option value="">Select market</option>{% for p in real_pairs %}<option value="{{p}}" data-mode="real" {% if mode=='real' and pair==p %}selected{% endif %}>{{p}}</option>{% endfor %}{% for p in otc_pairs %}<option value="{{p}}" data-mode="quotex_otc" {% if mode=='quotex_otc' and pair==p %}selected{% endif %}>{{p}}</option>{% endfor %}</select></div><div class="mode-row"><button type="button" class="mode-btn {% if mode=='real' or not mode %}active{% endif %}" data-mode="real">REAL</button><button type="button" class="mode-btn {% if mode=='quotex_otc' %}active{% endif %}" data-mode="quotex_otc">QUOTEX OTC</button></div></div>
   <button type="button" class="primary" id="get-signal">⚡ Get Signal</button><button type="button" class="secondary" id="auto-signal">◉ Auto Signal</button>
 </section>
 <div class="auto-box"><input type="checkbox" id="auto-toggle"><label for="auto-toggle">AUTO SIGNAL</label><span id="auto-status" class="auto-status">AUTO SIGNAL বন্ধ</span><button type="button" class="mini-btn" id="enable-alerts">🔔 Enable Alerts</button></div>
@@ -153,7 +153,7 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
 </section>
 <section class="section dashboard-grid">
 <article class="panel market-status" id="market-status"><div class="panel-head"><span class="round-icon">♧</span><div><h2 class="panel-title">Market Status</h2><div class="panel-sub">Live Market Overview</div></div></div><div class="status-list"><div class="status-row"><span class="status-label" id="status-pair">Select a market</span><span></span></div><div class="status-row"><span class="status-label">Current Session</span><b class="status-value" id="status-session">—</b></div><div class="status-row"><span class="status-label">Market Activity</span><b class="status-value" id="status-activity">—</b></div><div class="status-row"><span class="status-label">Best Trading Window</span><b class="status-value" id="status-window">—</b></div><div class="status-row"><span class="status-label">News Risk</span><b class="status-value" id="status-news">—</b></div><div class="status-row"><span class="status-label">Next News</span><b class="status-value" id="status-news-time">—</b></div></div></article>
-<article class="panel latest" id="latest-signal"><div class="panel-head"><span class="round-icon">♟</span><div><h2 class="panel-title">Latest Signal</h2><div class="panel-sub">AI Generated Trading Signal</div></div></div></article>
+<article class="panel latest" id="latest-signal"><div class="panel-head"><span class="round-icon">♟</span><div><h2 class="panel-title">Latest Signal</h2></div></div></article>
 <article class="panel news" id="news"><div class="panel-head"><span class="round-icon">▣</span><div><h2 class="panel-title">News & Events</h2><div class="panel-sub">Latest Market News & Economic Events</div></div><button type="button" class="refresh" id="news-refresh">Refresh</button></div><div id="news-items"><div class="empty">Select a market to load news & events.</div></div><div class="news-footer"><span id="news-source">—</span><button type="button" class="mini-btn" id="news-more">View All News →</button></div></article>
 </section>
 <section class="chart-panel" id="chart"><div class="chart-head"><span class="round-icon">▥</span><div><b>Live Chart</b><small>Real-time price chart with indicators</small></div><div class="chart-controls"><span class="chart-live" id="chart-live">LIVE —</span><select id="chart-interval" aria-label="Chart timeframe"><option value="1m">1m</option><option value="5m">5m</option><option value="15m">15m</option><option value="1h">1h</option><option value="4h">4h</option><option value="1D">1D</option></select><button type="button" id="chart-zoom-out">−</button><button type="button" id="chart-zoom-in">+</button><button type="button" id="chart-full-view">FULL</button></div></div><div class="chart-canvas-wrap" id="live-market-chart"><div class="chart-canvas-wrap-inner"></div></div></section>
@@ -402,7 +402,7 @@ ensurePerformanceCard();
     else{$('auto-status').textContent='AUTO SIGNAL চালু • মার্কেট সিঙ্ক হয়নি'}
   }).catch(()=>{if(state.auto)$('auto-status').textContent='AUTO SIGNAL চালু • মার্কেট সিঙ্ক হয়নি'});
 })();
-$('notify-btn').onclick=()=>modalOpen('Notifications','No new critical notifications. Signal alerts can be enabled with the 🔔 Enable Alerts button.');$('theme-btn').onclick=()=>toast('MMC dark dashboard is optimized for trading visibility');
+
 function updateChartSelection(){window.dispatchEvent(new Event('mmc-market-changed'))}
 const MMC_THEMES=[
   {id:'ocean',name:'Ocean Blue',sub:'বর্তমান',bg:'#06172e',side:'#061426',panel:'#071f3a',panel2:'#061a31',border:'#12365d',accent:'#1684ee',accent2:'#0759ba',soft:'#0a2440'},
@@ -438,11 +438,11 @@ function openThemeSettings(){
   });
 }
 function openSettings(){
-  modalOpen('Settings','Dashboard settings', '<div class="setting-row"><span>Theme Color</span><button type="button" class="mini-btn" id="settings-theme">10 Themes</button></div><div class="setting-row"><span>Signal Alerts</span><button type="button" class="mini-btn" id="settings-alerts">Enable</button></div>');
+  modalOpen('Settings','Dashboard settings', '<div class="setting-row"><span>♧ Notifications</span><button type="button" class="mini-btn" id="settings-notifications">Open</button></div><div class="setting-row"><span>☼ Theme Color</span><button type="button" class="mini-btn" id="settings-theme">10 Themes</button></div><div class="setting-row"><span>Signal Alerts</span><button type="button" class="mini-btn" id="settings-alerts">Enable</button></div>');
+  $('settings-notifications').onclick=()=>modalOpen('Notifications','No new critical notifications. Signal alerts can be enabled with the 🔔 Enable Alerts button.');
   $('settings-theme').onclick=openThemeSettings;
   $('settings-alerts').onclick=()=>{$('enable-alerts')?.click();closeModal()};
 }
-$('theme-btn').onclick=openThemeSettings;
 window.addEventListener('load',()=>{applySavedTheme();activeMode(state.mode||'real');setMode(state.mode||'real');if(state.pair)pair.value=state.pair;updateStatus();loadNews();loadPerformance();bindResult()});
 })();
 </script>
