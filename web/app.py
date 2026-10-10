@@ -338,7 +338,7 @@ def logout():
 
 @app.route("/favicon.ico")
 def favicon():
-    return redirect(url_for("static", filename="sk_bot_logo.svg"))
+    return "", 204
 
 @app.route("/privacy")
 def privacy():
