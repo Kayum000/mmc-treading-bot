@@ -33,6 +33,9 @@ PERIOD = 60
 CDP_URL = os.getenv("CHROME_CDP_URL", "http://127.0.0.1:9222").rstrip("/")
 BOT_URL = os.getenv("MMC_BOT_URL", "https://mmc-treading-bot.onrender.com").rstrip("/")
 INGEST_SECRET = os.getenv("QUOTEX_INGEST_SECRET", "").strip()
+# Optional mirror into the user's local My PC AI Agent. Example: http://127.0.0.1:8765
+PC_AGENT_URL = os.getenv("PC_AGENT_URL", "").strip().rstrip("/")
+PC_AGENT_TOKEN = os.getenv("PC_AGENT_TOKEN", "").strip()
 VERBOSE = os.getenv("QUOTEX_DEBUG_VERBOSE", "0").strip() == "1"
 
 
@@ -264,7 +267,26 @@ class Collector:
             finally:
                 self._candle_queue.task_done()
 
+    def _mirror_pc_agent(self, payload: dict[str, Any]) -> None:
+        """Best-effort local mirror; never block or break the MMC cloud upload."""
+        if not PC_AGENT_URL or not PC_AGENT_TOKEN:
+            return
+        try:
+            response = self.session.post(
+                f"{PC_AGENT_URL}/api/collector/quotex",
+                json=payload,
+                headers={"X-PC-Agent-Token": PC_AGENT_TOKEN},
+                timeout=2,
+                allow_redirects=False,
+            )
+            if not 200 <= response.status_code < 300:
+                log(f"local PC Agent mirror returned HTTP {response.status_code}; MMC upload continues")
+        except Exception as exc:
+            log(f"local PC Agent mirror unavailable; MMC upload continues: {exc}")
+
     def _post(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
+        # Mirror first so the local AI can keep receiving data even if Render is down.
+        self._mirror_pc_agent(payload)
         if not INGEST_SECRET:
             raise RuntimeError("QUOTEX_INGEST_SECRET is missing. Set the same secret on Render and locally.")
         response = self.session.post(

@@ -18,6 +18,23 @@ This setup lets MMC read the **same live WebSocket traffic that the user's own Q
 
 Chrome requires a non-default user-data directory when remote debugging is enabled on current versions, so the helper deliberately uses `%LocalAppData%\MMC-Quotex-Chrome` instead of your normal Chrome profile.
 
+## Optional: mirror data to My PC AI Agent
+
+The collector can also send the same candle/tick snapshots to your local PC AI Agent
+without replacing the existing Render upload. Start the PC Agent server first, then
+set these environment variables in the same terminal before starting the collector:
+
+```powershell
+$env:PC_AGENT_URL = "http://127.0.0.1:8765"
+$env:PC_AGENT_TOKEN = "PASTE_THE_PC_AGENT_TOKEN_PRINTED_BY_MY_PC_AI_AGENT"
+python tools/quotex_local_collector.py
+```
+
+Use the existing private PC Agent token; never put it in GitHub. Leave both variables
+unset to keep the collector's previous behavior. The local mirror is best-effort:
+if the PC Agent is offline, MMC's Render upload continues normally. Data is sent to
+`POST /api/collector/quotex` on the local PC Agent.
+
 ## What is sent to Render
 
 Only supported OTC candle/price data is forwarded:
