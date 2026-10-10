@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request, redirect, url_for, session
 
-from signals.get_signal import get_signal, get_future_signals
+from signals.get_signal import get_signal
 from data.biquote_forex import fetch_api_usage, get_credit_usage
 from data.news_direction import get_news_direction_for_pair
 from data.news_events import get_weekly_news_events_for_pair
@@ -283,7 +283,7 @@ def require_dashboard():
     if request.endpoint in {"login", "logout", "favicon", "privacy", "static"}:
         return None
     if not session.get("authenticated"):
-        if request.path.startswith("/api/") or request.path.startswith("/quotex/") or request.path in {"/select-market", "/auto-signal", "/news-alert", "/news-direction", "/future-signals"}:
+        if request.path.startswith("/api/") or request.path.startswith("/quotex/") or request.path in {"/select-market", "/auto-signal", "/news-alert", "/news-direction"}:
             return jsonify({"ok": False, "error": "লগইন প্রয়োজন।"}), 401
         return redirect(url_for("login"))
     return None
@@ -379,20 +379,6 @@ def telegram_test():
     try:
         send_test_message()
         return jsonify({"ok": True, "message": "Telegram test message sent."})
-    except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 502
-
-@app.route("/future-signals", methods=["GET"])
-def future_signals():
-    settings = _settings()
-    mode = session.get("selected_mode", settings.get("market_mode", "")).strip().lower()
-    pair = session.get("selected_pair", settings.get("pair", "") or "").strip().upper()
-    strategy_mode = settings.get("strategy_mode", "normal")
-    if pair not in _valid_pairs(mode):
-        return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
-    try:
-        result = get_future_signals(pair, mode)
-        return jsonify(result)
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
 
