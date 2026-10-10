@@ -607,6 +607,11 @@ def _score_pending_performance_once() -> None:
         entry_epoch = _utc_epoch(row.get("signal_time_utc"))
         if signal not in {"BUY", "SELL"} or not pair or entry_epoch is None:
             continue
+        # The exact entry-minute candle should be scored soon after it closes.
+        # Do not repeatedly query for stale legacy pending rows that are older
+        # than the available candle window; leave them pending rather than guess.
+        if row.get("result") == "অপেক্ষমাণ" and now - entry_epoch > 6 * 3600:
+            continue
         key = (mode, pair)
         # Do not request data until the entry candle has completely closed.
         if row.get("result") == "অপেক্ষমাণ" and now < entry_epoch + 60:
