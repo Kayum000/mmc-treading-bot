@@ -19,28 +19,44 @@ import base64
 import json
 import os
 import queue
+import re
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
 import websockets
 
-from data.otc_markets import OTC_PAIRS
+from data.otc_markets import OTC_PAIRS, normalize_detected_market
+
+# Quotex Real-Market symbols use the compact instrument IDs (EURUSD, GBPUSD,
+# ...), while the dashboard displays them as EUR/USD, GBP/USD, etc. Keep this
+# list local to the PC collector so the existing bot/server code stays untouched.
+REAL_MARKET_PAIRS = (
+    "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD",
+    "NZDUSD", "EURGBP", "EURJPY", "GBPJPY", "EURCHF", "GBPCHF",
+    "AUDJPY", "CADJPY", "CHFJPY", "NZDJPY", "EURAUD", "GBPAUD",
+    "AUDCAD", "NZDCAD",
+)
 
 PERIOD = 60
 CDP_URL = os.getenv("CHROME_CDP_URL", "http://127.0.0.1:9222").rstrip("/")
 BOT_URL = os.getenv("MMC_BOT_URL", "https://mmc-treading-bot.onrender.com").rstrip("/")
 INGEST_SECRET = os.getenv("QUOTEX_INGEST_SECRET", "").strip()
-# Optional mirror into the user's local My PC AI Agent. Example: http://127.0.0.1:8765
-PC_AGENT_URL = os.getenv("PC_AGENT_URL", "").strip().rstrip("/")
-PC_AGENT_TOKEN = os.getenv("PC_AGENT_TOKEN", "").strip()
 VERBOSE = os.getenv("QUOTEX_DEBUG_VERBOSE", "0").strip() == "1"
+STATUS_PATH = os.path.join(os.path.dirname(__file__), "collector_status.json")
 
 
 def log(message: str) -> None:
-    print(f"[MMC Quotex Laptop Collector] {message}", flush=True)
+    line = f"[MMC Quotex Laptop Collector] {message}"
+    print(line, flush=True)
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "collector_runtime.log"), "a", encoding="utf-8") as fh:
+            fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {line}\n")
+    except OSError:
+        pass
 
 
 def _target() -> dict[str, Any]:
@@ -164,20 +180,43 @@ def _normalise_candle(payload: Any, fallback_asset: str | None = None) -> list[d
     return result
 
 
-def _normalise_history(payload: Any) -> list[dict[str, Any]]:
+def _normalise_history(payload: Any, fallback_asset: str | None = None) -> list[dict[str, Any]]:
+    """Normalize either real OHLC candle rows or timestamp/price history points.
+
+    Quotex history/list/v2 can include a `candles` array of OHLC tuples and a
+    separate `history` price series. Prefer the actual candles when present;
+    aggregating the second field of OHLC tuples as if it were a quote loses the
+    original high/low/close and can shrink history to only a few bars.
+    """
     if not isinstance(payload, dict):
         return []
-    asset = payload.get("asset") or payload.get("symbol")
-    history = payload.get("history") or payload.get("data") or payload.get("candles") or []
+
+    rows = _normalise_candle(payload, fallback_asset=fallback_asset)
+    if rows:
+        boundary = int(time.time() // PERIOD) * PERIOD
+        return [
+            row for row in rows
+            if int(float(row["timestamp"]) // PERIOD) * PERIOD < boundary
+        ]
+
+    asset = payload.get("asset") or payload.get("symbol") or fallback_asset
+    history = payload.get("history")
+    if history is None:
+        history = payload.get("data") or payload.get("candles") or []
+    if isinstance(history, dict):
+        history = list(history.values())
     if not asset or not isinstance(history, list):
         return []
+
     buckets: dict[int, dict[str, Any]] = {}
     for item in history:
         if not isinstance(item, (list, tuple)) or len(item) < 2:
             continue
         try:
             ts, price = float(item[0]), float(item[1])
-        except (TypeError, ValueError):
+            if ts > 10_000_000_000:
+                ts /= 1000.0
+        except (TypeError, ValueError, OverflowError):
             continue
         bucket = int(ts // PERIOD) * PERIOD
         state = buckets.get(bucket)
@@ -213,13 +252,13 @@ def _price_from_payload(payload: Any) -> tuple[str | None, float | None, float |
 
 
 class Collector:
-    def __init__(self, history_asset_by_index: dict[int, str] | None = None) -> None:
+    def __init__(self, selected_asset: str, history_asset_by_index: dict[int, str] | None = None) -> None:
+        self.selected_asset = selected_asset
+        # Quotex history responses may omit the asset name but echo the request
+        # index. Keep the correlation map so delayed responses cannot be
+        # assigned to a different market after a market switch.
+        self.history_asset_by_index = dict(history_asset_by_index or {})
         self.partial: dict[str, dict[str, Any]] = {}
-        # Quotex can echo a base symbol (e.g. EURUSD) in a history response
-        # even when the request was explicitly for EURUSD_otc. Correlate the
-        # unique history request index back to the requested OTC asset so OTC
-        # candles are never misclassified as real-market candles.
-        self.history_asset_by_index = history_asset_by_index or {}
         # Keep a rolling closed-candle history locally so every ingest can
         # refresh Render with enough historical bars.
         self.closed_history: dict[str, dict[int, dict[str, Any]]] = {}
@@ -230,6 +269,12 @@ class Collector:
         self.last_quote_send: dict[str, float] = {}
         self.last_data_at = time.monotonic()
         self.last_market_data_at = time.monotonic()
+        self.last_status_write = 0.0
+        self.last_status_asset = ""
+        self.last_status_type = ""
+        self.last_real_data_at = 0.0
+        self.last_otc_data_at = 0.0
+        self._write_status("running", "starting", "")
         # Network uploads never run on the CDP/WebSocket event loop. A bounded
         # queue keeps short Render latency spikes from blocking market capture
         # while also preventing an outage from growing memory without limit.
@@ -244,6 +289,71 @@ class Collector:
         self._upload_thread.start()
         log("non-blocking upload worker started (bounded candle=50, quote=250)")
 
+    def _write_status(self, state: str, data_type: str, asset: str) -> None:
+        now = time.time()
+        if state == "running" and data_type != "starting" and now - self.last_status_write < 5:
+            return
+        payload = {
+            "process_alive": True,
+            "state": state,
+            "last_data_at": now if data_type != "starting" else None,
+            "last_data_type": data_type,
+            "last_asset": asset,
+            "last_real_data_at": self.last_real_data_at or None,
+            "last_otc_data_at": self.last_otc_data_at or None,
+            "updated_at": now,
+        }
+        tmp = f"{STATUS_PATH}.{os.getpid()}.{threading.get_ident()}.tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, separators=(",", ":"))
+            # Windows may briefly deny replacement while another process scans
+            # the destination. Use a writer-specific temp file and retry only
+            # transient permission/sharing errors before reporting failure.
+            for attempt in range(5):
+                try:
+                    os.replace(tmp, STATUS_PATH)
+                    break
+                except PermissionError:
+                    if attempt == 4:
+                        raise
+                    time.sleep(0.05 * (2 ** attempt))
+            self.last_status_write = now
+            self.last_status_asset = asset
+            self.last_status_type = data_type
+        except OSError as exc:
+            log(f"status file update failed after retry: {exc}")
+        finally:
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+
+    def set_selected_asset(self, asset: str) -> None:
+        self.selected_asset = str(asset or "").strip()
+        self.partial.clear()
+        self.closed_history.clear()
+        self.last_signature = ""
+        self.last_send = 0.0
+        self._write_status("live", "market changed", self.selected_asset)
+        log(f"selected market: {self.selected_asset}")
+
+    def _is_selected(self, asset: str) -> bool:
+        return bool(self.selected_asset) and str(asset or "").strip().lower() == self.selected_asset.lower()
+
+    def _mark_data(self, asset: str, data_type: str) -> None:
+        if not self._is_selected(asset):
+            return
+        self.last_data_at = time.monotonic()
+        self.last_market_data_at = self.last_data_at
+        now = time.time()
+        if asset in OTC_PAIRS:
+            self.last_otc_data_at = now
+        else:
+            self.last_real_data_at = now
+        self._write_status("live", data_type, asset)
+
     def _upload_worker(self) -> None:
         while not self._upload_stop.is_set():
             try:
@@ -254,7 +364,8 @@ class Collector:
                 except queue.Empty:
                     continue
                 try:
-                    self._post(endpoint, payload)
+                    result = self._post(endpoint, payload)
+                    log(f"queued {kind} upload accepted={result.get('accepted', '?')}")
                 except Exception as exc:
                     log(f"queued {kind} upload failed; stream stays alive: {exc}")
                 finally:
@@ -267,26 +378,7 @@ class Collector:
             finally:
                 self._candle_queue.task_done()
 
-    def _mirror_pc_agent(self, payload: dict[str, Any]) -> None:
-        """Best-effort local mirror; never block or break the MMC cloud upload."""
-        if not PC_AGENT_URL or not PC_AGENT_TOKEN:
-            return
-        try:
-            response = self.session.post(
-                f"{PC_AGENT_URL}/api/collector/quotex",
-                json=payload,
-                headers={"X-PC-Agent-Token": PC_AGENT_TOKEN},
-                timeout=2,
-                allow_redirects=False,
-            )
-            if not 200 <= response.status_code < 300:
-                log(f"local PC Agent mirror returned HTTP {response.status_code}; MMC upload continues")
-        except Exception as exc:
-            log(f"local PC Agent mirror unavailable; MMC upload continues: {exc}")
-
     def _post(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
-        # Mirror first so the local AI can keep receiving data even if Render is down.
-        self._mirror_pc_agent(payload)
         if not INGEST_SECRET:
             raise RuntimeError("QUOTEX_INGEST_SECRET is missing. Set the same secret on Render and locally.")
         response = self.session.post(
@@ -329,6 +421,7 @@ class Collector:
                     history.pop(old_bucket, None)
 
     def _send(self, rows: list[dict[str, Any]]) -> None:
+        rows = [r for r in rows if self._is_selected(str(r.get("asset") or ""))]
         if not rows:
             return
         try:
@@ -372,6 +465,8 @@ class Collector:
         log(f"sent {accepted} closed candle rows to MMC ({len(otc_rows)} OTC, {len(real_rows)} real-market)")
 
     def _send_quote(self, asset: str, price: float, ts: float) -> None:
+        if not self._is_selected(asset):
+            return
         now = time.monotonic()
         if now - self.last_quote_send.get(asset, 0.0) < 1.0:
             return
@@ -393,7 +488,7 @@ class Collector:
     def _add_price(self, asset: str, price: float, ts: float) -> None:
         if not asset:
             return
-        self.last_market_data_at = time.monotonic()
+        self._mark_data(asset, "tick")
         bucket = int(ts // PERIOD) * PERIOD
         state = self.partial.get(asset)
         if not state or state["bucket"] != bucket:
@@ -410,7 +505,6 @@ class Collector:
             state["high"] = max(state["high"], price)
             state["low"] = min(state["low"], price)
             state["close"] = price
-        self._send_quote(asset, price, ts)
 
     def flush_partials(self) -> None:
         now = time.monotonic()
@@ -434,12 +528,20 @@ class Collector:
                     fallback_asset = self.history_asset_by_index.get(int(payload.get("index")))
                 except (TypeError, ValueError):
                     fallback_asset = None
-            rows = _normalise_history(payload)
-            if fallback_asset and rows and fallback_asset in OTC_PAIRS:
-                for row in rows:
-                    row["asset"] = fallback_asset
+                if not fallback_asset and not (payload.get("asset") or payload.get("symbol")):
+                    fallback_asset = self.selected_asset
+            rows = _normalise_history(payload, fallback_asset=fallback_asset)
+            rows = [r for r in rows if self._is_selected(str(r.get("asset") or ""))]
             if rows:
+                rows = sorted(rows, key=lambda r: float(r.get("timestamp", 0)))
+                first_ts = datetime.fromtimestamp(float(rows[0]["timestamp"]), tz=timezone.utc).isoformat(timespec="minutes")
+                last_ts = datetime.fromtimestamp(float(rows[-1]["timestamp"]), tz=timezone.utc).isoformat(timespec="minutes")
+                log(f"history/list/v2 parsed {len(rows)} selected closed candles ({first_ts} to {last_ts})")
+                self._mark_data(self.selected_asset, "closed candle")
                 self._send(rows)
+            else:
+                asset_hint = payload.get("asset") or payload.get("symbol") if isinstance(payload, dict) else None
+                log(f"selected market history contained no usable OHLC/tick rows (asset={asset_hint or self.selected_asset})")
             return
         if name in {"candle", "candles", "history/list", "history/load", "chart_notification/get"}:
             fallback_asset = None
@@ -448,25 +550,61 @@ class Collector:
                     fallback_asset = self.history_asset_by_index.get(int(payload.get("index")))
                 except (TypeError, ValueError):
                     fallback_asset = None
+                if not fallback_asset and not (payload.get("asset") or payload.get("symbol")):
+                    fallback_asset = self.selected_asset
             rows = _normalise_candle(payload, fallback_asset=fallback_asset)
+            if not rows and name in {"history/list", "history/load"}:
+                rows = _normalise_history(payload, fallback_asset=fallback_asset)
+            rows = [r for r in rows if self._is_selected(str(r.get("asset") or ""))]
             if rows:
+                rows = sorted(rows, key=lambda r: float(r.get("timestamp", 0)))
+                if name in {"history/list", "history/load"}:
+                    first_ts = datetime.fromtimestamp(float(rows[0]["timestamp"]), tz=timezone.utc).isoformat(timespec="minutes")
+                    last_ts = datetime.fromtimestamp(float(rows[-1]["timestamp"]), tz=timezone.utc).isoformat(timespec="minutes")
+                    log(f"{name} parsed {len(rows)} selected closed candles ({first_ts} to {last_ts})")
+                self._mark_data(self.selected_asset, "candle")
                 self._send(rows)
             return
         if name == "quotes/stream":
-            rows = payload if isinstance(payload, list) else [payload]
-            for row in rows:
-                asset, price, ts = _price_from_payload(row)
-                if asset and price is not None and ts is not None:
-                    self._add_price(asset, price, ts)
+            # This is the live quote path. Ignoring it made the collector
+            # repeatedly reconnect after receiving history but no candle/tick
+            # events. Accept the common flat and nested Socket.IO row shapes.
+            pending = list(payload) if isinstance(payload, list) else [payload]
+            while pending:
+                item = pending.pop(0)
+                if isinstance(item, list) and item and isinstance(item[0], (list, tuple, dict)):
+                    pending[0:0] = item
+                    continue
+                asset, price, ts = _price_from_payload(item)
+                if not asset or price is None or not self._is_selected(asset):
+                    continue
+                if ts is None:
+                    ts = time.time()
+                if ts > 10_000_000_000:
+                    ts /= 1000
+                self._add_price(asset, price, ts)
+                self._send_quote(asset, price, ts)
             return
         if name in {"candle-generated", "quote", "quotes", "price", "tick", "instrument/price"}:
-            rows = _normalise_candle(payload)
+            rows = [r for r in _normalise_candle(payload) if self._is_selected(str(r.get("asset") or ""))]
             if rows:
+                assets = sorted({str(r.get("asset") or "") for r in rows if r.get("asset")})
+                self._mark_data(assets[-1] if assets else "", "candle")
                 self._send(rows)
                 return
-            asset, price, ts = _price_from_payload(payload)
-            if asset and price is not None and ts is not None:
-                self._add_price(asset, price, ts)
+            return
+
+
+def _selected_asset_from_text(text: str) -> str | None:
+    match = re.search(r"([A-Z]{3}\s*/\s*[A-Z]{3}(?:\s*\(OTC\))?)", str(text or "").upper())
+    if not match:
+        return None
+    visible = match.group(1)
+    otc = normalize_detected_market(visible)
+    if otc:
+        return otc
+    compact = re.sub(r"[^A-Z]", "", visible)
+    return compact if compact in REAL_MARKET_PAIRS else None
 
 
 async def run() -> None:
@@ -489,34 +627,70 @@ async def run() -> None:
         await _cdp_command(ws, counter, "Page.addScriptToEvaluateOnNewDocument", {"source": bridge})
         await _cdp_command(ws, counter, "Page.reload", {"ignoreCache": False})
         log("CDP Network capture enabled and Quotex page reloaded once to capture WebSocket from startup.")
-        await asyncio.sleep(2)
-        assets_json = json.dumps(sorted(OTC_PAIRS))
-        # Backfill four one-hour pages so delayed performance lookups still
-        # have exact entry candles after collector restarts.
-        request_js = """(() => { const now=Math.floor(Date.now()/1000); const index=Math.floor(Date.now()/10); const assets=__ASSETS__; const msg=a=>`42["history/load",${JSON.stringify({asset:a,index,time:now,offset:14400,period:60})}]`; const s=(window.__mmcSockets||[]).filter(x=>x&&x.readyState===1); for(const a of assets) for(const x of s) { try{x.send(msg(a))}catch(_){}} return {sockets:s.length,assets:assets.length}; })()""".replace("__ASSETS__", assets_json)
-        # Quotex uses index as the history response correlation ID. Reusing it
-        # for every symbol drops most responses, leaving the collector with
-        # only a handful of candles instead of the requested backfill.
-        request_js = request_js.replace("const msg=a=>", "const msg=(a,i,t)=>")
-        request_js = request_js.replace(
-            "{asset:a,index,time:now,offset:14400,period:60}",
-            "{asset:a,index:i,time:t,offset:3600,period:60}",
-        )
-        request_js = request_js.replace(
-            "for(const a of assets) for(const x of s) { try{x.send(msg(a))}catch(_){}}",
-            "for(let i=0;i<assets.length;i++) for(let w=0;w<4;w++) { const a=assets[i], id=index+i*4+w, t=now-w*3600; for(const x of s) setTimeout(()=>{try{x.send(msg(a,id,t))}catch(_){}},(i*4+w)*250); }",
-        )
-        history_asset_by_index = {
-            index + i * 4 + w: asset
-            for i, asset in enumerate(sorted(OTC_PAIRS))
-            for w in range(4)
-        }
-        result = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": request_js, "returnByValue": True})
-        log(f"Requested OTC history backfill: {result.get('result',{}).get('result',{}).get('value',{})}")
-        collector = Collector(history_asset_by_index)
+        # Give Quotex enough time to create the browser WebSocket before the
+        # history backfill is sent; otherwise the socket list can still be empty.
+        await asyncio.sleep(6)
+        selected_probe = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": "document.body.innerText", "returnByValue": True})
+        selected_text = selected_probe.get("result", {}).get("result", {}).get("value", "")
+        selected_asset = _selected_asset_from_text(selected_text)
+        if not selected_asset:
+            raise RuntimeError("Could not detect the currently selected Quotex market from the chart.")
+
+        collector = Collector(selected_asset)
+        log(f"selected market: {selected_asset} | ONLY this market will be sent")
+
+        async def request_selected_history(asset: str) -> None:
+            # Send subscriptions and backfill for ONLY the browser's current
+            # market. The old all-pairs request flood could delay or lose the
+            # selected pair's history responses.
+            now = int(time.time())
+            base = int(time.time() * 1000)
+            while any((base + w) in collector.history_asset_by_index for w in range(4)):
+                base += 10
+            requests_for_history = [
+                {"index": base + w, "time": now - w * 3600, "delay_ms": w * 350}
+                for w in range(4)
+            ]
+            collector.history_asset_by_index.update(
+                {int(item["index"]): asset for item in requests_for_history}
+            )
+            asset_json = json.dumps(asset)
+            requests_json = json.dumps(requests_for_history, separators=(",", ":"))
+            request_js = """(() => {
+              const asset=__ASSET__;
+              const pages=__PAGES__;
+              const sockets=(window.__mmcSockets||[]).filter(x=>x&&x.readyState===1);
+              const send=(x,packet)=>{try{x.send(packet)}catch(_){}};
+              for(const x of sockets){
+                send(x,'42["instruments/update",'+JSON.stringify({asset:asset,period:60})+']');
+                send(x,'42["depth/follow",'+JSON.stringify(asset)+']');
+                send(x,'42["chart_notification/get",'+JSON.stringify({asset:asset,version:"1.0.0"})+']');
+              }
+              const hist=p=>'42["history/load",'+JSON.stringify({asset:asset,index:p.index,time:p.time,offset:3600,period:60})+']';
+              for(const page of pages) for(const x of sockets) setTimeout(()=>send(x,hist(page)),page.delay_ms);
+              return {sockets:sockets.length,selected_asset:asset,history_requests:pages.length};
+            })()""".replace("__ASSET__", asset_json).replace("__PAGES__", requests_json)
+            result = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": request_js, "returnByValue": True})
+            value = result.get("result", {}).get("result", {}).get("value", {})
+            log(f"Requested selected-market history only: {value}")
+            if not value.get("sockets"):
+                log("No ready Quotex WebSocket yet; selected-market history will be retried after reconnect.")
+
+        await request_selected_history(selected_asset)
         pending_event: str | None = None
         last_frame_at = time.monotonic()
+        last_selection_check = 0.0
         while True:
+            now_mono = time.monotonic()
+            if now_mono - last_selection_check >= 2.0:
+                last_selection_check = now_mono
+                probe = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": "document.body.innerText", "returnByValue": True})
+                visible = probe.get("result", {}).get("result", {}).get("value", "")
+                new_asset = _selected_asset_from_text(visible)
+                if new_asset and new_asset != collector.selected_asset:
+                    collector.set_selected_asset(new_asset)
+                    log(f"market selection changed -> {new_asset}; old market data is discarded")
+                    await request_selected_history(new_asset)
             try:
                 message = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
             except asyncio.TimeoutError:
@@ -524,6 +698,18 @@ async def run() -> None:
                 if time.monotonic() - last_frame_at >= 30:
                     log("No Quotex WebSocket frames for 30s; reloading the page to recover the stream.")
                     await _cdp_command(ws, counter, "Page.reload", {"ignoreCache": False})
+                    # Wait for the page-created WebSocket to be captured by
+                    # the CDP bridge, then re-subscribe/backfill only the
+                    # currently selected market. A reload alone is not enough
+                    # to restore our explicit history requests.
+                    await asyncio.sleep(6)
+                    probe = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": "document.body.innerText", "returnByValue": True})
+                    visible = probe.get("result", {}).get("result", {}).get("value", "")
+                    reloaded_asset = _selected_asset_from_text(visible)
+                    if reloaded_asset and reloaded_asset != collector.selected_asset:
+                        collector.set_selected_asset(reloaded_asset)
+                        log(f"market selection after recovery reload -> {reloaded_asset}")
+                    await request_selected_history(collector.selected_asset)
                     last_frame_at = time.monotonic()
                 continue
             if message.get("method") != "Network.webSocketFrameReceived":
