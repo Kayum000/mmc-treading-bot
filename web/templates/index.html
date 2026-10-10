@@ -104,7 +104,6 @@ body{background:var(--mmc-bg)!important;color:var(--mmc-text)!important}
 :root[data-theme="white"] .status-row{border-color:#e2e8f0!important}
 
 
-.future-panel{margin-top:14px}.future-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px}.future-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:10px}.future-item{padding:11px;border:1px solid var(--mmc-border);border-radius:10px;background:var(--mmc-panel2)}.future-item b{font-size:15px}.future-item .future-meta{display:flex;justify-content:space-between;margin-top:5px;font-size:11px;color:#8ca7c4}.future-buy{border-left:3px solid #10b981}.future-sell{border-left:3px solid #ef4444}.future-empty{padding:12px;color:#8ca7c4;font-size:12px}
 </style>
 <style>
 .performance-modal #modal-extra{display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden}
@@ -122,7 +121,6 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
     <button class="active" data-scroll="top">⌂ &nbsp; Dashboard</button>
     <button data-action="auto">◉ &nbsp; Auto Signal</button>
     <button data-action="signal">◇ &nbsp; Get Signal</button>
-    <button data-action="future">⌁ &nbsp; Future Signals</button>
     <button data-scroll="performance">▥ &nbsp; Performance</button>
     <button data-action="market">♢ &nbsp; Market Selection</button>
     <button data-scroll="news">▤ &nbsp; News & Events</button>
@@ -141,7 +139,6 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
   <button type="button" class="primary" id="get-signal">⚡ Get Signal</button><button type="button" class="secondary" id="auto-signal">◉ Auto Signal</button>
 </section>
 <div class="auto-box"><input type="checkbox" id="auto-toggle"><label for="auto-toggle">AUTO SIGNAL</label><span id="auto-status" class="auto-status">AUTO SIGNAL বন্ধ</span><button type="button" class="mini-btn" id="enable-alerts">🔔 Enable Alerts</button></div>
-<section class="section panel future-panel" id="future-signals-panel"><div class="panel-head"><span class="round-icon">⌁</span><div><h2 class="panel-title">Future Signals</h2><div class="panel-sub">শুধু উচ্চ-মানের Future Signal পাওয়া গেলে তালিকায় দেখাবে</div></div></div><div id="future-summary" class="future-empty">Future Signals অপশনে ক্লিক করুন—যতগুলো যোগ্য signal পাওয়া যাবে, সবগুলোই দেখাবে।</div><div id="future-grid" class="future-grid"></div></section>
 {% if error %}<div class="alert" id="server-alert">{{ error }}</div>{% endif %}
 <section class="section performance" id="performance">
   <button type="button" class="performance-panel performance-compact-card" id="performance-card" aria-label="Open Performance">
@@ -221,11 +218,6 @@ function handleSidebarNav(e){
     $('auto-signal')?.click();
     return;
   }
-  if(action==='future'){
-    closeMobile();
-    scanFutureSignals(true);
-    return;
-  }
   if(action==='market'){
     closeMobile();
     $('signal-section')?.scrollIntoView({behavior:'smooth',block:'start'});
@@ -247,9 +239,6 @@ document.querySelectorAll('.mode-btn[data-mode]').forEach(b=>b.onclick=()=>setMo
 async function getSignal(){if(!state.pair){toast('প্রথমে একটি মার্কেট নির্বাচন করুন।');return}if(!(await syncMarket()))return;const btn=$('get-signal');btn.disabled=true;btn.textContent='Generating…';try{const r=await fetch('/auto-signal',{credentials:'same-origin',cache:'no-store'});const d=await readJsonResponse(r);if(!r.ok||!d.ok)throw Error(d.error||`Signal request failed (${r.status})`);if(!d.result)throw Error('Signal result not returned');renderResult(d.result);toast('Signal updated successfully');loadPerformance()}catch(e){toast(e.message)}finally{btn.disabled=false;btn.textContent='⚡ Get Signal'}}
 $('get-signal').onclick=getSignal;$('auto-signal').onclick=async()=>{if(!state.pair){toast('প্রথমে একটি মার্কেট নির্বাচন করুন।');return}if(!(await syncMarket()))return;const btn=$('auto-signal');btn.disabled=true;btn.textContent='Running…';try{const r=await fetch('/auto-signal',{credentials:'same-origin',cache:'no-store'});const d=await readJsonResponse(r);if(!r.ok||!d.ok)throw Error(d.error||'Auto signal failed');renderResult(d.result);if(window.alertForSignal)window.alertForSignal(d.result);recordPerformance(d.result);toast('Auto signal generated');loadPerformance()}catch(e){toast(e.message)}finally{btn.disabled=false;btn.textContent='◉ Auto Signal'}};
 function renderResult(r){if(!r)return;window.__mmcLastResult=r;window.__mmcRenderLegacySignal?.();}
-function renderFutureSignals(d){const s=d?.signals||[];const sum=$('future-summary'),grid=$('future-grid');if(!d?.ok){sum.textContent=d?.error||'Future Signal পাওয়া যায়নি';grid.innerHTML='';return}sum.textContent=`${d.count||0}টি forward opportunity • Base ${d.base_signal||'HOLD'} ${d.base_score||0}%`;grid.innerHTML=s.map(x=>`<div class="future-item future-${String(x.action).toLowerCase()}"><div style="display:flex;justify-content:space-between;gap:8px"><b>#${x.rank} ${x.action}</b><b>${x.score}%</b></div><div class="future-meta"><span>${x.entry_window}</span><span>${x.confidence}</span></div><div style="font-size:11px;margin-top:7px;line-height:1.45">${esc(x.reason||'')}</div></div>`).join('')||'<div class="future-empty">বর্তমান setup-এ threshold পার করা পর্যাপ্ত opportunity পাওয়া যায়নি।</div>'}
-async function scanFutureSignals(openList=false){if(!state.pair){toast('প্রথমে একটি মার্কেট নির্বাচন করুন।');return}if(!(await syncMarket()))return;const btn=$('future-scan');if(btn){btn.disabled=true;btn.textContent='Scanning…';}$('future-summary').textContent='Backtest-validated Future Signal scan হচ্ছে…';try{const r=await fetch('/future-signals',{credentials:'same-origin',cache:'no-store'});const d=await readJsonResponse(r);if(!r.ok||!d.ok)throw Error(d.error||'Future Signal failed');renderFutureSignals(d);if(openList){const rows=(d.signals||[]).map(x=>'<div class="future-item future-'+String(x.action).toLowerCase()+'" style="margin-bottom:8px"><div style="display:flex;justify-content:space-between"><b>#'+x.rank+' • '+x.action+'</b><b>'+x.score+'%</b></div><div class="future-meta"><span>'+esc(x.entry_window)+'</span><span>ব্যাকটেস্ট '+esc(x.backtest_win_rate)+'% ('+esc(x.backtest_trades)+'টি)</span></div><div style="font-size:11px;margin-top:7px;line-height:1.45">'+esc(x.reason||'')+'</div></div>').join('')||'<div class="future-empty">এই মুহূর্তে live quality ও backtest—দুই শর্ত পূরণ করা Future Signal পাওয়া যায়নি।</div>';modalOpen('Future Signal List','বর্তমান '+state.pair+' • '+(d.count||0)+'টি validated opportunity',rows)}toast((d.count||0)+'টি validated Future opportunity পাওয়া গেছে')}catch(e){$('future-summary').textContent=e.message;$('future-grid').innerHTML='';toast(e.message)}finally{if(btn){btn.disabled=false;btn.textContent='Scan'}}}
-if($('future-scan'))$('future-scan').onclick=scanFutureSignals;
 function bindResult(){$('view-signal')?.addEventListener('click',()=>modalOpen('Latest Signal','The latest generated signal is shown here. Generate another signal to update it.'))}
 $('auto-toggle').onchange=e=>{state.auto=e.target.checked;clearTimeout(state.autoTimer);if(state.auto){$('auto-status').textContent='AUTO SIGNAL চালু • পরের 1-minute entry-এর জন্য অপেক্ষা';scheduleAuto()}else $('auto-status').textContent='AUTO SIGNAL বন্ধ';try{localStorage.setItem(AUTO_SIGNAL_KEY,state.auto?'1':'0')}catch(_){}};
 function scheduleAuto(){clearTimeout(state.autoTimer);if(!state.auto||!state.pair)return;const now=Date.now();const minute=Math.floor(now/60000)*60000;const next=minute+60000+1000;state.autoTimer=setTimeout(async()=>{await runAuto();scheduleAuto()},Math.max(50,next-now))}
