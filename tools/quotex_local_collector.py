@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from collections import deque
 import os
 import queue
 import re
@@ -83,7 +84,14 @@ def _target() -> dict[str, Any]:
     return candidates[0]
 
 
-async def _cdp_command(ws, counter: list[int], method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+async def _cdp_command(
+    ws,
+    counter: list[int],
+    method: str,
+    params: dict[str, Any] | None = None,
+    pending_frames: deque[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Run a CDP command without discarding WebSocket events received meanwhile."""
     counter[0] += 1
     ident = counter[0]
     await ws.send(json.dumps({"id": ident, "method": method, "params": params or {}}))
@@ -93,7 +101,15 @@ async def _cdp_command(ws, counter: list[int], method: str, params: dict[str, An
             if "error" in message:
                 raise RuntimeError(f"CDP {method} failed: {message['error']}")
             return message
-
+        # CDP events can arrive before the command response. Preserve the
+        # incoming market frames and close/error notifications for the main
+        # consumer instead of silently dropping them during Runtime.evaluate.
+        if pending_frames is not None and message.get("method") in {
+            "Network.webSocketFrameReceived",
+            "Network.webSocketClosed",
+            "Network.webSocketFrameError",
+        }:
+            pending_frames.append(message)
 
 def _json_after_prefix(text: str) -> Any:
     if not text:
@@ -658,21 +674,26 @@ async def run() -> None:
     ws_url = target.get("webSocketDebuggerUrl")
     if not ws_url:
         raise RuntimeError("Chrome target has no webSocketDebuggerUrl. Start Chrome with remote debugging enabled.")
+    # CDP commands share this socket with asynchronous Network events. Keep
+    # frames received while a command is in flight until the main loop handles
+    # them. The cap prevents unbounded growth if the chart floods events.
+    pending_frames: deque[dict[str, Any]] = deque(maxlen=5000)
     async with websockets.connect(ws_url, open_timeout=10, close_timeout=5, max_size=16 * 1024 * 1024) as ws:
         counter = [0]
         await _cdp_command(
             ws, counter, "Network.enable",
             {"maxTotalBufferSize": 50 * 1024 * 1024, "maxResourceBufferSize": 5 * 1024 * 1024},
+            pending_frames=pending_frames,
         )
-        await _cdp_command(ws, counter, "Page.enable")
+        await _cdp_command(ws, counter, "Page.enable", pending_frames=pending_frames)
         bridge = """(() => { if (window.__mmcHistoryBridgeInstalled) return; window.__mmcHistoryBridgeInstalled=true; window.__mmcSockets=[]; const O=window.WebSocket; const W=function(...a){const s=new O(...a); window.__mmcSockets.push(s); return s;}; W.prototype=O.prototype; window.WebSocket=W; })();"""
-        await _cdp_command(ws, counter, "Page.addScriptToEvaluateOnNewDocument", {"source": bridge})
-        await _cdp_command(ws, counter, "Page.reload", {"ignoreCache": False})
+        await _cdp_command(ws, counter, "Page.addScriptToEvaluateOnNewDocument", {"source": bridge}, pending_frames=pending_frames)
+        await _cdp_command(ws, counter, "Page.reload", {"ignoreCache": False}, pending_frames=pending_frames)
         log("CDP Network capture enabled and Quotex page reloaded once to capture WebSocket from startup.")
         # Give Quotex enough time to create the browser WebSocket before the
         # history backfill is sent; otherwise the socket list can still be empty.
         await asyncio.sleep(6)
-        selected_probe = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": "document.body.innerText", "returnByValue": True})
+        selected_probe = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": "document.body.innerText", "returnByValue": True}, pending_frames=pending_frames)
         selected_text = selected_probe.get("result", {}).get("result", {}).get("value", "")
         selected_asset = _selected_asset_from_text(selected_text)
         if not selected_asset:
@@ -712,7 +733,7 @@ async def run() -> None:
               for(const page of pages) for(const x of sockets) setTimeout(()=>send(x,hist(page)),page.delay_ms);
               return {sockets:sockets.length,selected_asset:asset,history_requests:pages.length};
             })()""".replace("__ASSET__", asset_json).replace("__PAGES__", requests_json)
-            result = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": request_js, "returnByValue": True})
+            result = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": request_js, "returnByValue": True}, pending_frames=pending_frames)
             value = result.get("result", {}).get("result", {}).get("value", {})
             log(f"Requested selected-market history only: {value}")
             if not value.get("sockets"):
@@ -739,7 +760,7 @@ async def run() -> None:
 
                 if now_mono - last_selection_check >= 2.0:
                     last_selection_check = now_mono
-                    probe = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": "document.body.innerText", "returnByValue": True})
+                    probe = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": "document.body.innerText", "returnByValue": True}, pending_frames=pending_frames)
                     visible = probe.get("result", {}).get("result", {}).get("value", "")
                     new_asset = _selected_asset_from_text(visible)
                     if new_asset and new_asset != collector.selected_asset:
@@ -748,17 +769,20 @@ async def run() -> None:
                         await request_selected_history(new_asset)
                         next_history_refresh = time.monotonic() + 45.0
                 try:
-                    message = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+                    if pending_frames:
+                        message = pending_frames.popleft()
+                    else:
+                        message = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
                 except asyncio.TimeoutError:
                     if time.monotonic() - last_frame_at >= 30:
                         log("No Quotex WebSocket frames for 30s; reloading the page to recover the stream.")
-                        await _cdp_command(ws, counter, "Page.reload", {"ignoreCache": False})
+                        await _cdp_command(ws, counter, "Page.reload", {"ignoreCache": False}, pending_frames=pending_frames)
                         # Wait for the page-created WebSocket to be captured by
                         # the CDP bridge, then re-subscribe/backfill only the
                         # currently selected market. A reload alone is not enough
                         # to restore our explicit history requests.
                         await asyncio.sleep(6)
-                        probe = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": "document.body.innerText", "returnByValue": True})
+                        probe = await _cdp_command(ws, counter, "Runtime.evaluate", {"expression": "document.body.innerText", "returnByValue": True}, pending_frames=pending_frames)
                         visible = probe.get("result", {}).get("result", {}).get("value", "")
                         reloaded_asset = _selected_asset_from_text(visible)
                         if reloaded_asset and reloaded_asset != collector.selected_asset:
@@ -768,7 +792,15 @@ async def run() -> None:
                         next_history_refresh = time.monotonic() + 45.0
                         last_frame_at = time.monotonic()
                     continue
-                if message.get("method") != "Network.webSocketFrameReceived":
+                method = message.get("method")
+                params = message.get("params", {})
+                if method == "Network.webSocketClosed":
+                    log(f"Browser WebSocket closed (request_id={params.get('requestId', 'unknown')}); monitoring for reconnection.")
+                    continue
+                if method == "Network.webSocketFrameError":
+                    log(f"Browser WebSocket frame error (request_id={params.get('requestId', 'unknown')}); monitoring for reconnection.")
+                    continue
+                if method != "Network.webSocketFrameReceived":
                     continue
                 last_frame_at = time.monotonic()
                 response = message.get("params", {}).get("response", {})
