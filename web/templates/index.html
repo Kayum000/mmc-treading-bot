@@ -214,7 +214,7 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
 </section>
 <section class="chart-panel" id="chart"><div class="chart-head"><span class="round-icon">▥</span><div><b>Live Chart</b><small>Real-time price chart with indicators</small></div><div class="chart-controls"><span class="chart-live" id="chart-live">LIVE —</span><select id="chart-interval" aria-label="Chart timeframe"><option value="1m">1m</option><option value="5m">5m</option><option value="15m">15m</option><option value="1h">1h</option><option value="4h">4h</option><option value="1D">1D</option></select><button type="button" id="chart-zoom-out">−</button><button type="button" id="chart-zoom-in">+</button><button type="button" id="chart-full-view">FULL</button></div></div><div class="chart-canvas-wrap" id="live-market-chart"><div class="chart-canvas-wrap-inner"></div></div></section>
 </div></main></div>
-<a class="download-app" href="https://github.com/Kayum000/mmc-treading-bot/releases/download/latest/app-debug.apk">📲 Download Android App</a>
+<a class="download-app" id="download-app-action" href="https://github.com/Kayum000/mmc-treading-bot/releases/download/latest/app-debug.apk">📲 Download Android App</a>
 <div class="modal" id="modal"><div class="modal-card"><button class="modal-close" id="modal-close">×</button><h3 id="modal-title">Notice</h3><p id="modal-body">—</p><div id="modal-extra"></div></div></div><div class="toast" id="toast"></div>
 <script src="{{ url_for('static',filename='signal_alert.js') }}?v=20261003-2"></script>
 <script src="{{ url_for('static',filename='candle_timer.js') }}"></script>
@@ -582,6 +582,45 @@ function openSettings(){
   $('settings-alerts').onclick=()=>{$('enable-alerts')?.click();closeModal()};
 }
 window.addEventListener('load',()=>{applyCompactSidebar();applySavedTheme();activeMode(state.mode||'real');setMode(state.mode||'real');if(state.pair)pair.value=state.pair;updateStatus();loadNews();loadPerformance();bindResult();if(SETTINGS_SAFE_VIEW)openSettings()});
+})();
+</script>
+
+<script id="mmc-cross-platform-install">
+(()=>{
+  const appLink=document.getElementById('download-app-action');
+  if(!appLink) return;
+  const ua=navigator.userAgent||'';
+  const isAndroid=/Android/i.test(ua);
+  const isIOS=/iPhone|iPad|iPod/i.test(ua);
+  let installPrompt=null;
+  if(isAndroid){
+    appLink.textContent='📲 Download Android App';
+    return;
+  }
+  appLink.href='#install-app';
+  appLink.textContent=isIOS?'➕ Add App to Home Screen':'🖥️ Install App';
+  window.addEventListener('beforeinstallprompt',event=>{
+    event.preventDefault();
+    installPrompt=event;
+  });
+  window.addEventListener('appinstalled',()=>{
+    installPrompt=null;
+    appLink.textContent='✅ App Installed';
+  });
+  appLink.addEventListener('click',async event=>{
+    event.preventDefault();
+    if(installPrompt){
+      installPrompt.prompt();
+      try{ await installPrompt.userChoice; }catch(_e){}
+      installPrompt=null;
+      return;
+    }
+    if(isIOS){
+      alert('iPhone/iPad: Safari-তে এই ওয়েবসাইট খুলুন, Share বোতাম চাপুন, তারপর Add to Home Screen নির্বাচন করুন।');
+      return;
+    }
+    alert('PC-তে Chrome বা Edge দিয়ে MMC Dashboard খুলুন। ব্রাউজারের address bar-এর Install আইকনে ক্লিক করুন, অথবা menu (⋮) → Install page as app / Apps → Install this site as an app নির্বাচন করুন। অপশন না থাকলে browser update করে আবার চেষ্টা করুন। Android-এর APK ডাউনলোডের জন্য Android মোবাইল থেকে এই বাটন ব্যবহার করুন।');
+  });
 })();
 </script>
 </body>
