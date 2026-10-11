@@ -378,14 +378,21 @@ function replacePerformanceTable(preserveScroll=false){
 function recordPerformance(r){
   // Only persist actual directional signals; HOLD/WAIT/neutral results are not performance rows.
   if(!r||!['BUY','SELL'].includes(String(r.signal||'').toUpperCase()))return;
+  const mode=String(r.market_mode||state.mode||'real').toLowerCase();
+  const pair=String(r.pair||state.pair||'—').trim().toUpperCase();
+  const signal=String(r.signal).toUpperCase();
+  const signalTime=r.signal_time_utc||new Date().toISOString();
+  const entryMinute=Math.floor(Date.parse(signalTime)/60000);
   const row={
-    id:[r.market_mode||state.mode||'real',r.pair,r.signal,r.signal_time_utc,r.analysis_candle_time_utc].join('|'),
-    time:r.signal_created_bd||r.signal_created_utc||r.signal_time_bd||r.signal_time_utc||'—',
-    pair:r.pair||state.pair||'—',
-    mode:String(r.market_mode||state.mode||'real').toLowerCase(),
-    market_mode:String(r.market_mode||state.mode||'real').toLowerCase(),
-    signal:String(r.signal).toUpperCase(),entry_price:r.entry_price??null,
-    candle_color:r.signal_candle_color||'—',signal_time_utc:r.signal_time_utc||new Date().toISOString(),
+    // Match the server's canonical ID; analysis-candle changes must not
+    // produce a second performance row for the same entry minute.
+    id:[mode,pair,signal,Number.isFinite(entryMinute)?entryMinute:signalTime].join('|'),
+    time:r.signal_created_bd||r.signal_created_utc||r.signal_time_bd||signalTime||'—',
+    pair,
+    mode,
+    market_mode:mode,
+    signal,entry_price:r.entry_price??null,
+    candle_color:r.signal_candle_color||'—',signal_time_utc:signalTime,
     analysis_candle_time_utc:r.analysis_candle_time_utc||null,
     result:(r.result==='লাভ'||r.result==='লস'||r.result==='DOJI')?r.result:'অপেক্ষমাণ',
     signal_created_utc:r.signal_created_utc||null,signal_created_bd:r.signal_created_bd||null
