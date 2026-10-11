@@ -173,13 +173,23 @@ def _notify_telegram_safely(result: dict) -> None:
             pair = str(payload.get("pair") or "").strip().upper()
             mode = str(payload.get("market_mode") or "real").strip().lower()
             analysis_time = payload.get("analysis_candle_time_utc")
-            signal_id = "|".join([mode, pair, signal, str(signal_time), str(analysis_time or "")])
+            signal_id = _performance_signal_id(mode, pair, signal, signal_time)
             payload.update(_telegram_performance_stats(signal_id))
         sent = notify_signal(payload)
         if sent:
             print("[MMC Telegram] New BUY/SELL signal sent.", flush=True)
     except Exception as exc:
         print(f"[MMC Telegram] Signal notification failed: {exc}", flush=True)
+
+
+def _performance_signal_id(mode: str, pair: str, signal: str, signal_time) -> str:
+    """Return a stable deduplication key for one entry-minute signal."""
+    epoch = _utc_epoch(signal_time)
+    if epoch is None:
+        # Keep malformed/legacy timestamps distinct rather than collapsing them.
+        return "|".join([mode, pair, signal, str(signal_time or "")])
+    entry_minute = int(epoch // 60)
+    return "|".join([mode, pair, signal, str(entry_minute)])
 
 
 def _record_signal_performance(result: dict) -> None:
@@ -200,7 +210,9 @@ def _record_signal_performance(result: dict) -> None:
     analysis_time = result.get("analysis_candle_time_utc")
     mode = str(result.get("market_mode") or "real").strip().lower()
     row = {
-        "id": "|".join([mode, pair, signal, str(signal_time), str(analysis_time or "")]),
+        # One performance row per market/pair/direction/entry-minute. The
+        # analysis candle remains metadata and cannot create duplicate trades.
+        "id": _performance_signal_id(mode, pair, signal, signal_time),
         "time": result.get("signal_created_bd") or result.get("signal_created_utc") or signal_time,
         "pair": pair,
         "market_mode": mode,
@@ -517,7 +529,15 @@ def performance():
             return jsonify({"ok": False, "error": "Invalid performance row"}), 400
         cols = ["id","time","pair","signal","entry_price","candle_color","signal_time_utc","analysis_candle_time_utc","result","signal_created_utc","signal_created_bd","outcome_price","outcome_candle_time_utc","outcome_basis","market_mode","strategy","regime","strategy_mode"]
         vals = [payload.get(c) for c in cols]
-        vals[14] = payload.get("market_mode") or "real"
+        # Canonicalize browser writes too, so a different analysis candle or
+        # localStorage ID cannot create another row for the same entry minute.
+        mode = str(payload.get("market_mode") or "real").strip().lower()
+        pair = str(payload.get("pair") or "").strip().upper()
+        signal = str(payload.get("signal") or "").strip().upper()
+        signal_time = payload.get("signal_time_utc")
+        if pair and signal in {"BUY", "SELL"} and signal_time:
+            vals[0] = _performance_signal_id(mode, pair, signal, signal_time)
+        vals[14] = mode
         vals[15] = payload.get("strategy") or "UNKNOWN"
         vals[16] = payload.get("regime") or "UNKNOWN"
         vals[17] = payload.get("strategy_mode") or "adaptive"
@@ -528,10 +548,14 @@ def performance():
             ON CONFLICT(id) DO UPDATE SET
              time=excluded.time,pair=excluded.pair,signal=excluded.signal,entry_price=excluded.entry_price,
              candle_color=excluded.candle_color,signal_time_utc=excluded.signal_time_utc,
-             analysis_candle_time_utc=excluded.analysis_candle_time_utc,result=excluded.result,
-             signal_created_utc=excluded.signal_created_utc,signal_created_bd=excluded.signal_created_bd,
-             outcome_price=excluded.outcome_price,outcome_candle_time_utc=excluded.outcome_candle_time_utc,
-             outcome_basis=excluded.outcome_basis,market_mode=COALESCE(excluded.market_mode,performance.market_mode),
+             analysis_candle_time_utc=COALESCE(performance.analysis_candle_time_utc,excluded.analysis_candle_time_utc),
+             result=CASE WHEN performance.result IN ('লাভ','লস','DOJI') THEN performance.result ELSE excluded.result END,
+             signal_created_utc=COALESCE(performance.signal_created_utc,excluded.signal_created_utc),
+             signal_created_bd=COALESCE(performance.signal_created_bd,excluded.signal_created_bd),
+             outcome_price=CASE WHEN performance.result IN ('লাভ','লস','DOJI') THEN performance.outcome_price ELSE excluded.outcome_price END,
+             outcome_candle_time_utc=CASE WHEN performance.result IN ('লাভ','লস','DOJI') THEN performance.outcome_candle_time_utc ELSE excluded.outcome_candle_time_utc END,
+             outcome_basis=CASE WHEN performance.result IN ('লাভ','লস','DOJI') THEN performance.outcome_basis ELSE excluded.outcome_basis END,
+             market_mode=COALESCE(excluded.market_mode,performance.market_mode),
              strategy=CASE WHEN performance.strategy='UNKNOWN' THEN excluded.strategy ELSE performance.strategy END,
              regime=CASE WHEN performance.regime='UNKNOWN' THEN excluded.regime ELSE performance.regime END,
              strategy_mode=COALESCE(excluded.strategy_mode,performance.strategy_mode),
