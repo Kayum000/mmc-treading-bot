@@ -407,10 +407,13 @@ async function loadLiveAnalysis(){
   buttons.forEach(b=>{b.disabled=true;b.dataset.oldText=b.textContent;b.textContent='Calculating…'});
   try{
     const response=await fetch('/api/indicator-analysis',{credentials:'same-origin',cache:'no-store',headers:{'Accept':'application/json'}});
+
     const data=await readJsonResponse(response);
     if(!response.ok||!data.ok)throw Error(data.error||'Indicator analysis unavailable');
     const timeframeData=(data.timeframe_analysis||{})[tf];
     const indicatorSet=timeframeData||null;
+    const candleStamp=data.analysis_candle_time_utc ? new Date(data.analysis_candle_time_utc).toLocaleString() : 'timestamp unavailable';
+    const dataSource=String(data.source||'source not reported');
     const indicatorCards=[...document.querySelectorAll('#indicator-grid .indicator-card')];
     const normalize=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
     const alias={
@@ -434,8 +437,8 @@ async function loadLiveAnalysis(){
       if(!indicatorSet.available){state.textContent='Unavailable: '+(indicatorSet.reason||'not enough validated closed candles');return}
       const key=findIndicator(name);
       const item=key?liveValues[key]:null;
-      if(!item||item.value===null||item.value===undefined){state.textContent='Unavailable: required candle/volume data missing';return}
-      state.textContent='Live value: '+Number(item.value).toLocaleString(undefined,{maximumFractionDigits:6})+' · '+String(item.signal||'N/A');
+      if(!item||item.value===null||item.value===undefined){state.textContent='Unavailable: '+String(item?.reason||'required candle/volume data missing');return}
+      state.textContent='Calculated value: '+Number(item.value).toLocaleString(undefined,{maximumFractionDigits:6})+' · '+String(item.signal||'N/A')+' · min '+String(item.minimum_candles||30)+' candles';
     });
     const fmtSignal=s=>s==='BUY'?'BUY vote':s==='SELL'?'SELL vote':s==='DETECTED'?'DETECTED':s==='NEUTRAL'?'NEUTRAL':'N/A';
     const mmc=data.mmc_analysis||{};
@@ -462,11 +465,11 @@ async function loadLiveAnalysis(){
     if(status){
       if(!indicatorSet)status.innerHTML='<strong>ডেটা স্ট্যাটাস:</strong> '+tf+' timeframe calculation backend-এ নেই। বর্তমানে 1m, 5m ও 15m হিসাব সমর্থিত; 1h/4h-এর জন্য যথেষ্ট closed candle resampling যোগ করা হয়নি।';
       else if(!indicatorSet.available)status.innerHTML='<strong>ডেটা স্ট্যাটাস:</strong> '+(indicatorSet.reason||'পর্যাপ্ত closed candle নেই')+' · '+String(data.pair||'')+' · '+String(data.market_mode||'');
-      else status.innerHTML='<strong>ডেটা স্ট্যাটাস:</strong> '+String(data.pair||'')+' · '+String(data.market_mode||'')+' · '+tf+' · '+String(indicatorSet.count||0)+' closed candles · BUY '+String(indicatorSet.buy_votes||0)+' / SELL '+String(indicatorSet.sell_votes||0)+' · vote score '+String(indicatorSet.score??0)+' (win probability নয়)।';
+      else status.innerHTML='<strong>ডেটা স্ট্যাটাস:</strong> '+String(data.pair||'')+' · '+String(data.market_mode||'')+' · '+tf+' · '+String(indicatorSet.count||0)+' closed candles · usable votes '+String(indicatorSet.usable_indicators||0)+' · BUY '+String(indicatorSet.buy_votes||0)+' / SELL '+String(indicatorSet.sell_votes||0)+' · vote score '+String(indicatorSet.score??0)+' (win probability নয়) · source '+dataSource+' · candle time '+candleStamp+'.';
     }
     if(strategyStatus){
       if(mmc.available===false)strategyStatus.innerHTML='<strong>MMC status:</strong> '+(mmc.reason||'কমপক্ষে ৬০টি closed candle দরকার')+'; কোনো live vote অনুমান করে দেখানো হয়নি.';
-      else strategyStatus.innerHTML='<strong>MMC status:</strong> '+String(data.pair||'')+' · '+String(data.market_mode||'')+' · BUY '+String(mmc.buy_votes||0)+' / SELL '+String(mmc.sell_votes||0)+' / neutral '+String(mmc.neutral_votes||0)+' / detected '+String(mmc.detected_concepts||0)+' · '+String(mmc.note||'Rule-based proxy votes, not a win probability.');
+      else strategyStatus.innerHTML='<strong>MMC status:</strong> '+String(data.pair||'')+' · '+String(data.market_mode||'')+' · BUY '+String(mmc.buy_votes||0)+' / SELL '+String(mmc.sell_votes||0)+' / neutral '+String(mmc.neutral_votes||0)+' / detected '+String(mmc.detected_concepts||0)+' · source '+dataSource+' · candle time '+candleStamp+' · '+String(mmc.note||'Rule-based proxy votes, not a win probability.');
     }
   }catch(error){
     if(status)status.innerHTML='<strong>ডেটা স্ট্যাটাস:</strong> live analysis পাওয়া যায়নি — '+String(error.message||error)+'। Candle data অনুপস্থিত/পুরোনো হলে BUY/SELL দেখানো হবে না.';
