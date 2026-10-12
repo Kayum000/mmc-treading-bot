@@ -127,7 +127,7 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
         add("Volume Oscillator", vo.iloc[-1], trend_sig(vo.iloc[-1]>0, vo.iloc[-1]<0))
         # Weis Waves needs directional wave aggregation; use signed tick-volume proxy and label explicitly.
         signed = vol * np.sign(c.diff().fillna(0))
-        add("Weis Waves Volume Oscillator", signed.rolling(5).sum().iloc[-1]-signed.rolling(20).sum().iloc[-1], trend_sig(signed.rolling(5).sum().iloc[-1]>signed.rolling(20).sum().iloc[-1], signed.rolling(5).sum().iloc[-1]<signed.rolling(20).sum().iloc[-1])
+        add("Weis Waves Volume Oscillator", signed.rolling(5).sum().iloc[-1]-signed.rolling(20).sum().iloc[-1], trend_sig(signed.rolling(5).sum().iloc[-1]>signed.rolling(20).sum().iloc[-1], signed.rolling(5).sum().iloc[-1]<signed.rolling(20).sum().iloc[-1]))
     else:
         vals["Volume Oscillator"] = {"value": None, "signal": "N/A"}
         vals["Weis Waves Volume Oscillator"] = {"value": None, "signal": "N/A"}
