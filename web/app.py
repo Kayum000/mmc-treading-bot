@@ -163,7 +163,7 @@ def _telegram_performance_stats(signal_id: str | None = None) -> dict:
 
 
 def _apply_confidence_gate(result: dict) -> dict:
-    """Suppress BUY/SELL output unless confidence is at least 70 percent."""
+    """Suppress directional output everywhere unless confidence is >= 70%."""
     if not isinstance(result, dict):
         return result
     payload = dict(result)
@@ -177,16 +177,30 @@ def _apply_confidence_gate(result: dict) -> dict:
         raw_confidence = payload.get("confidence_pct")
     try:
         confidence = float(raw_confidence)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         confidence = -1.0
     if confidence > 1:
         confidence /= 100.0
     if not 0.70 <= confidence <= 1.0:
         payload["signal"] = "HOLD"
         payload["entry_signal"] = "HOLD"
+        payload["market_bias"] = "HOLD"
+        payload["buy_score"] = 0
+        payload["sell_score"] = 0
         payload["reason"] = "Confidence below 70%; signal suppressed."
         payload["hold_condition"] = "Confidence below 70%; no BUY/SELL signal."
         payload["confidence_gate_passed"] = False
+        # A suppressed signal has no actionable entry candle. Keep its analysis
+        # candle/time for audit, but don't expose a trade timestamp or reference
+        # price that could be mistaken for an approved entry.
+        for key in (
+            "signal_time_utc", "signal_time_bd", "candle_time",
+            "entry_time_utc", "entry_time_bd",
+            "entry_candle_time_utc", "entry_candle_time_bd",
+            "entry_price", "entry_delay_seconds",
+        ):
+            if key in payload:
+                payload[key] = None
     else:
         payload["confidence"] = confidence
         payload["confidence_gate_passed"] = True
