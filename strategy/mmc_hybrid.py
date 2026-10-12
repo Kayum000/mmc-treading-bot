@@ -251,47 +251,75 @@ def _concept_votes(x: pd.DataFrame, tf: dict) -> dict:
 
 def generate_hybrid_signal(candles: pd.DataFrame, ticks: pd.DataFrame | None = None) -> HybridSignal:
     x = _clean(candles)
-    if len(x) < 60:
-        analysis = {"available": False, "reason": "কমপক্ষে ৬০টি বন্ধ 1m candle দরকার",
+    # Always return a directional 1m call when this engine is invoked.
+    # Weak/short history lowers confidence instead of blocking the signal.
+    if x.empty:
+        analysis = {"available": False, "reason": "কোনো বৈধ candle data নেই; fallback direction",
                     "concepts": {name: "N/A" for name in CONCEPTS}, "buy_votes": 0,
-                    "sell_votes": 0, "neutral_votes": len(CONCEPTS), "score": 0}
-        return HybridSignal("HOLD", 0.0, "insufficient candle history for hybrid MMC", "UNKNOWN", "MMC_HYBRID", analysis)
+                    "sell_votes": 0, "neutral_votes": len(CONCEPTS), "score": 0,
+                    "direction": "BUY", "indicator_signal": "WAIT"}
+        return HybridSignal("BUY", 0.05, "Fallback BUY: candle data unavailable; very low confidence", "MMC_LOW_DATA", "MMC_HYBRID_1M", analysis)
 
     timeframes = analyze_timeframes(x)
+    indicator = timeframes.get("1m", {})
+    ind_signal = indicator.get("signal", "WAIT")
+    if len(x) < 60:
+        last = x.iloc[-1]
+        if ind_signal in ("BUY", "SELL"):
+            action = ind_signal
+        elif float(last.close) != float(last.open):
+            action = "BUY" if float(last.close) > float(last.open) else "SELL"
+        elif len(x) > 1 and float(last.close) != float(x.iloc[-2].close):
+            action = "BUY" if float(last.close) > float(x.iloc[-2].close) else "SELL"
+        else:
+            action = "BUY"
+        analysis = {"available": False, "reason": "কমপক্ষে ৬০টি বন্ধ 1m candle না থাকায় low-confidence fallback",
+                    "concepts": {name: "N/A" for name in CONCEPTS}, "buy_votes": 0,
+                    "sell_votes": 0, "neutral_votes": len(CONCEPTS), "score": 0,
+                    "direction": action, "indicator_signal": ind_signal, "candle_count": len(x)}
+        return HybridSignal(action, 0.15, f"{action} fallback: insufficient closed 1m history; confidence low", "MMC_LOW_DATA", "MMC_HYBRID_1M", analysis)
+
     votes = _concept_votes(x, timeframes)
     buy = sum(v == "BUY" for v in votes.values())
     sell = sum(v == "SELL" for v in votes.values())
     detected = sum(v == "DETECTED" for v in votes.values())
     neutral = sum(v == "NEUTRAL" for v in votes.values())
     score = int(round(100*(buy-sell)/max(1, buy+sell)))
-    indicator = timeframes.get("1m", {})
-    ind_signal = indicator.get("signal", "WAIT")
-    action = "HOLD"
-    direction = "BUY" if buy > sell else "SELL" if sell > buy else "WAIT"
-    # Balanced 1m-only mode: require at least five directional concept votes
-    # and a two-vote margin. The previous >=7 threshold suppressed most signals
-    # because each concept is an OHLC price-action proxy evaluated on one candle.
-    # Keep the 1m indicator as a veto if it gives a clear opposite direction.
-    min_directional_votes = 5
-    min_vote_margin = 2
-    reason = (
-        f"MMC confirmation weak: BUY {buy}, SELL {sell}; need "
-        f"{min_directional_votes}+ dominant votes and margin >= {min_vote_margin}; WAIT"
-    )
-    if direction in ("BUY", "SELL") and max(buy, sell) >= min_directional_votes and abs(buy-sell) >= min_vote_margin:
-        if ind_signal in ("BUY", "SELL") and ind_signal != direction:
-            reason = f"MMC {direction} but 1m indicator opposes (BUY {buy}, SELL {sell}); WAIT"
+    # Pick the stronger MMC side; on a tie use the 1m indicator, then candle
+    # direction. The indicator can affect confidence but never veto the call.
+    if buy > sell:
+        action = "BUY"
+    elif sell > buy:
+        action = "SELL"
+    elif ind_signal in ("BUY", "SELL"):
+        action = ind_signal
+    else:
+        last = x.iloc[-1]
+        if float(last.close) > float(last.open):
+            action = "BUY"
+        elif float(last.close) < float(last.open):
+            action = "SELL"
+        elif float(last.close) > float(x.iloc[-2].close):
+            action = "BUY"
+        elif float(last.close) < float(x.iloc[-2].close):
+            action = "SELL"
         else:
-            action = direction
-            reason = f"MMC {direction}: BUY {buy}, SELL {sell}; 1m indicator check passed"
-    confidence = min(0.82, 0.50 + 0.025*max(0, abs(buy-sell)-1)) if action in ("BUY", "SELL") else 0.0
-    # Confidence is a rule-strength score only, not a calibrated win probability.
+            action = "BUY"
+    margin = abs(buy-sell)
+    support = max(buy, sell)
+    # Confidence is a heuristic strength score, not a calibrated win probability.
+    confidence = min(0.82, 0.25 + 0.045*support + 0.025*margin)
+    if ind_signal in ("BUY", "SELL"):
+        confidence += 0.08 if ind_signal == action else -0.08
+    confidence = round(max(0.10, min(0.90, confidence)), 2)
+    reason = f"{action}: MMC BUY {buy}, SELL {sell}; 1m indicator {ind_signal}; confidence reflects rule strength"
     analysis = {
         "available": True, "concept_count": len(CONCEPTS), "concepts": votes,
         "buy_votes": buy, "sell_votes": sell, "detected_concepts": detected, "neutral_votes": neutral,
-        "score": score, "direction": direction, "indicator_signal": ind_signal,
+        "score": score, "direction": action, "indicator_signal": ind_signal,
         "timeframe_signals": {"1m": {"available": indicator.get("available", False), "signal": ind_signal}},
-        "note": "MMC conceptগুলো OHLC-ভিত্তিক heuristic proxy; vote score/confidence জয়ের সম্ভাবনা নয়।",
+        "confidence_basis": "heuristic_strength_not_win_probability",
+        "note": "প্রতিটি signal BUY/SELL; দুর্বল confirmation-এ confidence কম। Confidence জয়ের calibrated সম্ভাবনা নয়।",
     }
-    regime = "MMC_BULLISH" if action == "BUY" else "MMC_BEARISH" if action == "SELL" else "MMC_WAIT"
-    return HybridSignal(action, confidence, reason, regime, "MMC_HYBRID_BALANCED", analysis)
+    regime = "MMC_BULLISH" if action == "BUY" else "MMC_BEARISH"
+    return HybridSignal(action, confidence, reason, regime, "MMC_HYBRID_1M", analysis)
