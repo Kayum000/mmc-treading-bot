@@ -48,6 +48,14 @@ def _store_real_market(payload: dict) -> int:
             bars = state["bars"]
             bucket = int(ts // 60) * 60
             item = {"timestamp": float(bucket), "open": o, "high": h, "low": l, "close": c}
+            for field in ("volume", "tick_volume"):
+                try:
+                    raw_volume = row.get(field)
+                    volume = float(raw_volume) if raw_volume is not None else None
+                except (TypeError, ValueError, OverflowError):
+                    volume = None
+                if volume is not None and volume >= 0 and volume == volume and abs(volume) != float("inf"):
+                    item[field] = volume
             if bars and int(float(bars[-1]["timestamp"])) == bucket:
                 bars[-1].update(item)
             else:
@@ -70,16 +78,16 @@ def _store_real_market(payload: dict) -> int:
             state["quote"] = {"price": price, "timestamp": ts}
             history = state.setdefault("quote_history", [])
             history.append({"price": price, "timestamp": ts})
-            state["quote_history"] = history[-1000:]
+            state["quote_history"] = history[-10000:]
             state["updated_at"] = now
             accepted += 1
     return accepted
 
 
-def real_market_ticks(asset: str, count: int = 1000):
+def real_market_ticks(asset: str, count: int = 10000):
     import pandas as pd
     clean = _real_asset(asset)
-    limit = max(1, min(int(count), 1000))
+    limit = max(1, min(int(count), 10000))
     with _REAL_MARKET_LOCK:
         rows = list((_REAL_MARKET.get(clean) or {}).get("quote_history", []))[-limit:]
     if not rows:
