@@ -91,7 +91,7 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
     add("Ichimoku Cloud", span_a.iloc[-1], trend_sig(lastc>max(span_a.iloc[-1],span_b.iloc[-1]), lastc<min(span_a.iloc[-1],span_b.iloc[-1])))
     add("Keltner channel", kelt_mid.iloc[-1], trend_sig(lastc>kelt_mid.iloc[-1]+2*atr.iloc[-1], lastc<kelt_mid.iloc[-1]-2*atr.iloc[-1]))
     add("Donchian channel", don_hi.iloc[-1], trend_sig(lastc>don_hi.shift(1).iloc[-1], lastc<don_lo.shift(1).iloc[-1]))
-    add("Supertrend", lastc, trend_sig(lastc>kelt_mid.iloc[-1]-3*atr.iloc[-1], lastc<kelt_mid.iloc[-1]-3*atr.iloc[-1]))
+    add("Supertrend", kelt_mid.iloc[-1] + (3*atr.iloc[-1] if lastc < kelt_mid.iloc[-1] else -3*atr.iloc[-1]), trend_sig(lastc>kelt_mid.iloc[-1], lastc<kelt_mid.iloc[-1]))
     add("Moving Average", ema20.iloc[-1], trend_sig(ema20.iloc[-1]>ema50.iloc[-1], ema20.iloc[-1]<ema50.iloc[-1]))
     add("Parabolic SAR", sar_proxy.iloc[-1], trend_sig(lastc>sar_proxy.iloc[-1], lastc<sar_proxy.iloc[-1]))
     add("Zig Zag", c.pct_change(5).iloc[-1]*100, trend_sig(c.iloc[-1]>c.iloc[-6], c.iloc[-1]<c.iloc[-6]))
