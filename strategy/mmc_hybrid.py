@@ -61,7 +61,7 @@ def _concept_votes(x: pd.DataFrame, tf: dict) -> dict:
     """
     votes = {name: "NEUTRAL" for name in CONCEPTS}
     if len(x) < 60:
-        return votes
+        return {name: "N/A" for name in CONCEPTS}
 
     # Use prior candles to establish reference levels; the latest candle is
     # evaluated as the signal candle. Pivot candidates need candles on both sides.
@@ -104,6 +104,11 @@ def _concept_votes(x: pd.DataFrame, tf: dict) -> dict:
     prior_low = float(d.low.iloc[-21:-1].min())
     prior_mid = (prior_high + prior_low) / 2.0
 
+    # A confirmed swing point is a detectable structure level even if it has
+    # not yet produced a directional break or rejection.
+    if recent_highs or recent_lows:
+        votes["Swing High/Low"] = "DETECTED"
+
     # Market structure uses the sequence of the two latest confirmed swing points.
     if len(recent_highs) >= 2 and len(recent_lows) >= 2:
         hh = recent_highs[-1][1] > recent_highs[-2][1]
@@ -130,9 +135,9 @@ def _concept_votes(x: pd.DataFrame, tf: dict) -> dict:
     elif prior_structure == "BUY" and broke_down:
         votes["CHOCH"] = "SELL"
     if body >= 0.8 * atr and candle_range > 0 and body / candle_range >= 0.60:
-        if broke_up and bullish:
+        if prior_structure == "SELL" and broke_up and bullish:
             votes["MSS"] = "BUY"
-        elif broke_down and bearish:
+        elif prior_structure == "BUY" and broke_down and bearish:
             votes["MSS"] = "SELL"
 
     # Equal highs/lows require at least two distinct swing points close in price.
@@ -215,12 +220,15 @@ def _concept_votes(x: pd.DataFrame, tf: dict) -> dict:
         elif ob_dir == "SELL" and high >= ob_low and close < ob_low and bearish:
             votes["OB Mitigation"] = "SELL"
 
-    # Breaker proxy: prior range boundary breaks and the immediately prior close
-    # was on the other side; this is a level-flip approximation, not order-flow.
-    if close > prior_high and float(prev.close) <= prior_high:
-        votes["Breaker Block"] = "BUY"
-    elif close < prior_low and float(prev.close) >= prior_low:
-        votes["Breaker Block"] = "SELL"
+    # Breaker-block proxy: an identified order block has failed through its
+    # far side; direction then flips. OHLC cannot confirm the institutional
+    # order-flow interpretation, so this remains a transparent price-zone rule.
+    if ob is not None:
+        ob_high, ob_low = float(ob.high), float(ob.low)
+        if ob_dir == "BUY" and close < ob_low and float(prev.close) >= ob_low:
+            votes["Breaker Block"] = "SELL"
+        elif ob_dir == "SELL" and close > ob_high and float(prev.close) <= ob_high:
+            votes["Breaker Block"] = "BUY"
 
     # Retest is only counted when an earlier close broke the level, and current
     # candle revisits it and closes back on the breakout side.
@@ -241,7 +249,25 @@ def _concept_votes(x: pd.DataFrame, tf: dict) -> dict:
     if abs(close - prior_mid) <= 0.10 * atr:
         votes["Equilibrium"] = "DETECTED"
 
-    # Higher-Timeframe Bias is intentionally neutral: strategy is 1m-only.
+    # Higher-timeframe bias: resample the closed 1m candles into completed
+    # 5m bars, then compare EMA20 with EMA50. Never label missing HTF history
+    # as a neutral market; mark it unavailable instead.
+    try:
+        htf_source = d.copy()
+        htf_source["timestamp"] = pd.to_datetime(htf_source["timestamp"], utc=True, errors="coerce").dt.floor("min")
+        htf_source = htf_source.dropna(subset=["timestamp"]).set_index("timestamp").sort_index()
+        resampler = htf_source.resample("5min", label="left", closed="left")
+        htf_count = resampler["close"].count()
+        htf = resampler.agg({"open": "first", "high": "max", "low": "min", "close": "last"})
+        htf = htf.loc[htf_count.reindex(htf.index).fillna(0).eq(5)].dropna(subset=["close"])
+        if len(htf) >= 50:
+            htf_ema20 = htf["close"].ewm(span=20, adjust=False).mean().iloc[-1]
+            htf_ema50 = htf["close"].ewm(span=50, adjust=False).mean().iloc[-1]
+            votes["Higher-Timeframe Bias"] = "BUY" if htf_ema20 > htf_ema50 else "SELL" if htf_ema20 < htf_ema50 else "NEUTRAL"
+        else:
+            votes["Higher-Timeframe Bias"] = "N/A"
+    except (KeyError, TypeError, ValueError):
+        votes["Higher-Timeframe Bias"] = "N/A"
 
     if bullish and close > float(prev.close) and body >= 0.25 * atr:
         votes["Candle Momentum"] = "BUY"
@@ -256,7 +282,7 @@ def generate_hybrid_signal(candles: pd.DataFrame, ticks: pd.DataFrame | None = N
     if x.empty:
         analysis = {"available": False, "reason": "কোনো বৈধ candle data নেই; fallback direction",
                     "concepts": {name: "N/A" for name in CONCEPTS}, "buy_votes": 0,
-                    "sell_votes": 0, "neutral_votes": len(CONCEPTS), "score": 0,
+                    "sell_votes": 0, "neutral_votes": 0, "unavailable_concepts": len(CONCEPTS), "score": 0,
                     "direction": "BUY", "indicator_signal": "WAIT"}
         return HybridSignal("BUY", 0.05, "Fallback BUY: candle data unavailable; very low confidence", "MMC_LOW_DATA", "MMC_HYBRID_1M", analysis)
 
@@ -275,7 +301,7 @@ def generate_hybrid_signal(candles: pd.DataFrame, ticks: pd.DataFrame | None = N
             action = "BUY"
         analysis = {"available": False, "reason": "কমপক্ষে ৬০টি বন্ধ 1m candle না থাকায় low-confidence fallback",
                     "concepts": {name: "N/A" for name in CONCEPTS}, "buy_votes": 0,
-                    "sell_votes": 0, "neutral_votes": len(CONCEPTS), "score": 0,
+                    "sell_votes": 0, "neutral_votes": 0, "unavailable_concepts": len(CONCEPTS), "score": 0,
                     "direction": action, "indicator_signal": ind_signal, "candle_count": len(x)}
         return HybridSignal(action, 0.15, f"{action} fallback: insufficient closed 1m history; confidence low", "MMC_LOW_DATA", "MMC_HYBRID_1M", analysis)
 
@@ -284,6 +310,7 @@ def generate_hybrid_signal(candles: pd.DataFrame, ticks: pd.DataFrame | None = N
     sell = sum(v == "SELL" for v in votes.values())
     detected = sum(v == "DETECTED" for v in votes.values())
     neutral = sum(v == "NEUTRAL" for v in votes.values())
+    unavailable = sum(v == "N/A" for v in votes.values())
     score = int(round(100*(buy-sell)/max(1, buy+sell)))
     # Pick the stronger MMC side; on a tie use the 1m indicator, then candle
     # direction. The indicator can affect confidence but never veto the call.
@@ -316,7 +343,7 @@ def generate_hybrid_signal(candles: pd.DataFrame, ticks: pd.DataFrame | None = N
     analysis = {
         "available": True, "concept_count": len(CONCEPTS), "concepts": votes,
         "buy_votes": buy, "sell_votes": sell, "detected_concepts": detected, "neutral_votes": neutral,
-        "score": score, "direction": action, "indicator_signal": ind_signal,
+        "unavailable_concepts": unavailable, "score": score, "direction": action, "indicator_signal": ind_signal,
         "timeframe_signals": {"1m": {"available": indicator.get("available", False), "signal": ind_signal}},
         "confidence_basis": "heuristic_strength_not_win_probability",
         "note": "প্রতিটি signal BUY/SELL; দুর্বল confirmation-এ confidence কম। Confidence জয়ের calibrated সম্ভাবনা নয়।",
