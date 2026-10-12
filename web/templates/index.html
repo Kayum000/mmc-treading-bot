@@ -135,6 +135,7 @@ body{background:var(--mmc-bg)!important;color:var(--mmc-text)!important}
   .app.compact-sidebar .nav button[data-scroll="news"]::before{content:"▤"}
   .app.compact-sidebar .nav button[data-scroll="chart"]::before{content:"⌁"}
   .app.compact-sidebar .nav button[data-action="indicators"]::before{content:"▦"}
+  .app.compact-sidebar .nav button[data-action="strategies"]::before{content:"♜"}
   .app.compact-sidebar .nav button[data-action="settings"]::before{content:"⚙"}
 }
 .setting-toggle{min-width:54px}
@@ -192,6 +193,7 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
     <button data-scroll="news">▤ &nbsp; News & Events</button>
     <button data-scroll="chart">⌁ &nbsp; Live Chart</button>
     <button data-action="indicators">▦ &nbsp; Indicators</button>
+    <button data-action="strategies">♜ &nbsp; Strategy</button>
     <a class="download-app" id="download-app-action" href="https://github.com/Kayum000/mmc-treading-bot/releases/download/latest/app-debug.apk">🖥️ Windows App Download</a>
     <button data-action="settings">⚙ &nbsp; Settings</button>
     
@@ -288,6 +290,41 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
     <article class="indicator-card" data-category="oscillator" data-name="Weis Waves Volume Oscillator"><div class="indicator-card-top"><h3>Weis Waves Volume Oscillator</h3></div><span class="indicator-category">Oscillator / Volume</span><div class="indicator-summary">Analyzes volume accumulated across price waves; requires suitable volume data.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
   </div>
 </section>
+<section class="indicators-panel" id="strategies-section" aria-labelledby="strategies-title">
+  <div class="indicators-head">
+    <div><h2 id="strategies-title">♜ MMC Strategy &amp; 22 Concepts</h2><p>MMC/ICT-ধাঁচের ২২টি কনসেপ্ট—নাম, ক্যাটাগরি ও কীভাবে কাজ করে।</p></div>
+    <button type="button" class="mini-btn" id="strategies-back">← Dashboard</button>
+  </div>
+  <div class="indicators-notice"><strong>গুরুত্বপূর্ণ:</strong> এগুলো ২২টি আলাদা স্বয়ংক্রিয় trading strategy নয়; analysis concepts। এই তালিকা dashboard-এ reference হিসেবে যোগ করা হয়েছে—প্রতিটি concept-এর live vote/calculation এখনো signal engine-এর সঙ্গে সংযুক্ত হয়েছে বলে ধরে নেওয়া যাবে না।</div>
+  <div class="indicators-tools">
+    <input type="search" id="strategy-search" placeholder="Search strategy / concept…" aria-label="Search strategies">
+    <span class="indicators-count" id="strategies-count">22 concepts</span>
+  </div>
+  <div class="indicator-grid" id="strategy-grid">
+    <article class="indicator-card strategy-card" data-name="market structure" data-category="structure"><div class="indicator-card-top"><h3>1. Market Structure</h3></div><span class="indicator-category">Structure</span><div class="indicator-summary">Higher High/Higher Low বা Lower High/Lower Low দিয়ে বাজারের swing structure ও সম্ভাব্য দিক বোঝে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="bos — break of structure" data-category="structure"><div class="indicator-card-top"><h3>2. BOS — Break of Structure</h3></div><span class="indicator-category">Structure</span><div class="indicator-summary">গুরুত্বপূর্ণ swing high/low ভাঙলে চলমান trend অব্যাহত থাকার সম্ভাবনা যাচাই করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="choch — change of character" data-category="structure"><div class="indicator-card-top"><h3>3. CHOCH — Change of Character</h3></div><span class="indicator-category">Structure</span><div class="indicator-summary">আগের trend-এর বিপরীতে structure break হলে সম্ভাব্য পরিবর্তনের সতর্কতা দেয়।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="mss — market structure shift" data-category="structure"><div class="indicator-card-top"><h3>4. MSS — Market Structure Shift</h3></div><span class="indicator-category">Structure</span><div class="indicator-summary">বিশেষ করে liquidity sweep-এর পরে বিপরীত দিকে শক্তিশালী structure break খোঁজে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="buy-side liquidity (bsl)" data-category="liquidity"><div class="indicator-card-top"><h3>5. Buy-Side Liquidity (BSL)</h3></div><span class="indicator-category">Liquidity</span><div class="indicator-summary">আগের গুরুত্বপূর্ণ high-এর ওপরে সম্ভাব্য stop/liquidity অঞ্চল চিহ্নিত করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="sell-side liquidity (ssl)" data-category="liquidity"><div class="indicator-card-top"><h3>6. Sell-Side Liquidity (SSL)</h3></div><span class="indicator-category">Liquidity</span><div class="indicator-summary">আগের গুরুত্বপূর্ণ low-এর নিচে সম্ভাব্য stop/liquidity অঞ্চল খোঁজে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="liquidity sweep" data-category="liquidity"><div class="indicator-card-top"><h3>7. Liquidity Sweep</h3></div><span class="indicator-category">Liquidity</span><div class="indicator-summary">দাম আগের high/low ছুঁয়ে বা ভেঙে আবার ফিরে আসে কি না দেখে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="equal highs (eqh)" data-category="liquidity"><div class="indicator-card-top"><h3>8. Equal Highs (EQH)</h3></div><span class="indicator-category">Liquidity</span><div class="indicator-summary">কাছাকাছি সমান high খুঁজে সম্ভাব্য liquidity pool চিহ্নিত করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="equal lows (eql)" data-category="liquidity"><div class="indicator-card-top"><h3>9. Equal Lows (EQL)</h3></div><span class="indicator-category">Liquidity</span><div class="indicator-summary">কাছাকাছি সমান low খুঁজে সম্ভাব্য liquidity pool চিহ্নিত করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="swing high / swing low" data-category="structure"><div class="indicator-card-top"><h3>10. Swing High / Swing Low</h3></div><span class="indicator-category">Structure</span><div class="indicator-summary">স্থানীয় গুরুত্বপূর্ণ চূড়া ও তল শনাক্ত করে; structure ও level নির্ধারণে সাহায্য করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="displacement" data-category="momentum"><div class="indicator-card-top"><h3>11. Displacement</h3></div><span class="indicator-category">Momentum</span><div class="indicator-summary">বড় ও শক্তিশালী directional candle দিয়ে দ্রুত price movement যাচাই করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="fair value gap (fvg)" data-category="imbalance"><div class="indicator-card-top"><h3>12. Fair Value Gap (FVG)</h3></div><span class="indicator-category">Imbalance</span><div class="indicator-summary">ক্যান্ডেলগুলোর মধ্যে imbalance অঞ্চল খুঁজে; পরে retest হলে setup বিবেচনা করা যায়।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="order block (ob)" data-category="price zone"><div class="indicator-card-top"><h3>13. Order Block (OB)</h3></div><span class="indicator-category">Price Zone</span><div class="indicator-summary">শক্তিশালী move-এর আগে তৈরি হওয়া সম্ভাব্য reaction zone চিহ্নিত করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="ob mitigation" data-category="price zone"><div class="indicator-card-top"><h3>14. OB Mitigation</h3></div><span class="indicator-category">Price Zone</span><div class="indicator-summary">দাম আগের Order Block-এ ফিরে এসে প্রতিক্রিয়া দেখায় কি না যাচাই করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="breaker block" data-category="price zone"><div class="indicator-card-top"><h3>15. Breaker Block</h3></div><span class="indicator-category">Price Zone</span><div class="indicator-summary">ব্যর্থ Order Block পরে বিপরীত দিকের reaction zone হিসেবে কাজ করছে কি না দেখে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="rejection candle" data-category="candle confirmation"><div class="indicator-card-top"><h3>16. Rejection Candle</h3></div><span class="indicator-category">Candle Confirmation</span><div class="indicator-summary">লম্বা wick বা close-এর অবস্থান দিয়ে কোনো level থেকে rejection-এর লক্ষণ খোঁজে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="retest confirmation" data-category="entry confirmation"><div class="indicator-card-top"><h3>17. Retest Confirmation</h3></div><span class="indicator-category">Entry Confirmation</span><div class="indicator-summary">breakout বা structure break-এর পর দাম level-এ ফিরে এসে সেটি ধরে রাখছে কি না দেখে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="premium zone" data-category="range position"><div class="indicator-card-top"><h3>18. Premium Zone</h3></div><span class="indicator-category">Range Position</span><div class="indicator-summary">নির্বাচিত high-low range-এর midpoint-এর ওপরে দাম আছে কি না চিহ্নিত করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="discount zone" data-category="range position"><div class="indicator-card-top"><h3>19. Discount Zone</h3></div><span class="indicator-category">Range Position</span><div class="indicator-summary">নির্বাচিত high-low range-এর midpoint-এর নিচে দাম আছে কি না চিহ্নিত করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="equilibrium (50%)" data-category="range position"><div class="indicator-card-top"><h3>20. Equilibrium (50%)</h3></div><span class="indicator-category">Range Position</span><div class="indicator-summary">নির্বাচিত range-এর ৫০% midpoint-কে reference level হিসেবে ব্যবহার করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="higher-timeframe bias" data-category="multi-timeframe"><div class="indicator-card-top"><h3>21. Higher-Timeframe Bias</h3></div><span class="indicator-category">Multi-Timeframe</span><div class="indicator-summary">বড় timeframe-এর trend/bias ছোট timeframe-এর setup-কে সমর্থন করে কি না দেখে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="candle momentum confirmation" data-category="candle confirmation"><div class="indicator-card-top"><h3>22. Candle Momentum Confirmation</h3></div><span class="indicator-category">Candle Confirmation</span><div class="indicator-summary">candle body, close ও momentum দিয়ে সম্ভাব্য BUY/SELL দিক যাচাই করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+  </div>
+</section>
 </div></main></div>
 <div class="modal" id="modal"><div class="modal-card"><button class="modal-close" id="modal-close">×</button><h3 id="modal-title">Notice</h3><p id="modal-body">—</p><div id="modal-extra"></div></div></div><div class="toast" id="toast"></div>
 <script src="{{ url_for('static',filename='signal_alert.js') }}?v=20261003-2"></script>
@@ -327,6 +364,20 @@ function closeModal(){modal.classList.remove('open');modal.querySelector('.modal
 $('modal-close').onclick=closeModal;modal.onclick=e=>{if(e.target===modal)closeModal()};
 $('menu').onclick=()=>{$('sidebar').classList.toggle('open')};
 $('indicators-back')?.addEventListener('click',()=>{$('top')?.scrollIntoView({behavior:'smooth',block:'start'})});
+$('strategies-back')?.addEventListener('click',()=>{$('top')?.scrollIntoView({behavior:'smooth',block:'start'})});
+(()=>{
+ const grid=$('strategy-grid'), search=$('strategy-search'), count=$('strategies-count');
+ if(!grid||!search||!count)return;
+ const filter=()=>{
+  const q=(search.value||'').trim().toLowerCase();let visible=0;
+  grid.querySelectorAll('.strategy-card').forEach(card=>{
+   const show=!q||((card.dataset.name||'').includes(q)||(card.dataset.category||'').includes(q)||card.textContent.toLowerCase().includes(q));
+   card.hidden=!show;if(show)visible++;
+  });
+  count.textContent=visible+' / 22 concepts';
+ };
+ search.addEventListener('input',filter);filter();
+})();
 (()=>{
  const grid=$('indicator-grid'), search=$('indicator-search'), count=$('indicators-count');
  if(!grid||!search||!count)return;
@@ -377,6 +428,11 @@ function handleSidebarNav(e){
   }
   if(action==='indicators'){
     $('indicators-section')?.scrollIntoView({behavior:'smooth',block:'start'});
+    closeMobile();
+    return;
+  }
+  if(action==='strategies'){
+    $('strategies-section')?.scrollIntoView({behavior:'smooth',block:'start'});
     closeMobile();
     return;
   }
