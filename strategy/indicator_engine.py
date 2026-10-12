@@ -45,8 +45,12 @@ def _prep(candles: pd.DataFrame) -> pd.DataFrame:
 
 def analyze_indicators(candles: pd.DataFrame) -> dict:
     x = _prep(candles)
-    if len(x) < 30:
-        return {"available": False, "reason": "কমপক্ষে ৩০টি বন্ধ candle দরকার",
+    # A few calculations (for example the 5-bar Zig Zag proxy) need 6 bars
+    # to evaluate safely. After that, each indicator is gated by its own
+    # minimum-candle requirement below instead of blocking the whole set at 30.
+    if len(x) < 6:
+        return {"available": False,
+                "reason": "কমপক্ষে ৬টি closed candle দরকার; প্রতিটি indicator-এর নিজস্ব minimum candle count আছে",
                 "count": len(x), "score": 0, "signal": "WAIT",
                 "indicators": {n: {"value": None, "signal": "N/A"} for n in ALL_NAMES}}
     c, h, l = x.close, x.high, x.low
