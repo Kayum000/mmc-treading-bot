@@ -88,7 +88,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
 
     with _REAL_MARKET_LOCK:
         state = dict(_REAL_MARKET.get(asset) or {})
-        candle_rows = list(state.get("bars") or [])[-500:]
+        candle_rows = list(state.get("bars") or [])[-1200:]
     # Real quotes are stored in quote_history. Build the same normalized tick
     # DataFrame used by the shared adaptive strategy; do this after releasing
     # the market lock because real_market_ticks() acquires the same lock.
@@ -194,7 +194,7 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
     # the local collector and Render can otherwise hide the newest valid candle
     # exactly at the minute boundary.
     # The adaptive Real strategy requires at least 60 closed candles.
-    candles = fetch_quotex_candles(asset, count=500)
+    candles = fetch_quotex_candles(asset, count=1200)
 
     ticks = local_ticks(asset)
     result = _apply_mtf_filter(generate_otc_signal(candles, ticks=ticks), candles)
