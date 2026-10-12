@@ -219,5 +219,4 @@
   const content=document.getElementById('news-content');if(content&&'MutationObserver'in window){let timer=null;const observer=new MutationObserver(()=>{window.clearTimeout(timer);timer=window.setTimeout(()=>{renderHero();checkAlphaDirection();},80);});observer.observe(content,{childList:true,subtree:true});}
 
   const pairSelect=document.getElementById('pair');if(pairSelect){pairSelect.addEventListener('change',()=>{chartSymbol='';lastChartBars=[];syncChartToMarket();});syncChartToMarket();}
-  if(!document.getElementById('english-ui-script')){const script=document.createElement('script');script.id='english-ui-script';script.src='/static/english_ui.js';script.defer=true;document.head.appendChild(script);}
 })();
