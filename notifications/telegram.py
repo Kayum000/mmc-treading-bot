@@ -98,6 +98,14 @@ def notify_signal(result: dict[str, Any]) -> bool:
     if action not in {"BUY", "SELL"}:
         return False
 
+    # Only forward stronger signals to Telegram. Confidence is a 0..1 score.
+    try:
+        confidence_gate = float(result.get("confidence"))
+    except (TypeError, ValueError):
+        return False
+    if confidence_gate < 0.70:
+        return False
+
     pair = str(result.get("pair") or "Unknown pair").strip()
     mode = str(result.get("market_mode") or "unknown").replace("_", " ").upper()
     entry_time = str(result.get("entry_time_bd") or result.get("signal_time_bd") or result.get("signal_time_utc") or "")
