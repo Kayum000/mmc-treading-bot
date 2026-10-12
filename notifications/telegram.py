@@ -100,7 +100,11 @@ def notify_signal(result: dict[str, Any]) -> bool:
 
     # Only forward stronger signals to Telegram. Accept either a 0..1 score
     # or a percentage value (0..100), and fail closed if missing/invalid.
-    confidence_value = result.get("confidence", result.get("confidence_score", result.get("confidence_pct")))
+    confidence_value = result.get("confidence")
+    if confidence_value is None:
+        confidence_value = result.get("confidence_score")
+    if confidence_value is None:
+        confidence_value = result.get("confidence_pct")
     try:
         confidence_gate = float(confidence_value)
     except (TypeError, ValueError):
