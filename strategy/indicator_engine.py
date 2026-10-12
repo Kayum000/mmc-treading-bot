@@ -139,7 +139,8 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
             if not np.isfinite(v): raise ValueError()
             vals[name] = {"value": round(v, 6), "signal": sig}
         except (ValueError, TypeError, IndexError):
-            vals[name] = {"value": None, "signal": "N/A"}
+            vals[name] = {"value": None, "signal": "N/A",
+                          "reason": "পর্যাপ্ত বা পরিবর্তনশীল candle data নেই"}
     def trend_sig(up, down):
         return "BUY" if up else "SELL" if down else "NEUTRAL"
     lastc = float(c.iloc[-1])
@@ -217,8 +218,10 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
         signed = vol * np.sign(c.diff().fillna(0))
         add("Weis Waves Volume Oscillator", signed.rolling(5).sum().iloc[-1]-signed.rolling(20).sum().iloc[-1], trend_sig(signed.rolling(5).sum().iloc[-1]>signed.rolling(20).sum().iloc[-1], signed.rolling(5).sum().iloc[-1]<signed.rolling(20).sum().iloc[-1]))
     else:
-        vals["Volume Oscillator"] = {"value": None, "signal": "N/A"}
-        vals["Weis Waves Volume Oscillator"] = {"value": None, "signal": "N/A"}
+        vals["Volume Oscillator"] = {"value": None, "signal": "N/A",
+                                     "reason": "বাস্তব volume/tick-volume data collector থেকে পাওয়া যায়নি"}
+        vals["Weis Waves Volume Oscillator"] = {"value": None, "signal": "N/A",
+                                                "reason": "বাস্তব volume/tick-volume data collector থেকে পাওয়া যায়নি"}
     willr = -100*(highest-c)/(highest-lowest).replace(0,np.nan)
     add("Williams %R", willr.iloc[-1], trend_sig(willr.iloc[-1]<-80, willr.iloc[-1]>-20))
     # Require enough closed bars for each lookback before treating its value as valid.
