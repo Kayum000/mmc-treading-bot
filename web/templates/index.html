@@ -625,7 +625,7 @@ function scheduleAuto(){
  };
  const now=Date.now(),minute=Math.floor(now/60000)*60000;
  let fireAt=minute+1500;
- if(now>minute+10000)fireAt+=60000;
+ if(now>=fireAt)fireAt+=60000;
  state.autoTimer=setTimeout(check,Math.max(100,fireAt-now));
 }
 async function runAuto(){if(!state.auto||!state.pair)return;try{const r=await fetch('/auto-signal',{credentials:'same-origin',cache:'no-store'});const d=await readJsonResponse(r);if(r.ok&&d.ok){renderResult(d.result);if(window.alertForSignal)window.alertForSignal(d.result);recordPerformance(d.result);$('auto-status').textContent=`AUTO SIGNAL চালু • ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;loadPerformance()}}catch(e){$('auto-status').textContent='AUTO SIGNAL error'}}
