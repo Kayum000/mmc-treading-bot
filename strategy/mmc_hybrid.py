@@ -198,16 +198,13 @@ def _concept_votes(x: pd.DataFrame, tf: dict) -> dict:
                 break
     if ob is not None:
         ob_high, ob_low = float(ob.high), float(ob.low)
-        # Mark OB as directional context. Mitigation only counts if the current
-        # candle revisits a previously formed zone and rejects it in its direction.
-        if ob_dir == "BUY" and bullish and close > ob_high:
-            votes["Order Block"] = "BUY"
-            if low <= ob_high and close > ob_high:
-                votes["OB Mitigation"] = "BUY"
-        elif ob_dir == "SELL" and bearish and close < ob_low:
-            votes["Order Block"] = "SELL"
-            if high >= ob_low and close < ob_low:
-                votes["OB Mitigation"] = "SELL"
+        votes["Order Block"] = ob_dir
+        # Mitigation only counts when the current candle revisits the already
+        # formed zone and closes back outside it in the original direction.
+        if ob_dir == "BUY" and low <= ob_high and close > ob_high and bullish:
+            votes["OB Mitigation"] = "BUY"
+        elif ob_dir == "SELL" and high >= ob_low and close < ob_low and bearish:
+            votes["OB Mitigation"] = "SELL"
 
     # Breaker proxy: prior range boundary breaks and the immediately prior close
     # was on the other side; this is a level-flip approximation, not order-flow.
