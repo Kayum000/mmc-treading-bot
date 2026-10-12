@@ -202,7 +202,8 @@ def init_quotex_browser_ingest(app):
                 result = get_signal(pair, "real", automatic=True)
             else:
                 return jsonify({"ok": False, "error": "অসমর্থিত মার্কেট মোড।"}), 400
-            from web.app import _record_signal_performance, _notify_telegram_safely
+            from web.app import _apply_confidence_gate, _record_signal_performance, _notify_telegram_safely
+            result = _apply_confidence_gate(result)
             _record_signal_performance(result)
             _notify_telegram_safely(result)
             return jsonify({"ok": True, "result": result})
@@ -268,8 +269,8 @@ def init_quotex_browser_ingest(app):
                     cache_asset.get("fresh") if cache_asset else False,
                 )
                 try:
-                    result = get_signal(pair, "quotex_otc", automatic=True)
-                    from web.app import _record_signal_performance, _notify_telegram_safely
+                    from web.app import _apply_confidence_gate, _record_signal_performance, _notify_telegram_safely
+                    result = _apply_confidence_gate(get_signal(pair, "quotex_otc", automatic=True))
                     _record_signal_performance(result)
                     _notify_telegram_safely(result)
                     return jsonify({"ok": True, "result": result})
