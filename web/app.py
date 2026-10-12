@@ -573,7 +573,7 @@ def performance():
             con.execute("DELETE FROM performance")
             con.commit()
             return jsonify({"ok": True})
-        payload = request.get_json(silent=True) or {}
+        payload = _apply_confidence_gate(request.get_json(silent=True) or {})
         if not payload.get("id") or str(payload.get("signal", "")).upper() not in {"BUY", "SELL"}:
             return jsonify({"ok": False, "error": "Invalid performance row"}), 400
         cols = ["id","time","pair","signal","entry_price","candle_color","signal_time_utc","analysis_candle_time_utc","result","signal_created_utc","signal_created_bd","outcome_price","outcome_candle_time_utc","outcome_basis","market_mode","strategy","regime","strategy_mode"]
