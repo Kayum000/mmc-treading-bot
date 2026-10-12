@@ -876,7 +876,7 @@ function openSettings(){
   $('settings-theme').onclick=openThemeSettings;
   $('settings-alerts').onclick=()=>{$('enable-alerts')?.click();closeModal()};
 }
-window.addEventListener('load',()=>{applyCompactSidebar();applySavedTheme();activeMode(state.mode||'real');setMode(state.mode||'real');if(state.pair)pair.value=state.pair;updateStatus();loadNews();loadPerformance();bindResult();if(SETTINGS_SAFE_VIEW)openSettings()});
+window.addEventListener('load',()=>{applyCompactSidebar();applySavedTheme();$('auto-toggle').checked=state.auto;activeMode(state.mode||'real');setMode(state.mode||'real');if(state.pair)pair.value=state.pair;updateStatus();loadNews();loadPerformance();bindResult();if(SETTINGS_SAFE_VIEW)openSettings();else if(state.auto){$('auto-status').textContent='AUTO SIGNAL চালু • candle check চলছে';scheduleAuto()}});
 })();
 </script>
 
