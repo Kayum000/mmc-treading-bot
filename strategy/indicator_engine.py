@@ -142,13 +142,35 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
         vals["Weis Waves Volume Oscillator"] = {"value": None, "signal": "N/A"}
     willr = -100*(highest-c)/(highest-lowest).replace(0,np.nan)
     add("Williams %R", willr.iloc[-1], trend_sig(willr.iloc[-1]<-80, willr.iloc[-1]>-20))
+    # Require enough closed bars for each lookback before treating its value as valid.
+    # A moving EMA can be numerically produced early, but that does not mean its
+    # advertised period has enough history behind it.
+    minimums = {
+        "Alligator": 20, "Bollinger Bands": 20, "Envelopes": 20, "Fractal": 30,
+        "Ichimoku Cloud": 52, "Keltner channel": 20, "Donchian channel": 20,
+        "Supertrend": 14, "Moving Average": 50, "Parabolic SAR": 30, "Zig Zag": 30,
+        "ADX": 27, "Aroon": 30, "Awesome Oscillator": 34, "Bears power": 30,
+        "Bulls power": 30, "CCI": 20, "DeMarker": 30, "ATR": 14, "MACD": 34,
+        "Momentum": 30, "RSI": 30, "Rate Of Change": 30,
+        "Stochastic Oscillator": 30, "Schaff Trend Cycle": 30, "Vortex": 30,
+        "Volume Oscillator": 30, "Williams %R": 30,
+        "Weis Waves Volume Oscillator": 30,
+    }
+    for name, required in minimums.items():
+        if len(x) < required:
+            vals[name] = {"value": None, "signal": "N/A",
+                          "reason": f"কমপক্ষে {required}টি closed candle দরকার",
+                          "minimum_candles": required}
+        elif name in vals:
+            vals[name]["minimum_candles"] = required
     votes = [v["signal"] for v in vals.values() if v["signal"] in ("BUY","SELL")]
     buy, sell = votes.count("BUY"), votes.count("SELL")
     total = len(votes)
     score = int(round(100*(buy-sell)/total)) if total else 0
-    signal = "BUY" if score >= 25 else "SELL" if score <= -25 else "WAIT"
+    signal = "BUY" if total >= 10 and score >= 25 else "SELL" if total >= 10 and score <= -25 else "WAIT"
     return {"available": True, "count": len(x), "score": score, "signal": signal,
             "buy_votes": buy, "sell_votes": sell, "usable_indicators": total,
+            "minimum_usable_indicators": 10,
             "indicators": vals,
             "note": "এটি indicator vote score, জয়ের সম্ভাবনা নয়; কিছু নামের জন্য OHLC proxy ব্যবহৃত হয়েছে।"}
 
