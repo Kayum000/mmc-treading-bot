@@ -485,7 +485,7 @@ async function loadLiveAnalysis(){
     }
     if(strategyStatus){
       if(mmc.available===false)strategyStatus.innerHTML='<strong>MMC status:</strong> '+(mmc.reason||'কমপক্ষে ৬০টি closed candle দরকার')+'; কোনো live vote অনুমান করে দেখানো হয়নি.';
-      else strategyStatus.innerHTML='<strong>MMC status:</strong> '+String(data.pair||'')+' · '+String(data.market_mode||'')+' · BUY '+String(mmc.buy_votes||0)+' / SELL '+String(mmc.sell_votes||0)+' / neutral '+String(mmc.neutral_votes||0)+' / detected '+String(mmc.detected_concepts||0)+' · source '+dataSource+' · candle time '+candleStamp+' · '+String(mmc.note||'Rule-based proxy votes, not a win probability.');
+      else strategyStatus.innerHTML='<strong>MMC status:</strong> '+String(data.pair||'')+' · '+String(data.market_mode||'')+' · BUY '+String(mmc.buy_votes||0)+' / SELL '+String(mmc.sell_votes||0)+' / neutral '+String(mmc.neutral_votes||0)+' / detected '+String(mmc.detected_concepts||0)+' / unavailable '+String(mmc.unavailable_concepts||0)+' · source '+dataSource+' · candle time '+candleStamp+' · '+String(mmc.note||'Rule-based proxy votes, not a win probability.');
     }
   }catch(error){
     if(status)status.innerHTML='<strong>ডেটা স্ট্যাটাস:</strong> live analysis পাওয়া যায়নি — '+String(error.message||error)+'। Candle data অনুপস্থিত/পুরোনো হলে BUY/SELL দেখানো হবে না.';
