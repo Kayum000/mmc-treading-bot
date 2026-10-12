@@ -170,6 +170,18 @@ body{background:var(--mmc-bg)!important;color:var(--mmc-text)!important}
 .indicator-summary{margin-top:6px;color:#91a9c3;font-size:10px;line-height:1.5}
 .indicators-notice{padding:11px 12px;border:1px solid #73551d;background:#2b2413;color:#f6d992;border-radius:9px;font-size:11px;line-height:1.65}
 .indicators-count{color:#a7c0dc;font-size:11px;margin:10px 0}
+/* Keep the full 29-indicator and 22-concept catalogs off the dashboard. */
+#indicators-section,#strategies-section{display:none!important}
+.modal.open:has(.analysis-modal){padding:2vh 2vw!important}
+.modal.open:has(.analysis-modal) .modal-card.analysis-modal{box-sizing:border-box!important;position:relative;width:min(1180px,96vw)!important;min-width:0!important;max-width:96vw!important;height:92vh!important;height:92dvh!important;max-height:92dvh!important;margin:0!important;border-radius:12px!important;padding:16px 20px 18px!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}
+.modal-card.analysis-modal #modal-title{flex:none;font-size:18px;margin:0 38px 12px 0}
+.modal-card.analysis-modal #modal-body{display:none!important}
+.modal-card.analysis-modal #modal-extra{display:block!important;flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.modal-card.analysis-modal .modal-close{position:absolute;right:14px;top:10px;float:none;z-index:2}
+.modal-card.analysis-modal #indicators-section,.modal-card.analysis-modal #strategies-section{display:block!important;margin:0!important;border:0!important;border-radius:0!important;padding:0!important;background:transparent!important}
+.modal-card.analysis-modal .indicators-head{padding-right:34px}
+html:has(.modal.open .analysis-modal),body:has(.modal.open .analysis-modal),.modal.open:has(.analysis-modal){overflow:hidden!important}
+@media(max-width:760px){.modal.open:has(.analysis-modal){padding:0!important}.modal.open:has(.analysis-modal) .modal-card.analysis-modal{width:100vw!important;max-width:100vw!important;height:100vh!important;height:100dvh!important;max-height:none!important;border-radius:0!important;padding:12px!important}.modal-card.analysis-modal .indicators-head{padding-right:30px}}
 @media(max-width:1000px){.indicator-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:520px){.indicator-grid{grid-template-columns:1fr}.indicators-panel{padding:13px}.indicators-head h2{font-size:19px}}
 </style>
@@ -359,12 +371,16 @@ function applyCompactSidebar(){
 }
 const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(m){toastEl.textContent=m;toastEl.classList.add('show');clearTimeout(toastEl._t);toastEl._t=setTimeout(()=>toastEl.classList.remove('show'),2600)}
-function modalOpen(title,body,extra=''){window.__mmcModalPageScrollY=window.scrollY;$('modal-title').textContent=title;$('modal-body').textContent=body;$('modal-extra').innerHTML=extra;modal.querySelector('.modal-card')?.classList.remove('performance-modal');modal.classList.add('open')}
-function closeModal(){modal.classList.remove('open');modal.querySelector('.modal-card')?.classList.remove('performance-modal');const y=Number(window.__mmcModalPageScrollY||0);document.documentElement.style.scrollBehavior='auto';window.scrollTo(0,y);requestAnimationFrame(()=>document.documentElement.style.removeProperty('scroll-behavior'))}
+const analysisSectionMarkers={};
+['indicators-section','strategies-section'].forEach(id=>{const node=$(id);if(!node||!node.parentNode)return;const marker=document.createComment('mmc-home-'+id);node.parentNode.insertBefore(marker,node);analysisSectionMarkers[id]=marker;});
+function restoreAnalysisSections(){Object.entries(analysisSectionMarkers).forEach(([id,marker])=>{const node=$(id),host=$('analysis-modal-host');if(node&&host&&host.contains(node)&&marker.parentNode)marker.parentNode.insertBefore(node,marker.nextSibling);});}
+function modalOpen(title,body,extra=''){restoreAnalysisSections();window.__mmcModalPageScrollY=window.scrollY;$('modal-title').textContent=title;$('modal-body').textContent=body;$('modal-extra').innerHTML=extra;modal.querySelector('.modal-card')?.classList.remove('performance-modal','analysis-modal');modal.classList.add('open')}
+function closeModal(){restoreAnalysisSections();modal.classList.remove('open');modal.querySelector('.modal-card')?.classList.remove('performance-modal','analysis-modal');const y=Number(window.__mmcModalPageScrollY||0);document.documentElement.style.scrollBehavior='auto';window.scrollTo(0,y);requestAnimationFrame(()=>document.documentElement.style.removeProperty('scroll-behavior'))}
+function openAnalysisModal(sectionId){const section=$(sectionId);if(!section)return;const title=sectionId==='indicators-section'?'▦ Quotex Indicators':'♜ MMC Strategy & 22 Concepts';modalOpen(title,'নির্বাচিত মার্কেটের সর্বশেষ closed-candle data দিয়ে গণনা করা ফলাফল।','<div id="analysis-modal-host"></div>');modal.querySelector('.modal-card')?.classList.add('analysis-modal');$('analysis-modal-host')?.appendChild(section);$('modal-extra').scrollTop=0;loadLiveAnalysis();}
 $('modal-close').onclick=closeModal;modal.onclick=e=>{if(e.target===modal)closeModal()};
 $('menu').onclick=()=>{$('sidebar').classList.toggle('open')};
-$('indicators-back')?.addEventListener('click',()=>{$('top')?.scrollIntoView({behavior:'smooth',block:'start'})});
-$('strategies-back')?.addEventListener('click',()=>{$('top')?.scrollIntoView({behavior:'smooth',block:'start'})});
+$('indicators-back')?.addEventListener('click',closeModal);
+$('strategies-back')?.addEventListener('click',closeModal);
 (()=>{
  const grid=$('strategy-grid'), search=$('strategy-search'), count=$('strategies-count');
  if(!grid||!search||!count)return;
@@ -534,13 +550,11 @@ function handleSidebarNav(e){
     return;
   }
   if(action==='indicators'){
-    $('indicators-section')?.scrollIntoView({behavior:'smooth',block:'start'});
-    closeMobile();loadLiveAnalysis();
+    closeMobile();openAnalysisModal('indicators-section');
     return;
   }
   if(action==='strategies'){
-    $('strategies-section')?.scrollIntoView({behavior:'smooth',block:'start'});
-    closeMobile();loadLiveAnalysis();
+    closeMobile();openAnalysisModal('strategies-section');
     return;
   }
   if(action==='signal'){
