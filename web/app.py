@@ -11,7 +11,6 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request, redirect, url_for, session
 
 from signals.get_signal import get_signal
-from data.biquote_forex import fetch_api_usage, get_credit_usage
 from data.news_direction import get_news_direction_for_pair
 from data.news_events import get_weekly_news_events_for_pair
 from data.all_news_events import get_all_news_events
@@ -275,19 +274,14 @@ def _valid_login(username: str, password: str) -> bool:
     )
 
 def _usage_view():
-    """Return cached API/credit usage without blocking the dashboard unnecessarily."""
+    """Report that the dashboard's real-market feed comes from the Quotex collector."""
     now = time.time()
     if _USAGE_CACHE["data"] is not None and now - _USAGE_CACHE["at"] < 30:
         return _USAGE_CACHE["data"]
-    try:
-        api_usage = fetch_api_usage() or {}
-    except Exception:
-        api_usage = {}
-    try:
-        credit_usage = get_credit_usage() or {}
-    except Exception:
-        credit_usage = {}
-    data = {"api": api_usage, "credits": credit_usage}
+    data = {
+        "api": {"provider": "Quotex browser WebSocket", "api_key_required": False},
+        "credits": {},
+    }
     _USAGE_CACHE["data"] = data
     _USAGE_CACHE["at"] = now
     return data
