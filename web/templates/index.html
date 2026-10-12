@@ -327,7 +327,7 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
 </section>
 </div></main></div>
 <div class="modal" id="modal"><div class="modal-card"><button class="modal-close" id="modal-close">×</button><h3 id="modal-title">Notice</h3><p id="modal-body">—</p><div id="modal-extra"></div></div></div><div class="toast" id="toast"></div>
-<script src="{{ url_for('static',filename='signal_alert.js') }}?v=20261012-confidence-gate-4"></script>
+<script src="{{ url_for('static',filename='signal_alert.js') }}?v=20261012-confidence-gate-5"></script>
 <script src="{{ url_for('static',filename='candle_timer.js') }}?v=20261012-clean-1"></script>
 <script src="{{ url_for('static',filename='live_stream_chart.js') }}?v=20260921-6"></script>
 <script>
@@ -682,8 +682,12 @@ function replacePerformanceTable(preserveScroll=false){
   }
 }
 function recordPerformance(r){
-  // Only persist actual directional signals; HOLD/WAIT/neutral results are not performance rows.
+  // Persist only valid BUY/SELL signals with verified confidence >= 70%.
   if(!r||!['BUY','SELL'].includes(String(r.signal||'').toUpperCase()))return;
+  const rawConfidence=r.confidence??r.confidence_score??r.confidence_pct;
+  const confidenceNumber=Number(rawConfidence);
+  const confidence=rawConfidence==null||rawConfidence===''||!Number.isFinite(confidenceNumber)?null:(confidenceNumber>1?confidenceNumber/100:confidenceNumber);
+  if(confidence===null||confidence<0.70||confidence>1)return;
   const mode=String(r.market_mode||state.mode||'real').toLowerCase();
   const pair=String(r.pair||state.pair||'—').trim().toUpperCase();
   const signal=String(r.signal).toUpperCase();
@@ -697,7 +701,7 @@ function recordPerformance(r){
     pair,
     mode,
     market_mode:mode,
-    signal,entry_price:r.entry_price??null,
+    signal,confidence,entry_price:r.entry_price??null,
     candle_color:r.signal_candle_color||'—',signal_time_utc:signalTime,
     analysis_candle_time_utc:r.analysis_candle_time_utc||null,
     result:(r.result==='লাভ'||r.result==='লস'||r.result==='DOJI')?r.result:'অপেক্ষমাণ',
