@@ -45,88 +45,194 @@ def _clean(candles: pd.DataFrame) -> pd.DataFrame:
 
 
 def _concept_votes(x: pd.DataFrame, tf: dict) -> dict:
-    names = CONCEPTS
-    votes = {name: "NEUTRAL" for name in names}
-    if len(x) < 30:
+    """Evaluate 22 transparent OHLC rules using completed candles only.
+
+    These are reproducible price-action proxies. OHLC alone cannot confirm
+    actual resting liquidity, institutional order flow, or subjective OB validity.
+    """
+    votes = {name: "NEUTRAL" for name in CONCEPTS}
+    if len(x) < 60:
         return votes
-    recent = x.iloc[-30:].reset_index(drop=True)
-    last = recent.iloc[-1]
-    prev = recent.iloc[-2]
-    close, op, high, low = map(float, (last.close, last.open, last.high, last.low))
-    candle_range = max(high-low, 1e-12)
-    body = abs(close-op)
-    bullish = close > op
-    bearish = close < op
-    prior = recent.iloc[-21:-1]
-    prior_high, prior_low = float(prior.high.max()), float(prior.low.min())
-    prior_mid = (prior_high + prior_low) / 2
-    # Local swing references use past candles only (excluding the signal candle).
-    swing_hi = float(recent.high.iloc[-7:-1].max())
-    swing_lo = float(recent.low.iloc[-7:-1].min())
-    older_hi = float(recent.high.iloc[-13:-7].max())
-    older_lo = float(recent.low.iloc[-13:-7].min())
-    atr = float((recent.high-recent.low).rolling(14).mean().iloc[-2]) if len(recent) >= 15 else candle_range
-    atr = max(atr if np.isfinite(atr) else candle_range, 1e-12)
+
+    # Use prior candles to establish reference levels; the latest candle is
+    # evaluated as the signal candle. Pivot candidates need candles on both sides.
+    d = x.reset_index(drop=True)
+    last_i = len(d) - 1
+    last = d.iloc[last_i]
+    prev = d.iloc[last_i - 1]
+    close, op, high, low = (float(last[k]) for k in ("close", "open", "high", "low"))
+    candle_range = max(high - low, 1e-12)
+    body = abs(close - op)
+    bullish, bearish = close > op, close < op
     upper_wick = high - max(close, op)
     lower_wick = min(close, op) - low
 
-    if swing_hi > older_hi and swing_lo > older_lo: votes["Market Structure"] = "BUY"
-    elif swing_hi < older_hi and swing_lo < older_lo: votes["Market Structure"] = "SELL"
-    if close > swing_hi: votes["BOS"] = "BUY"
-    elif close < swing_lo: votes["BOS"] = "SELL"
-    if older_lo < float(recent.low.iloc[-7]) and close > swing_hi: votes["CHOCH"] = "BUY"
-    elif older_hi > float(recent.high.iloc[-7]) and close < swing_lo: votes["CHOCH"] = "SELL"
-    if close > swing_hi and body >= 0.55*candle_range: votes["MSS"] = "BUY"
-    elif close < swing_lo and body >= 0.55*candle_range: votes["MSS"] = "SELL"
+    tr = pd.concat([
+        d["high"] - d["low"],
+        (d["high"] - d["close"].shift(1)).abs(),
+        (d["low"] - d["close"].shift(1)).abs(),
+    ], axis=1).max(axis=1)
+    atr_series = tr.rolling(14).mean()
+    atr = float(atr_series.iloc[-2]) if pd.notna(atr_series.iloc[-2]) else candle_range
+    atr = max(atr, 1e-12)
 
-    # Liquidity pools and sweeps.
-    equal_high = abs(float(recent.high.iloc[-10:-1].max()) - float(recent.high.iloc[-10:-1].min())) <= atr*0.18
-    equal_low = abs(float(recent.low.iloc[-10:-1].max()) - float(recent.low.iloc[-10:-1].min())) <= atr*0.18
-    if equal_high: votes["Equal Highs"] = "SELL"
-    if equal_low: votes["Equal Lows"] = "BUY"
-    if high > swing_hi and close < swing_hi: votes["Buy-Side Liquidity"] = "SELL"
-    elif low < swing_lo and close > swing_lo: votes["Sell-Side Liquidity"] = "BUY"
-    if (high > swing_hi and close < swing_hi and upper_wick > body) : votes["Liquidity Sweep"] = "SELL"
-    elif low < swing_lo and close > swing_lo and lower_wick > body: votes["Liquidity Sweep"] = "BUY"
-    if upper_wick > body*1.5 and upper_wick > candle_range*0.35: votes["Swing High/Low"] = "SELL"
-    elif lower_wick > body*1.5 and lower_wick > candle_range*0.35: votes["Swing High/Low"] = "BUY"
+    # Confirmed swing pivots: the pivot is at least two bars old, so no
+    # future candle is used to decide the signal candle's direction.
+    pivot_window = d.iloc[max(0, last_i - 40):last_i - 1].copy()
+    swing_highs, swing_lows = [], []
+    for i in range(2, len(pivot_window) - 2):
+        row = pivot_window.iloc[i]
+        h0, l0 = float(row.high), float(row.low)
+        if h0 >= float(pivot_window.high.iloc[i-2:i+3].max()):
+            swing_highs.append((pivot_window.index[i], h0))
+        if l0 <= float(pivot_window.low.iloc[i-2:i+3].min()):
+            swing_lows.append((pivot_window.index[i], l0))
+    recent_highs = [p for p in swing_highs if p[0] >= last_i - 25]
+    recent_lows = [p for p in swing_lows if p[0] >= last_i - 25]
+    swing_hi = recent_highs[-1][1] if recent_highs else float(d.high.iloc[-21:-1].max())
+    swing_lo = recent_lows[-1][1] if recent_lows else float(d.low.iloc[-21:-1].min())
+    prior_high = float(d.high.iloc[-21:-1].max())
+    prior_low = float(d.low.iloc[-21:-1].min())
+    prior_mid = (prior_high + prior_low) / 2.0
 
-    if body >= atr*0.9 and bullish: votes["Displacement"] = "BUY"
-    elif body >= atr*0.9 and bearish: votes["Displacement"] = "SELL"
-    # Three-candle FVG proxy: gap between candle 1 and candle 3.
-    c1, c3 = recent.iloc[-3], recent.iloc[-1]
-    if float(c1.high) < float(c3.low): votes["Fair Value Gap"] = "BUY"
-    elif float(c1.low) > float(c3.high): votes["Fair Value Gap"] = "SELL"
-    # OB proxy: last opposing candle before current displacement.
-    previous = recent.iloc[-5:-1]
-    bull_ob = previous[(previous.close < previous.open)]
-    bear_ob = previous[(previous.close > previous.open)]
-    if bullish and body >= atr*0.65 and not bull_ob.empty: votes["Order Block"] = "BUY"
-    elif bearish and body >= atr*0.65 and not bear_ob.empty: votes["Order Block"] = "SELL"
-    # Mitigation/retest proxies require price to revisit the prior swing area.
-    if low <= swing_hi and close > swing_hi and bullish: votes["OB Mitigation"] = "BUY"
-    elif high >= swing_lo and close < swing_lo and bearish: votes["OB Mitigation"] = "SELL"
-    if close > prior_high and float(prev.close) < prior_high: votes["Breaker Block"] = "BUY"
-    elif close < prior_low and float(prev.close) > prior_low: votes["Breaker Block"] = "SELL"
-    if lower_wick > candle_range*0.45 and bullish: votes["Rejection Candle"] = "BUY"
-    elif upper_wick > candle_range*0.45 and bearish: votes["Rejection Candle"] = "SELL"
-    if abs(close-swing_hi) <= atr*0.2 and bullish: votes["Retest Confirmation"] = "BUY"
-    elif abs(close-swing_lo) <= atr*0.2 and bearish: votes["Retest Confirmation"] = "SELL"
-    if close > prior_mid + atr*0.1: votes["Premium Zone"] = "SELL"
-    elif close < prior_mid - atr*0.1: votes["Discount Zone"] = "BUY"
-    if close > prior_mid + atr*0.05: votes["Equilibrium"] = "BUY"
-    elif close < prior_mid - atr*0.05: votes["Equilibrium"] = "SELL"
+    # Market structure uses the sequence of the two latest confirmed swing points.
+    if len(recent_highs) >= 2 and len(recent_lows) >= 2:
+        hh = recent_highs[-1][1] > recent_highs[-2][1]
+        hl = recent_lows[-1][1] > recent_lows[-2][1]
+        lh = recent_highs[-1][1] < recent_highs[-2][1]
+        ll = recent_lows[-1][1] < recent_lows[-2][1]
+        if hh and hl:
+            votes["Market Structure"] = "BUY"
+        elif lh and ll:
+            votes["Market Structure"] = "SELL"
+
+    # BOS = close through the latest confirmed swing in the existing structure.
+    broke_up, broke_down = close > swing_hi, close < swing_lo
+    if broke_up:
+        votes["BOS"] = "BUY"
+    elif broke_down:
+        votes["BOS"] = "SELL"
+
+    # CHOCH/MSS only vote when a close breaks the opposite-side swing against
+    # the prior confirmed structure; MSS additionally requires displacement.
+    prior_structure = votes["Market Structure"]
+    if prior_structure == "SELL" and broke_up:
+        votes["CHOCH"] = "BUY"
+    elif prior_structure == "BUY" and broke_down:
+        votes["CHOCH"] = "SELL"
+    if body >= 0.8 * atr and candle_range > 0 and body / candle_range >= 0.60:
+        if broke_up and bullish:
+            votes["MSS"] = "BUY"
+        elif broke_down and bearish:
+            votes["MSS"] = "SELL"
+
+    # Equal highs/lows require at least two distinct swing points close in price.
+    tol = max(0.12 * atr, abs(close) * 0.00002)
+    eqh = len(recent_highs) >= 2 and abs(recent_highs[-1][1] - recent_highs[-2][1]) <= tol
+    eql = len(recent_lows) >= 2 and abs(recent_lows[-1][1] - recent_lows[-2][1]) <= tol
+    if eqh:
+        votes["Equal Highs"] = "NEUTRAL"  # pool exists; direction comes from a sweep/reclaim
+    if eql:
+        votes["Equal Lows"] = "NEUTRAL"
+
+    # Sweep requires piercing a prior level and closing back inside it.
+    sweep_bsl = high > swing_hi and close < swing_hi
+    sweep_ssl = low < swing_lo and close > swing_lo
+    if sweep_bsl:
+        votes["Buy-Side Liquidity"] = "SELL"
+        votes["Liquidity Sweep"] = "SELL"
+    elif sweep_ssl:
+        votes["Sell-Side Liquidity"] = "BUY"
+        votes["Liquidity Sweep"] = "BUY"
+
+    # Candle rejection/swing reaction; do not count a neutral doji as directional.
+    if bullish and lower_wick >= max(body * 1.5, candle_range * 0.35):
+        votes["Swing High/Low"] = "BUY"
+        votes["Rejection Candle"] = "BUY"
+    elif bearish and upper_wick >= max(body * 1.5, candle_range * 0.35):
+        votes["Swing High/Low"] = "SELL"
+        votes["Rejection Candle"] = "SELL"
+
+    # Displacement: body materially larger than recent ATR and close near candle extreme.
+    if bullish and body >= 1.0 * atr and (high - close) <= 0.20 * candle_range:
+        votes["Displacement"] = "BUY"
+    elif bearish and body >= 1.0 * atr and (close - low) <= 0.20 * candle_range:
+        votes["Displacement"] = "SELL"
+
+    # Three-candle FVG definition: candle 1 high below candle 3 low, or vice versa.
+    c1, c3 = d.iloc[-3], d.iloc[-1]
+    bull_fvg = float(c1.high) < float(c3.low)
+    bear_fvg = float(c1.low) > float(c3.high)
+    if bull_fvg:
+        votes["Fair Value Gap"] = "BUY"
+    elif bear_fvg:
+        votes["Fair Value Gap"] = "SELL"
+
+    # Order block proxy: last opposite-colour candle before a displacement move
+    # that closes beyond a prior swing; zone is that candle's full high-low.
+    ob_start = max(0, last_i - 6)
+    candidates = d.iloc[ob_start:last_i]
+    bull_ob = candidates[(candidates.close < candidates.open)]
+    bear_ob = candidates[(candidates.close > candidates.open)]
+    bull_break = bullish and body >= atr and close > swing_hi
+    bear_break = bearish and body >= atr and close < swing_lo
+    ob = None
+    ob_dir = None
+    if bull_break and not bull_ob.empty:
+        ob, ob_dir = bull_ob.iloc[-1], "BUY"
+    elif bear_break and not bear_ob.empty:
+        ob, ob_dir = bear_ob.iloc[-1], "SELL"
+    if ob is not None:
+        votes["Order Block"] = ob_dir
+        ob_high, ob_low = float(ob.high), float(ob.low)
+        # Mitigation means price later revisits the zone and closes away in the
+        # original direction; the current displacement bar itself is not a retest.
+        if ob_dir == "BUY" and low <= ob_high and close > ob_high and bullish:
+            votes["OB Mitigation"] = "BUY"
+        elif ob_dir == "SELL" and high >= ob_low and close < ob_low and bearish:
+            votes["OB Mitigation"] = "SELL"
+
+    # Breaker proxy: prior range boundary breaks and the immediately prior close
+    # was on the other side; this is a level-flip approximation, not order-flow.
+    if close > prior_high and float(prev.close) <= prior_high:
+        votes["Breaker Block"] = "BUY"
+    elif close < prior_low and float(prev.close) >= prior_low:
+        votes["Breaker Block"] = "SELL"
+
+    # Retest is only counted when an earlier close broke the level, and current
+    # candle revisits it and closes back on the breakout side.
+    hist = d.iloc[-6:-1]
+    prior_bull_break = bool((hist.close > swing_hi).any())
+    prior_bear_break = bool((hist.close < swing_lo).any())
+    if prior_bull_break and low <= swing_hi + 0.15 * atr and close > swing_hi and bullish:
+        votes["Retest Confirmation"] = "BUY"
+    elif prior_bear_break and high >= swing_lo - 0.15 * atr and close < swing_lo and bearish:
+        votes["Retest Confirmation"] = "SELL"
+
+    # Premium/discount are location labels, not directional signals on their own.
+    # Vote only when price is in the relevant half AND a matching reaction exists.
+    if close > prior_mid and sweep_bsl and bearish:
+        votes["Premium Zone"] = "SELL"
+    elif close < prior_mid and sweep_ssl and bullish:
+        votes["Discount Zone"] = "BUY"
+    if abs(close - prior_mid) <= 0.10 * atr:
+        votes["Equilibrium"] = "NEUTRAL"
+    elif close > prior_mid and bullish:
+        votes["Equilibrium"] = "BUY"
+    elif close < prior_mid and bearish:
+        votes["Equilibrium"] = "SELL"
 
     higher = [tf.get(k, {}) for k in ("5m", "15m")]
-    usable = [item.get("signal") for item in higher if item.get("available") and item.get("signal") in ("BUY", "SELL")]
-    if usable:
-        buys, sells = usable.count("BUY"), usable.count("SELL")
-        if buys > sells: votes["Higher-Timeframe Bias"] = "BUY"
-        elif sells > buys: votes["Higher-Timeframe Bias"] = "SELL"
-    if bullish and close > float(prev.close): votes["Candle Momentum"] = "BUY"
-    elif bearish and close < float(prev.close): votes["Candle Momentum"] = "SELL"
-    return votes
+    usable = [item.get("signal") for item in higher
+              if item.get("available") and item.get("signal") in ("BUY", "SELL")]
+    if len(usable) == 2 and usable[0] == usable[1]:
+        votes["Higher-Timeframe Bias"] = usable[0]
 
+    if bullish and close > float(prev.close) and body >= 0.25 * atr:
+        votes["Candle Momentum"] = "BUY"
+    elif bearish and close < float(prev.close) and body >= 0.25 * atr:
+        votes["Candle Momentum"] = "SELL"
+    return votes
 
 def generate_hybrid_signal(candles: pd.DataFrame, ticks: pd.DataFrame | None = None) -> HybridSignal:
     x = _clean(candles)
