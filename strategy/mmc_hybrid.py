@@ -241,11 +241,7 @@ def _concept_votes(x: pd.DataFrame, tf: dict) -> dict:
     if abs(close - prior_mid) <= 0.10 * atr:
         votes["Equilibrium"] = "DETECTED"
 
-    higher = [tf.get(k, {}) for k in ("5m", "15m")]
-    usable = [item.get("signal") for item in higher
-              if item.get("available") and item.get("signal") in ("BUY", "SELL")]
-    if len(usable) == 2 and usable[0] == usable[1]:
-        votes["Higher-Timeframe Bias"] = usable[0]
+    # Higher-Timeframe Bias is intentionally neutral: strategy is 1m-only.
 
     if bullish and close > float(prev.close) and body >= 0.25 * atr:
         votes["Candle Momentum"] = "BUY"
@@ -270,28 +266,24 @@ def generate_hybrid_signal(candles: pd.DataFrame, ticks: pd.DataFrame | None = N
     score = int(round(100*(buy-sell)/max(1, buy+sell)))
     indicator = timeframes.get("1m", {})
     ind_signal = indicator.get("signal", "WAIT")
-    higher = [timeframes.get(k, {}) for k in ("5m", "15m")]
-    opposing_higher = all(t.get("available") and t.get("signal") in ("BUY", "SELL") and t.get("signal") != ("BUY" if buy > sell else "SELL") for t in higher)
     action = "HOLD"
     reason = "MMC confirmation not strong enough; WAIT"
     direction = "BUY" if buy > sell else "SELL" if sell > buy else "WAIT"
     # Balanced mode: >=7 directional concept votes, gap >=2, and no strong
-    # 1m-indicator or complete higher-timeframe disagreement.
+    # opposing 1m-indicator vote; higher-timeframe checks are disabled.
     if direction in ("BUY", "SELL") and max(buy, sell) >= 7 and abs(buy-sell) >= 2:
         if ind_signal in ("BUY", "SELL") and ind_signal != direction:
             reason = f"MMC {direction} but 1m indicator vote opposes; WAIT"
-        elif opposing_higher:
-            reason = f"MMC {direction} but both 5m and 15m oppose; WAIT"
         else:
             action = direction
-            reason = f"MMC {direction}: {max(buy,sell)}/22 directional votes; indicator/timeframe checks passed"
+            reason = f"MMC {direction}: {max(buy,sell)}/22 directional votes; 1m indicator check passed"
     confidence = min(0.82, 0.50 + 0.025*max(0, abs(buy-sell)-1)) if action in ("BUY", "SELL") else 0.0
     # Confidence is a rule-strength score only, not a calibrated win probability.
     analysis = {
         "available": True, "concept_count": len(CONCEPTS), "concepts": votes,
         "buy_votes": buy, "sell_votes": sell, "detected_concepts": detected, "neutral_votes": neutral,
         "score": score, "direction": direction, "indicator_signal": ind_signal,
-        "timeframe_signals": {k: {"available": v.get("available", False), "signal": v.get("signal", "WAIT")} for k, v in timeframes.items()},
+        "timeframe_signals": {"1m": {"available": indicator.get("available", False), "signal": ind_signal}},
         "note": "MMC conceptগুলো OHLC-ভিত্তিক heuristic proxy; vote score/confidence জয়ের সম্ভাবনা নয়।",
     }
     regime = "MMC_BULLISH" if action == "BUY" else "MMC_BEARISH" if action == "SELL" else "MMC_WAIT"
