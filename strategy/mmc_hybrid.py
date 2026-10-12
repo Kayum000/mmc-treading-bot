@@ -267,16 +267,23 @@ def generate_hybrid_signal(candles: pd.DataFrame, ticks: pd.DataFrame | None = N
     indicator = timeframes.get("1m", {})
     ind_signal = indicator.get("signal", "WAIT")
     action = "HOLD"
-    reason = "MMC confirmation not strong enough; WAIT"
     direction = "BUY" if buy > sell else "SELL" if sell > buy else "WAIT"
-    # Balanced mode: >=7 directional concept votes, gap >=2, and no strong
-    # opposing 1m-indicator vote; higher-timeframe checks are disabled.
-    if direction in ("BUY", "SELL") and max(buy, sell) >= 7 and abs(buy-sell) >= 2:
+    # Balanced 1m-only mode: require at least five directional concept votes
+    # and a two-vote margin. The previous >=7 threshold suppressed most signals
+    # because each concept is an OHLC price-action proxy evaluated on one candle.
+    # Keep the 1m indicator as a veto if it gives a clear opposite direction.
+    min_directional_votes = 5
+    min_vote_margin = 2
+    reason = (
+        f"MMC confirmation weak: BUY {buy}, SELL {sell}; need "
+        f"{min_directional_votes}+ dominant votes and margin >= {min_vote_margin}; WAIT"
+    )
+    if direction in ("BUY", "SELL") and max(buy, sell) >= min_directional_votes and abs(buy-sell) >= min_vote_margin:
         if ind_signal in ("BUY", "SELL") and ind_signal != direction:
-            reason = f"MMC {direction} but 1m indicator vote opposes; WAIT"
+            reason = f"MMC {direction} but 1m indicator opposes (BUY {buy}, SELL {sell}); WAIT"
         else:
             action = direction
-            reason = f"MMC {direction}: {max(buy,sell)}/22 directional votes; 1m indicator check passed"
+            reason = f"MMC {direction}: BUY {buy}, SELL {sell}; 1m indicator check passed"
     confidence = min(0.82, 0.50 + 0.025*max(0, abs(buy-sell)-1)) if action in ("BUY", "SELL") else 0.0
     # Confidence is a rule-strength score only, not a calibrated win probability.
     analysis = {
