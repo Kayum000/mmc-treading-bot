@@ -224,6 +224,7 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
         "entry_timeframe": "next 1-minute candle after closed-candle analysis",
         "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
         "regime": result.regime, "strategy": result.strategy, "strategy_mode": "hybrid_mmc", "mmc_analysis": result.mmc_analysis,
+        **_indicator_payload(candles),
     }
 
 
