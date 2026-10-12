@@ -168,29 +168,46 @@ def _concept_votes(x: pd.DataFrame, tf: dict) -> dict:
     elif bear_fvg:
         votes["Fair Value Gap"] = "SELL"
 
-    # Order block proxy: last opposite-colour candle before a displacement move
-    # that closes beyond a prior swing; zone is that candle's full high-low.
-    ob_start = max(0, last_i - 6)
-    candidates = d.iloc[ob_start:last_i]
-    bull_ob = candidates[(candidates.close < candidates.open)]
-    bear_ob = candidates[(candidates.close > candidates.open)]
-    bull_break = bullish and body >= atr and close > swing_hi
-    bear_break = bearish and body >= atr and close < swing_lo
+    # Order-block proxy is derived from a completed earlier displacement,
+    # then the current candle is checked separately for a zone revisit.
     ob = None
     ob_dir = None
-    if bull_break and not bull_ob.empty:
-        ob, ob_dir = bull_ob.iloc[-1], "BUY"
-    elif bear_break and not bear_ob.empty:
-        ob, ob_dir = bear_ob.iloc[-1], "SELL"
+    search_start = max(10, last_i - 8)
+    for j in range(last_i - 1, search_start - 1, -1):
+        disp = d.iloc[j]
+        disp_body = abs(float(disp.close) - float(disp.open))
+        disp_range = max(float(disp.high) - float(disp.low), 1e-12)
+        if disp_body < atr * 0.8 or disp_body / disp_range < 0.60:
+            continue
+        # Require a close beyond a swing level known before that displacement.
+        ref = d.iloc[max(0, j - 20):j]
+        if ref.empty:
+            continue
+        ref_high, ref_low = float(ref.high.max()), float(ref.low.min())
+        if float(disp.close) > ref_high and float(disp.close) > float(disp.open):
+            opposing = d.iloc[max(0, j - 5):j]
+            opposing = opposing[opposing.close < opposing.open]
+            if not opposing.empty:
+                ob, ob_dir = opposing.iloc[-1], "BUY"
+                break
+        if float(disp.close) < ref_low and float(disp.close) < float(disp.open):
+            opposing = d.iloc[max(0, j - 5):j]
+            opposing = opposing[opposing.close > opposing.open]
+            if not opposing.empty:
+                ob, ob_dir = opposing.iloc[-1], "SELL"
+                break
     if ob is not None:
-        votes["Order Block"] = ob_dir
         ob_high, ob_low = float(ob.high), float(ob.low)
-        # Mitigation means price later revisits the zone and closes away in the
-        # original direction; the current displacement bar itself is not a retest.
-        if ob_dir == "BUY" and low <= ob_high and close > ob_high and bullish:
-            votes["OB Mitigation"] = "BUY"
-        elif ob_dir == "SELL" and high >= ob_low and close < ob_low and bearish:
-            votes["OB Mitigation"] = "SELL"
+        # Mark OB as directional context. Mitigation only counts if the current
+        # candle revisits a previously formed zone and rejects it in its direction.
+        if ob_dir == "BUY" and bullish and close > ob_high:
+            votes["Order Block"] = "BUY"
+            if low <= ob_high and close > ob_high:
+                votes["OB Mitigation"] = "BUY"
+        elif ob_dir == "SELL" and bearish and close < ob_low:
+            votes["Order Block"] = "SELL"
+            if high >= ob_low and close < ob_low:
+                votes["OB Mitigation"] = "SELL"
 
     # Breaker proxy: prior range boundary breaks and the immediately prior close
     # was on the other side; this is a level-flip approximation, not order-flow.
