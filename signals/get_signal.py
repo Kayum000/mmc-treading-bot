@@ -27,16 +27,7 @@ def _indicator_payload(candles: pd.DataFrame) -> dict:
 
 def _apply_mtf_filter(result, candles: pd.DataFrame):
     """Suppress entries only when both higher timeframes are available and oppose them."""
-    analysis = analyze_timeframes(candles)
-    if result.action not in {"BUY", "SELL"}:
-        return result
-    higher = [analysis.get("5m", {}), analysis.get("15m", {})]
-    if all(item.get("available") and item.get("signal") in {"BUY", "SELL"} for item in higher):
-        if all(item.get("signal") != result.action for item in higher):
-            result.action = "HOLD"
-            result.confidence = 0.0
-            result.reason += "; 5m and 15m confirmation oppose entry"
-            result.strategy += "_MTF_FILTER"
+    # 1m-only strategy: higher-timeframe confirmation is disabled.
     return result
 
 
