@@ -31,6 +31,15 @@ def _prep(candles: pd.DataFrame) -> pd.DataFrame:
     for c in ["open", "high", "low", "close"]:
         x[c] = pd.to_numeric(x[c], errors="coerce")
     x = x.dropna(subset=list(required)).sort_values("timestamp").drop_duplicates("timestamp")
+    # Reject impossible OHLC rows before calculating any indicator.
+    finite = np.isfinite(x[["open", "high", "low", "close"]].to_numpy(dtype=float)).all(axis=1)
+    valid = (
+        finite
+        & (x["open"] > 0) & (x["high"] > 0) & (x["low"] > 0) & (x["close"] > 0)
+        & (x["high"] >= x[["open", "close", "low"]].max(axis=1))
+        & (x["low"] <= x[["open", "close", "high"]].min(axis=1))
+    )
+    x = x.loc[valid]
     return x.reset_index(drop=True)
 
 
