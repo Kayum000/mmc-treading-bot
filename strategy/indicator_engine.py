@@ -158,6 +158,10 @@ def analyze_timeframes(candles: pd.DataFrame) -> dict:
         bars = indexed.resample(rule, label="left", closed="left").agg(
             {"open":"first","high":"max","low":"min","close":"last"}
         ).dropna().reset_index()
+        # Only use higher-timeframe candles whose entire interval has closed.
+        interval = pd.Timedelta(minutes=5 if tf == "5m" else 15)
+        last_closed_end = x["timestamp"].iloc[-1] + pd.Timedelta(minutes=1)
+        bars = bars[bars["timestamp"] + interval <= last_closed_end].reset_index(drop=True)
         result = analyze_indicators(bars)
         if len(bars) < minimum:
             result.update({"available": False, "signal": "WAIT",
