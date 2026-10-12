@@ -220,19 +220,41 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
     vm_plus = (h-l.shift(1)).abs().rolling(14).sum()
     vm_minus = (l-h.shift(1)).abs().rolling(14).sum()
     add("Vortex", (vm_plus/vm_minus.replace(0,np.nan)).iloc[-1], trend_sig(vm_plus.iloc[-1]>vm_minus.iloc[-1], vm_minus.iloc[-1]>vm_plus.iloc[-1]))
-    if "volume" in x.columns or "tick_volume" in x.columns:
-        vol_col = "volume" if "volume" in x.columns else "tick_volume"
-        vol = pd.to_numeric(x[vol_col], errors="coerce")
-        vo = (vol.rolling(5).mean()-vol.rolling(20).mean())/vol.rolling(20).mean().replace(0,np.nan)*100
+    # Prefer genuine per-candle volume when the latest 20 bars contain it.
+    # Otherwise use observed quote-update counts (tick volume) as a clearly
+    # labelled proxy; never describe tick counts as traded volume.
+    real_volume = pd.to_numeric(x["volume"], errors="coerce") if "volume" in x.columns else None
+    tick_volume = pd.to_numeric(x["tick_volume"], errors="coerce") if "tick_volume" in x.columns else None
+    if real_volume is not None and real_volume.tail(20).notna().all():
+        vol, volume_source = real_volume, "Candle volume"
+    elif tick_volume is not None:
+        vol, volume_source = tick_volume, "Tick-volume proxy (quote updates; not traded volume)"
+    elif real_volume is not None:
+        vol, volume_source = real_volume, "Candle volume"
+    else:
+        vol, volume_source = None, ""
+    if vol is not None:
+        vo_base = vol.rolling(20).mean()
+        vo = (vol.rolling(5).mean()-vo_base)/vo_base.replace(0,np.nan)*100
         add("Volume Oscillator", vo.iloc[-1], trend_sig(vo.iloc[-1]>0, vo.iloc[-1]<0))
-        # Weis Waves needs directional wave aggregation; use signed tick-volume proxy and label explicitly.
+        # Full Weis Waves requires wave segmentation. This remains an explicitly
+        # labelled signed 5/20-bar volume proxy, not the proprietary platform's
+        # complete Weis Waves implementation.
         signed = vol * np.sign(c.diff().fillna(0))
-        add("Weis Waves Volume Oscillator", signed.rolling(5).sum().iloc[-1]-signed.rolling(20).sum().iloc[-1], trend_sig(signed.rolling(5).sum().iloc[-1]>signed.rolling(20).sum().iloc[-1], signed.rolling(5).sum().iloc[-1]<signed.rolling(20).sum().iloc[-1]))
+        signed_fast = signed.rolling(5).sum()
+        signed_slow = signed.rolling(20).sum()
+        add("Weis Waves Volume Oscillator", signed_fast.iloc[-1]-signed_slow.iloc[-1],
+            trend_sig(signed_fast.iloc[-1]>signed_slow.iloc[-1], signed_fast.iloc[-1]<signed_slow.iloc[-1]))
+        for volume_name in ("Volume Oscillator", "Weis Waves Volume Oscillator"):
+            if vals[volume_name]["value"] is None:
+                vals[volume_name]["reason"] = "সর্বশেষ ২০টি candle-এর volume/tick-volume history সম্পূর্ণ নয়; data জমা হলে গণনা হবে"
+            else:
+                vals[volume_name]["data_source"] = volume_source
     else:
         vals["Volume Oscillator"] = {"value": None, "signal": "N/A",
-                                     "reason": "বাস্তব volume/tick-volume data collector থেকে পাওয়া যায়নি"}
+                                     "reason": "বাস্তব volume নেই; tick-volume quote history-ও পাওয়া যায়নি"}
         vals["Weis Waves Volume Oscillator"] = {"value": None, "signal": "N/A",
-                                                "reason": "বাস্তব volume/tick-volume data collector থেকে পাওয়া যায়নি"}
+                                                "reason": "বাস্তব volume নেই; tick-volume quote history-ও পাওয়া যায়নি"}
     willr = -100*(highest-c)/(highest-lowest).replace(0,np.nan)
     add("Williams %R", willr.iloc[-1], trend_sig(willr.iloc[-1]<-80, willr.iloc[-1]>-20))
     # Require enough closed bars for each lookback before treating its value as valid.
@@ -240,7 +262,7 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
     # advertised period has enough history behind it.
     minimums = {
         "Alligator": 30, "Bollinger Bands": 20, "Envelopes": 20, "Fractal": 30,
-        "Ichimoku Cloud": 52, "Keltner channel": 20, "Donchian channel": 20,
+        "Ichimoku Cloud": 52, "Keltner channel": 20, "Donchian channel": 21,
         "Supertrend": 14, "Moving Average": 50, "Parabolic SAR": 30, "Zig Zag": 30,
         "ADX": 27, "Aroon": 30, "Awesome Oscillator": 34, "Bears power": 30,
         "Bulls power": 30, "CCI": 20, "DeMarker": 30, "ATR": 14, "MACD": 34,
