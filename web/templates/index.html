@@ -237,7 +237,7 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
   </button>
 </section>
 <section class="section dashboard-grid">
-<article class="panel market-status" id="market-status"><div class="panel-head"><span class="round-icon">♧</span><div><h2 class="panel-title">Market Status</h2><div class="panel-sub">Live Market Overview</div></div></div><div class="status-list"><div class="status-row"><span class="status-label" id="status-pair">Select a market</span><span></span></div><div class="status-row"><span class="status-label">Current Session</span><b class="status-value" id="status-session">—</b></div><div class="status-row"><span class="status-label">Market Activity</span><b class="status-value" id="status-activity">—</b></div><div class="status-row"><span class="status-label">Best Trading Window</span><b class="status-value" id="status-window">—</b></div><div class="status-row"><span class="status-label">News Risk</span><b class="status-value" id="status-news">—</b></div><div class="status-row"><span class="status-label">Next News</span><b class="status-value" id="status-news-time">—</b></div></div></article>
+<article class="panel market-status" id="market-status"><div class="panel-head"><span class="round-icon">♧</span><div><h2 class="panel-title">Market Status</h2><div class="panel-sub">Live Market Overview</div></div></div><div class="status-list"><div class="status-row"><span class="status-label" id="status-pair">Select a market</span><span></span></div><div class="status-row"><span class="status-label">Current Session</span><b class="status-value" id="status-session">—</b></div><div class="status-row"><span class="status-label">Market Activity</span><b class="status-value" id="status-activity">—</b></div><div class="status-row"><span class="status-label">Best Trading Window</span><b class="status-value" id="status-window">—</b></div><div class="status-row"><span class="status-label">News Risk</span><b class="status-value" id="status-news">—</b></div><div class="status-row"><span class="status-label">Next News</span><b class="status-value" id="status-news-time">—</b></div><div class="status-row"><span class="status-label">Strategy BUY / SELL</span><b class="status-value" id="status-strategy-score">—</b></div><div class="status-row"><span class="status-label">Timeframe BUY / SELL</span><b class="status-value" id="status-timeframe-score">—</b></div><div class="status-row"><span class="status-label">Indicator BUY / SELL</span><b class="status-value" id="status-indicator-score">—</b></div></div></article>
 <article class="panel latest" id="latest-signal"><div class="panel-head"><span class="round-icon">♟</span><div><h2 class="panel-title">Latest Signal</h2></div></div></article>
 <article class="panel news" id="news"><div class="panel-head"><span class="round-icon">▣</span><div><h2 class="panel-title">News & Events</h2><div class="panel-sub">Latest Market News & Economic Events</div></div><button type="button" class="refresh" id="news-refresh">Refresh</button></div><div id="news-items"><div class="empty">Select a market to load news & events.</div></div><div class="news-footer"><span id="news-source">—</span><button type="button" class="mini-btn" id="news-more">View All News →</button></div></article>
 </section>
@@ -560,6 +560,36 @@ function scheduleAuto(){clearTimeout(state.autoTimer);if(!state.auto||!state.pai
 async function runAuto(){if(!state.auto||!state.pair)return;try{const r=await fetch('/auto-signal',{credentials:'same-origin',cache:'no-store'});const d=await readJsonResponse(r);if(r.ok&&d.ok){renderResult(d.result);if(window.alertForSignal)window.alertForSignal(d.result);recordPerformance(d.result);$('auto-status').textContent=`AUTO SIGNAL চালু • ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;loadPerformance()}}catch(e){$('auto-status').textContent='AUTO SIGNAL error'}}
 $('enable-alerts').onclick=async()=>{if(window.enableSignalAudio)window.enableSignalAudio();toast('Signal alerts enabled for this browser when permission is granted.')};
 function updateStatus(){const p=state.pair,m=state.mode;const label=p||'Select a market';$('status-pair').textContent=label;if(!p){['status-session','status-activity','status-window','status-news','status-news-time'].forEach(id=>$(id).textContent='—');return}if(m==='quotex_otc'){$('status-session').textContent='24/7 OTC';$('status-activity').textContent='HIGH';$('status-window').textContent='24/7 OTC Market';$('status-news').textContent='LOW';$('status-news-time').textContent='No scheduled news';return}const d=new Date(),day=d.getUTCDay(),h=d.getUTCHours();let s='New York',a='MEDIUM',w='London session';if(day===0||day===6){s='Market Closed';a='LOW';w='Next Forex session'}else if(h<7){s='Asia';a='MEDIUM';w='London / New York overlap'}else if(h<12){s='London';a='HIGH';w='London / New York overlap'}else if(h<17){s='London / New York';a='HIGH';w='London / New York overlap'}$('status-session').textContent=s;$('status-activity').textContent=a;$('status-window').textContent=w;$('status-news').textContent='LOW';$('status-news-time').textContent='No scheduled news'}
+let marketScoreRequest=0;
+async function loadMarketScores(){
+ const requestId=++marketScoreRequest;
+ const ids=['status-strategy-score','status-timeframe-score','status-indicator-score'];
+ ids.forEach(id=>{const el=$(id);if(el)el.textContent='Calculating…'});
+ if(!state.pair){ids.forEach(id=>{const el=$(id);if(el)el.textContent='—'});return}
+ try{
+  const r=await fetch('/api/indicator-analysis',{credentials:'same-origin',cache:'no-store',headers:{'Accept':'application/json'}});
+  const d=await readJsonResponse(r);
+  if(requestId!==marketScoreRequest)return;
+  if(!r.ok||!d.ok)throw Error(d.error||'analysis unavailable');
+  const mmc=d.mmc_analysis||{},frames=d.timeframe_analysis||{},tf=frames['1m']||d.indicator_analysis||{};
+  const put=(id,value)=>{const el=$(id);if(el)el.textContent=value};
+  put('status-strategy-score',mmc.available===false?'Unavailable':('BUY '+(mmc.buy_votes??0)+' / SELL '+(mmc.sell_votes??0)+' · '+(mmc.score??0)));
+  const mtf=mmc.timeframe_signals||{};
+  const one=mtf['1m']?.signal||frames['1m']?.signal||'WAIT';
+  const five=mtf['5m']?.signal||frames['5m']?.signal||'WAIT';
+  const fifteen=mtf['15m']?.signal||frames['15m']?.signal||'WAIT';
+  put('status-timeframe-score','1m '+one+' · 5m '+five+' · 15m '+fifteen);
+  if(tf.available===false)put('status-indicator-score','Unavailable');
+  else {
+   const votes=tf.indicators?Object.values(tf.indicators).reduce((a,v)=>{if(v?.signal==='BUY')a.buy++;else if(v?.signal==='SELL')a.sell++;return a},{buy:0,sell:0}):null;
+   put('status-indicator-score',votes?('BUY '+votes.buy+' / SELL '+votes.sell+' · '+(tf.signal||'WAIT')):('BUY/SELL unavailable · '+(tf.signal||'WAIT')));
+  }
+ }catch(e){
+  if(requestId!==marketScoreRequest)return;
+  ids.forEach(id=>{const el=$(id);if(el)el.textContent='Unavailable'});
+ }
+}
+const _updateStatusBase=updateStatus;updateStatus=function(){_updateStatusBase();loadMarketScores()};
 function newsHtml(events){if(!events?.length)return '<div class="empty">No scheduled news for this market.</div>';return `<div class="news-items">${events.slice(0,6).map((e,i)=>`<div class="news-item"><span class="news-dot">${i%2?'₿':'▣'}</span><div><b>${esc(e.title||e.name||'Economic Event')}</b><p>${esc(e.description||e.impact||'Market event')}</p></div><span class="news-time">${esc(e.time||e.datetime||e.date||'')}</span></div>`).join('')}</div>`}
 let lastNewsLoadAt=0;
 async function loadNews(){lastNewsLoadAt=Date.now();if(!state.pair){$('news-items').innerHTML='<div class="empty">Select a market to load news & events.</div>';return}$('news-items').innerHTML='<div class="empty">Loading news…</div>';try{const r=await fetch('/news-alert',{credentials:'same-origin',cache:'no-store'});const d=await readJsonResponse(r);if(!r.ok||d.ok===false)throw Error(d.error||'News unavailable');state.news=d.events||d.alert_events||[];$('news-items').innerHTML=newsHtml(state.news);$('news-source').textContent=d.source||'MMC News Engine'}catch(e){$('news-items').innerHTML=`<div class="empty">${esc(e.message)}</div>`;$('news-source').textContent='Unavailable'}}
