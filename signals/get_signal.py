@@ -79,15 +79,14 @@ def _hold_condition(reason: str, regime: str = "", strategy: str = "") -> str:
 def _entry_candle_time(signal_at_utc: datetime, automatic: bool, latest_closed_open=None) -> datetime:
     """Choose an actionable full-minute entry, accounting for AUTO boundary races.
 
-    AUTO is normally called about three seconds before the next minute. If the
-    HTTP request reaches the server just after that boundary, reuse the new
-    minute only during a tiny grace window and only when the immediately
-    preceding candle is confirmed closed. Otherwise always target a future
-    candle rather than publishing a timestamp that has already started.
+    AUTO runs just after the minute boundary. If collector/network delivery
+    takes a few seconds, reuse the active minute only while its short grace
+    window remains and the immediately preceding candle is confirmed closed.
+    Otherwise target a future candle rather than publishing a stale entry.
     """
     current_minute = signal_at_utc.replace(second=0, microsecond=0)
     elapsed_seconds = signal_at_utc.second + signal_at_utc.microsecond / 1_000_000
-    if automatic and elapsed_seconds <= 3.0 and latest_closed_open is not None:
+    if automatic and elapsed_seconds <= 8.0 and latest_closed_open is not None:
         try:
             stamp = latest_closed_open.to_pydatetime() if hasattr(latest_closed_open, "to_pydatetime") else latest_closed_open
             if not isinstance(stamp, datetime):
