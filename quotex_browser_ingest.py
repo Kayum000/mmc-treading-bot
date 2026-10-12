@@ -218,7 +218,8 @@ def init_quotex_browser_ingest(app):
             return jsonify({"ok": False, "error": "অসমর্থিত OTC মার্কেট।"}), 400
         try:
             result = get_signal(pair, "quotex_otc", automatic=True)
-            from web.app import _record_signal_performance, _notify_telegram_safely
+            from web.app import _apply_confidence_gate, _record_signal_performance, _notify_telegram_safely
+            result = _apply_confidence_gate(result)
             _record_signal_performance(result)
             _notify_telegram_safely(result)
             return jsonify({"ok": True, "result": result})
