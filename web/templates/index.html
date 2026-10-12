@@ -593,12 +593,12 @@ $('auto-toggle').onchange=e=>{state.auto=e.target.checked;clearTimeout(state.aut
 function scheduleAuto(){
  clearTimeout(state.autoTimer);
  if(!state.auto||!state.pair)return;
- // Align AUTO to three seconds before each UTC minute boundary. The server
- // uses the same minute boundaries and has a tiny post-boundary race guard.
- const now=Date.now(),minute=Math.floor(now/60000)*60000;
- let fireAt=minute+57000;
- if(fireAt<=now+250)fireAt+=60000;
- state.autoTimer=setTimeout(async()=>{
+ // Analyze just AFTER the UTC minute boundary, when the previous candle can
+ // be confirmed closed. Retry briefly if the browser collector publishes it
+ // a little late; never generate a second signal for the same candle.
+ const check=async()=>{
+  if(!state.auto||!state.pair)return;
+  let retry=false;
   try{
    const r=await fetch('/api/indicator-analysis',{credentials:'same-origin',cache:'no-store',headers:{'Accept':'application/json'}});
    const d=await readJsonResponse(r);
@@ -606,18 +606,27 @@ function scheduleAuto(){
    const candle=String(d.analysis_candle_time_utc||'');
    if(!candle){
     $('auto-status').textContent='AUTO SIGNAL • candle history/data unavailable';
+    retry=(Date.now()%60000)<=10000;
    }else if(!state.lastAutoAnalysisCandle||candle!==state.lastAutoAnalysisCandle){
     state.lastAutoAnalysisCandle=candle;
     await runAuto();
    }else{
-    $('auto-status').textContent='AUTO SIGNAL • waiting for a new closed candle';
+    $('auto-status').textContent='AUTO SIGNAL • waiting for the newly closed candle';
+    retry=(Date.now()%60000)<=10000;
    }
   }catch(e){
    $('auto-status').textContent='AUTO SIGNAL • '+String(e.message||e).slice(0,80);
+   retry=(Date.now()%60000)<=10000;
   }finally{
-   scheduleAuto();
+   if(!state.auto||!state.pair)return;
+   if(retry)state.autoTimer=setTimeout(check,800);
+   else scheduleAuto();
   }
- },Math.max(100,fireAt-now));
+ };
+ const now=Date.now(),minute=Math.floor(now/60000)*60000;
+ let fireAt=minute+1500;
+ if(now>minute+10000)fireAt+=60000;
+ state.autoTimer=setTimeout(check,Math.max(100,fireAt-now));
 }
 async function runAuto(){if(!state.auto||!state.pair)return;try{const r=await fetch('/auto-signal',{credentials:'same-origin',cache:'no-store'});const d=await readJsonResponse(r);if(r.ok&&d.ok){renderResult(d.result);if(window.alertForSignal)window.alertForSignal(d.result);recordPerformance(d.result);$('auto-status').textContent=`AUTO SIGNAL চালু • ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;loadPerformance()}}catch(e){$('auto-status').textContent='AUTO SIGNAL error'}}
 $('enable-alerts').onclick=async()=>{if(window.enableSignalAudio)window.enableSignalAudio();toast('Signal alerts enabled for this browser when permission is granted.')};
