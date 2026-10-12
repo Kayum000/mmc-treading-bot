@@ -41,7 +41,16 @@ def _clean(candles: pd.DataFrame) -> pd.DataFrame:
     x["timestamp"] = pd.to_datetime(x["timestamp"], utc=True, errors="coerce")
     for col in ("open", "high", "low", "close"):
         x[col] = pd.to_numeric(x[col], errors="coerce")
-    return x.dropna(subset=list(required)).sort_values("timestamp").drop_duplicates("timestamp").reset_index(drop=True)
+    x = x.dropna(subset=list(required)).sort_values("timestamp").drop_duplicates("timestamp")
+    # Reject malformed bars so bad quotes cannot become structure or liquidity votes.
+    finite = np.isfinite(x[["open", "high", "low", "close"]].to_numpy(dtype=float)).all(axis=1)
+    valid = (
+        finite
+        & (x["open"] > 0) & (x["high"] > 0) & (x["low"] > 0) & (x["close"] > 0)
+        & (x["high"] >= x[["open", "close", "low"]].max(axis=1))
+        & (x["low"] <= x[["open", "close", "high"]].min(axis=1))
+    )
+    return x.loc[valid].reset_index(drop=True)
 
 
 def _concept_votes(x: pd.DataFrame, tf: dict) -> dict:
