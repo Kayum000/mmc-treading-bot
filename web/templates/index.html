@@ -247,7 +247,7 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
     <div><h2 id="indicators-title">▦ Quotex Indicators</h2><p>তোমার Quotex স্ক্রিনশটে দেখা সব ২৯টি ইন্ডিকেটর—ক্যাটাগরি অনুযায়ী এক জায়গায়।</p></div>
     <button type="button" class="mini-btn" id="indicators-back">← Dashboard</button>
   </div>
-  <div class="indicators-notice"><strong>ডেটা স্ট্যাটাস:</strong> এখানে ইন্ডিকেটরের নাম ও ব্যবহার দেখানো হচ্ছে। যাচাইকৃত live OHLC candle data এবং indicator calculation সংযুক্ত না হওয়া পর্যন্ত BUY/SELL স্কোর দেখানো হবে না—ভুয়া live signal দেখানো হচ্ছে না। OTC ও real-market data এক নয়।</div>
+  <div class="indicators-notice" id="indicator-data-status"><strong>ডেটা স্ট্যাটাস:</strong> নির্বাচিত মার্কেটের closed-candle OHLC data দিয়ে হিসাবের অপেক্ষায়। কিছু indicator-এর জন্য approximation ব্যবহৃত হয়; volume data না থাকলে volume indicators unavailable থাকবে। OTC ও real-market data আলাদা। <button type="button" class="mini-btn" id="analysis-refresh" style="margin-left:8px">↻ Calculate / Refresh</button></div>
   <div class="indicators-tools">
     <input type="search" id="indicator-search" placeholder="Search indicator…" aria-label="Search indicators">
     <select id="indicator-timeframe" aria-label="Indicator timeframe"><option value="1m">Timeframe: 1m</option><option value="5m">Timeframe: 5m</option><option value="15m">Timeframe: 15m</option><option value="1h">Timeframe: 1h</option><option value="4h">Timeframe: 4h</option></select>
@@ -295,34 +295,34 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
     <div><h2 id="strategies-title">♜ MMC Strategy &amp; 22 Concepts</h2><p>MMC/ICT-ধাঁচের ২২টি কনসেপ্ট—নাম, ক্যাটাগরি ও কীভাবে কাজ করে।</p></div>
     <button type="button" class="mini-btn" id="strategies-back">← Dashboard</button>
   </div>
-  <div class="indicators-notice"><strong>গুরুত্বপূর্ণ:</strong> এগুলো ২২টি আলাদা স্বয়ংক্রিয় trading strategy নয়; analysis concepts। এই তালিকা dashboard-এ reference হিসেবে যোগ করা হয়েছে—প্রতিটি concept-এর live vote/calculation এখনো signal engine-এর সঙ্গে সংযুক্ত হয়েছে বলে ধরে নেওয়া যাবে না।</div>
+  <div class="indicators-notice" id="strategy-data-status"><strong>গুরুত্বপূর্ণ:</strong> এগুলো ২২টি আলাদা স্বয়ংক্রিয় strategy নয়। Closed-candle OHLC rule দিয়ে যেসব concept evaluate করা যায়, তাদের vote এখানে দেখানো হবে; liquidity/order-block হলো heuristic proxy, institutional order-flow-এর প্রমাণ নয়। <button type="button" class="mini-btn" id="analysis-refresh-strategy" style="margin-left:8px">↻ Calculate / Refresh</button></div>
   <div class="indicators-tools">
     <input type="search" id="strategy-search" placeholder="Search strategy / concept…" aria-label="Search strategies">
     <span class="indicators-count" id="strategies-count">22 concepts</span>
   </div>
   <div class="indicator-grid" id="strategy-grid">
-    <article class="indicator-card strategy-card" data-name="market structure" data-category="structure"><div class="indicator-card-top"><h3>1. Market Structure</h3></div><span class="indicator-category">Structure</span><div class="indicator-summary">Higher High/Higher Low বা Lower High/Lower Low দিয়ে বাজারের swing structure ও সম্ভাব্য দিক বোঝে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="bos — break of structure" data-category="structure"><div class="indicator-card-top"><h3>2. BOS — Break of Structure</h3></div><span class="indicator-category">Structure</span><div class="indicator-summary">গুরুত্বপূর্ণ swing high/low ভাঙলে চলমান trend অব্যাহত থাকার সম্ভাবনা যাচাই করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="choch — change of character" data-category="structure"><div class="indicator-card-top"><h3>3. CHOCH — Change of Character</h3></div><span class="indicator-category">Structure</span><div class="indicator-summary">আগের trend-এর বিপরীতে structure break হলে সম্ভাব্য পরিবর্তনের সতর্কতা দেয়।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="mss — market structure shift" data-category="structure"><div class="indicator-card-top"><h3>4. MSS — Market Structure Shift</h3></div><span class="indicator-category">Structure</span><div class="indicator-summary">বিশেষ করে liquidity sweep-এর পরে বিপরীত দিকে শক্তিশালী structure break খোঁজে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="buy-side liquidity (bsl)" data-category="liquidity"><div class="indicator-card-top"><h3>5. Buy-Side Liquidity (BSL)</h3></div><span class="indicator-category">Liquidity</span><div class="indicator-summary">আগের গুরুত্বপূর্ণ high-এর ওপরে সম্ভাব্য stop/liquidity অঞ্চল চিহ্নিত করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="sell-side liquidity (ssl)" data-category="liquidity"><div class="indicator-card-top"><h3>6. Sell-Side Liquidity (SSL)</h3></div><span class="indicator-category">Liquidity</span><div class="indicator-summary">আগের গুরুত্বপূর্ণ low-এর নিচে সম্ভাব্য stop/liquidity অঞ্চল খোঁজে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="liquidity sweep" data-category="liquidity"><div class="indicator-card-top"><h3>7. Liquidity Sweep</h3></div><span class="indicator-category">Liquidity</span><div class="indicator-summary">দাম আগের high/low ছুঁয়ে বা ভেঙে আবার ফিরে আসে কি না দেখে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="equal highs (eqh)" data-category="liquidity"><div class="indicator-card-top"><h3>8. Equal Highs (EQH)</h3></div><span class="indicator-category">Liquidity</span><div class="indicator-summary">কাছাকাছি সমান high খুঁজে সম্ভাব্য liquidity pool চিহ্নিত করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="equal lows (eql)" data-category="liquidity"><div class="indicator-card-top"><h3>9. Equal Lows (EQL)</h3></div><span class="indicator-category">Liquidity</span><div class="indicator-summary">কাছাকাছি সমান low খুঁজে সম্ভাব্য liquidity pool চিহ্নিত করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="swing high / swing low" data-category="structure"><div class="indicator-card-top"><h3>10. Swing High / Swing Low</h3></div><span class="indicator-category">Structure</span><div class="indicator-summary">স্থানীয় গুরুত্বপূর্ণ চূড়া ও তল শনাক্ত করে; structure ও level নির্ধারণে সাহায্য করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="displacement" data-category="momentum"><div class="indicator-card-top"><h3>11. Displacement</h3></div><span class="indicator-category">Momentum</span><div class="indicator-summary">বড় ও শক্তিশালী directional candle দিয়ে দ্রুত price movement যাচাই করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="fair value gap (fvg)" data-category="imbalance"><div class="indicator-card-top"><h3>12. Fair Value Gap (FVG)</h3></div><span class="indicator-category">Imbalance</span><div class="indicator-summary">ক্যান্ডেলগুলোর মধ্যে imbalance অঞ্চল খুঁজে; পরে retest হলে setup বিবেচনা করা যায়।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="order block (ob)" data-category="price zone"><div class="indicator-card-top"><h3>13. Order Block (OB)</h3></div><span class="indicator-category">Price Zone</span><div class="indicator-summary">শক্তিশালী move-এর আগে তৈরি হওয়া সম্ভাব্য reaction zone চিহ্নিত করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="ob mitigation" data-category="price zone"><div class="indicator-card-top"><h3>14. OB Mitigation</h3></div><span class="indicator-category">Price Zone</span><div class="indicator-summary">দাম আগের Order Block-এ ফিরে এসে প্রতিক্রিয়া দেখায় কি না যাচাই করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="breaker block" data-category="price zone"><div class="indicator-card-top"><h3>15. Breaker Block</h3></div><span class="indicator-category">Price Zone</span><div class="indicator-summary">ব্যর্থ Order Block পরে বিপরীত দিকের reaction zone হিসেবে কাজ করছে কি না দেখে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="rejection candle" data-category="candle confirmation"><div class="indicator-card-top"><h3>16. Rejection Candle</h3></div><span class="indicator-category">Candle Confirmation</span><div class="indicator-summary">লম্বা wick বা close-এর অবস্থান দিয়ে কোনো level থেকে rejection-এর লক্ষণ খোঁজে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="retest confirmation" data-category="entry confirmation"><div class="indicator-card-top"><h3>17. Retest Confirmation</h3></div><span class="indicator-category">Entry Confirmation</span><div class="indicator-summary">breakout বা structure break-এর পর দাম level-এ ফিরে এসে সেটি ধরে রাখছে কি না দেখে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="premium zone" data-category="range position"><div class="indicator-card-top"><h3>18. Premium Zone</h3></div><span class="indicator-category">Range Position</span><div class="indicator-summary">নির্বাচিত high-low range-এর midpoint-এর ওপরে দাম আছে কি না চিহ্নিত করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="discount zone" data-category="range position"><div class="indicator-card-top"><h3>19. Discount Zone</h3></div><span class="indicator-category">Range Position</span><div class="indicator-summary">নির্বাচিত high-low range-এর midpoint-এর নিচে দাম আছে কি না চিহ্নিত করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="equilibrium (50%)" data-category="range position"><div class="indicator-card-top"><h3>20. Equilibrium (50%)</h3></div><span class="indicator-category">Range Position</span><div class="indicator-summary">নির্বাচিত range-এর ৫০% midpoint-কে reference level হিসেবে ব্যবহার করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="higher-timeframe bias" data-category="multi-timeframe"><div class="indicator-card-top"><h3>21. Higher-Timeframe Bias</h3></div><span class="indicator-category">Multi-Timeframe</span><div class="indicator-summary">বড় timeframe-এর trend/bias ছোট timeframe-এর setup-কে সমর্থন করে কি না দেখে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
-    <article class="indicator-card strategy-card" data-name="candle momentum confirmation" data-category="candle confirmation"><div class="indicator-card-top"><h3>22. Candle Momentum Confirmation</h3></div><span class="indicator-category">Candle Confirmation</span><div class="indicator-summary">candle body, close ও momentum দিয়ে সম্ভাব্য BUY/SELL দিক যাচাই করে।</div><span class="indicator-state">Concept reference · live vote status not connected</span></article>
+    <article class="indicator-card strategy-card" data-name="market structure" data-category="structure"><div class="indicator-card-top"><h3>1. Market Structure</h3></div><span class="indicator-category">Structure</span><div class="indicator-summary">Higher High/Higher Low বা Lower High/Lower Low দিয়ে বাজারের swing structure ও সম্ভাব্য দিক বোঝে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="bos — break of structure" data-category="structure"><div class="indicator-card-top"><h3>2. BOS — Break of Structure</h3></div><span class="indicator-category">Structure</span><div class="indicator-summary">গুরুত্বপূর্ণ swing high/low ভাঙলে চলমান trend অব্যাহত থাকার সম্ভাবনা যাচাই করে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="choch — change of character" data-category="structure"><div class="indicator-card-top"><h3>3. CHOCH — Change of Character</h3></div><span class="indicator-category">Structure</span><div class="indicator-summary">আগের trend-এর বিপরীতে structure break হলে সম্ভাব্য পরিবর্তনের সতর্কতা দেয়।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="mss — market structure shift" data-category="structure"><div class="indicator-card-top"><h3>4. MSS — Market Structure Shift</h3></div><span class="indicator-category">Structure</span><div class="indicator-summary">বিশেষ করে liquidity sweep-এর পরে বিপরীত দিকে শক্তিশালী structure break খোঁজে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="buy-side liquidity (bsl)" data-category="liquidity"><div class="indicator-card-top"><h3>5. Buy-Side Liquidity (BSL)</h3></div><span class="indicator-category">Liquidity</span><div class="indicator-summary">আগের গুরুত্বপূর্ণ high-এর ওপরে সম্ভাব্য stop/liquidity অঞ্চল চিহ্নিত করে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="sell-side liquidity (ssl)" data-category="liquidity"><div class="indicator-card-top"><h3>6. Sell-Side Liquidity (SSL)</h3></div><span class="indicator-category">Liquidity</span><div class="indicator-summary">আগের গুরুত্বপূর্ণ low-এর নিচে সম্ভাব্য stop/liquidity অঞ্চল খোঁজে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="liquidity sweep" data-category="liquidity"><div class="indicator-card-top"><h3>7. Liquidity Sweep</h3></div><span class="indicator-category">Liquidity</span><div class="indicator-summary">দাম আগের high/low ছুঁয়ে বা ভেঙে আবার ফিরে আসে কি না দেখে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="equal highs (eqh)" data-category="liquidity"><div class="indicator-card-top"><h3>8. Equal Highs (EQH)</h3></div><span class="indicator-category">Liquidity</span><div class="indicator-summary">কাছাকাছি সমান high খুঁজে সম্ভাব্য liquidity pool চিহ্নিত করে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="equal lows (eql)" data-category="liquidity"><div class="indicator-card-top"><h3>9. Equal Lows (EQL)</h3></div><span class="indicator-category">Liquidity</span><div class="indicator-summary">কাছাকাছি সমান low খুঁজে সম্ভাব্য liquidity pool চিহ্নিত করে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="swing high / swing low" data-category="structure"><div class="indicator-card-top"><h3>10. Swing High / Swing Low</h3></div><span class="indicator-category">Structure</span><div class="indicator-summary">স্থানীয় গুরুত্বপূর্ণ চূড়া ও তল শনাক্ত করে; structure ও level নির্ধারণে সাহায্য করে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="displacement" data-category="momentum"><div class="indicator-card-top"><h3>11. Displacement</h3></div><span class="indicator-category">Momentum</span><div class="indicator-summary">বড় ও শক্তিশালী directional candle দিয়ে দ্রুত price movement যাচাই করে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="fair value gap (fvg)" data-category="imbalance"><div class="indicator-card-top"><h3>12. Fair Value Gap (FVG)</h3></div><span class="indicator-category">Imbalance</span><div class="indicator-summary">ক্যান্ডেলগুলোর মধ্যে imbalance অঞ্চল খুঁজে; পরে retest হলে setup বিবেচনা করা যায়।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="order block (ob)" data-category="price zone"><div class="indicator-card-top"><h3>13. Order Block (OB)</h3></div><span class="indicator-category">Price Zone</span><div class="indicator-summary">শক্তিশালী move-এর আগে তৈরি হওয়া সম্ভাব্য reaction zone চিহ্নিত করে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="ob mitigation" data-category="price zone"><div class="indicator-card-top"><h3>14. OB Mitigation</h3></div><span class="indicator-category">Price Zone</span><div class="indicator-summary">দাম আগের Order Block-এ ফিরে এসে প্রতিক্রিয়া দেখায় কি না যাচাই করে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="breaker block" data-category="price zone"><div class="indicator-card-top"><h3>15. Breaker Block</h3></div><span class="indicator-category">Price Zone</span><div class="indicator-summary">ব্যর্থ Order Block পরে বিপরীত দিকের reaction zone হিসেবে কাজ করছে কি না দেখে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="rejection candle" data-category="candle confirmation"><div class="indicator-card-top"><h3>16. Rejection Candle</h3></div><span class="indicator-category">Candle Confirmation</span><div class="indicator-summary">লম্বা wick বা close-এর অবস্থান দিয়ে কোনো level থেকে rejection-এর লক্ষণ খোঁজে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="retest confirmation" data-category="entry confirmation"><div class="indicator-card-top"><h3>17. Retest Confirmation</h3></div><span class="indicator-category">Entry Confirmation</span><div class="indicator-summary">breakout বা structure break-এর পর দাম level-এ ফিরে এসে সেটি ধরে রাখছে কি না দেখে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="premium zone" data-category="range position"><div class="indicator-card-top"><h3>18. Premium Zone</h3></div><span class="indicator-category">Range Position</span><div class="indicator-summary">নির্বাচিত high-low range-এর midpoint-এর ওপরে দাম আছে কি না চিহ্নিত করে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="discount zone" data-category="range position"><div class="indicator-card-top"><h3>19. Discount Zone</h3></div><span class="indicator-category">Range Position</span><div class="indicator-summary">নির্বাচিত high-low range-এর midpoint-এর নিচে দাম আছে কি না চিহ্নিত করে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="equilibrium (50%)" data-category="range position"><div class="indicator-card-top"><h3>20. Equilibrium (50%)</h3></div><span class="indicator-category">Range Position</span><div class="indicator-summary">নির্বাচিত range-এর ৫০% midpoint-কে reference level হিসেবে ব্যবহার করে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="higher-timeframe bias" data-category="multi-timeframe"><div class="indicator-card-top"><h3>21. Higher-Timeframe Bias</h3></div><span class="indicator-category">Multi-Timeframe</span><div class="indicator-summary">বড় timeframe-এর trend/bias ছোট timeframe-এর setup-কে সমর্থন করে কি না দেখে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
+    <article class="indicator-card strategy-card" data-name="candle momentum confirmation" data-category="candle confirmation"><div class="indicator-card-top"><h3>22. Candle Momentum Confirmation</h3></div><span class="indicator-category">Candle Confirmation</span><div class="indicator-summary">candle body, close ও momentum দিয়ে সম্ভাব্য BUY/SELL দিক যাচাই করে।</div><span class="indicator-state">Waiting for validated closed candles</span></article>
   </div>
 </section>
 </div></main></div>
@@ -396,6 +396,90 @@ $('strategies-back')?.addEventListener('click',()=>{$('top')?.scrollIntoView({be
  }));
 })();
 
+
+async function loadLiveAnalysis(){
+  const status=$('indicator-data-status'), strategyStatus=$('strategy-data-status');
+  const tf=$('indicator-timeframe')?.value||'1m';
+  const showStatus=(el,msg)=>{if(el)el.dataset.message=msg;};
+  if(status)status.innerHTML='<strong>ডেটা স্ট্যাটাস:</strong> নির্বাচিত মার্কেটের candle ও indicator হিসাব হচ্ছে…';
+  if(strategyStatus)strategyStatus.innerHTML='<strong>MMC status:</strong> closed candle থেকে concept vote হিসাব হচ্ছে…';
+  const buttons=[$('analysis-refresh'),$('analysis-refresh-strategy')].filter(Boolean);
+  buttons.forEach(b=>{b.disabled=true;b.dataset.oldText=b.textContent;b.textContent='Calculating…'});
+  try{
+    const response=await fetch('/api/indicator-analysis',{credentials:'same-origin',cache:'no-store',headers:{'Accept':'application/json'}});
+    const data=await readJsonResponse(response);
+    if(!response.ok||!data.ok)throw Error(data.error||'Indicator analysis unavailable');
+    const timeframeData=(data.timeframe_analysis||{})[tf];
+    const indicatorSet=timeframeData||null;
+    const indicatorCards=[...document.querySelectorAll('#indicator-grid .indicator-card')];
+    const normalize=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+    const alias={
+      'keltner channel':'Keltner channel','donchian channel':'Donchian channel',
+      'rate of change':'Rate Of Change','bears power':'Bears power','bulls power':'Bulls power',
+      'we is waves volume oscillator':'Weis Waves Volume Oscillator'
+    };
+    const liveValues=indicatorSet?.indicators||{};
+    const keys=Object.keys(liveValues);
+    const findIndicator=name=>{
+      const n=normalize(name);
+      const exact=keys.find(k=>normalize(k)===n);
+      if(exact)return exact;
+      const alt=alias[n];if(alt&&liveValues[alt])return alt;
+      return keys.find(k=>normalize(k).includes(n)||n.includes(normalize(k)));
+    };
+    indicatorCards.forEach(card=>{
+      const name=card.querySelector('h3')?.textContent||card.dataset.name||'';
+      const state=card.querySelector('.indicator-state');if(!state)return;
+      if(!indicatorSet){state.textContent='Unavailable: backend has no '+tf+' calculation';return}
+      if(!indicatorSet.available){state.textContent='Unavailable: '+(indicatorSet.reason||'not enough validated closed candles');return}
+      const key=findIndicator(name);
+      const item=key?liveValues[key]:null;
+      if(!item||item.value===null||item.value===undefined){state.textContent='Unavailable: required candle/volume data missing';return}
+      state.textContent='Live value: '+Number(item.value).toLocaleString(undefined,{maximumFractionDigits:6})+' · '+String(item.signal||'N/A');
+    });
+    const fmtSignal=s=>s==='BUY'?'BUY vote':s==='SELL'?'SELL vote':s==='DETECTED'?'DETECTED':s==='NEUTRAL'?'NEUTRAL':'N/A';
+    const mmc=data.mmc_analysis||{};
+    const conceptVotes=mmc.concepts||{};
+    const conceptAliases={
+      'buy side liquidity bsl':'Buy-Side Liquidity',
+      'sell side liquidity ssl':'Sell-Side Liquidity',
+      'equal highs eqh':'Equal Highs','equal lows eql':'Equal Lows',
+      'swing high swing low':'Swing High/Low',
+      'fair value gap fvg':'Fair Value Gap','order block ob':'Order Block',
+      'candle momentum confirmation':'Candle Momentum',
+      'equilibrium 50':'Equilibrium'
+    };
+    document.querySelectorAll('#strategy-grid .strategy-card').forEach(card=>{
+      const title=card.querySelector('h3')?.textContent||card.dataset.name||'';
+      const state=card.querySelector('.indicator-state');if(!state)return;
+      if(mmc.available===false){state.textContent='Unavailable: '+(mmc.reason||'কমপক্ষে ৬০টি closed candle দরকার');return}
+      const n=normalize(title.replace(/^\d+\s*/,'')); 
+      const aliasKey=Object.keys(conceptAliases).find(k=>n.includes(k)||k.includes(n));
+      const key=aliasKey?conceptAliases[aliasKey]:Object.keys(conceptVotes).find(k=>normalize(k)===n||n.startsWith(normalize(k))||normalize(k).startsWith(n));
+      const vote=key?conceptVotes[key]:null;
+      state.textContent=vote?('Calculated vote: '+fmtSignal(vote)):'Not calculated for this concept';
+    });
+    if(status){
+      if(!indicatorSet)status.innerHTML='<strong>ডেটা স্ট্যাটাস:</strong> '+tf+' timeframe calculation backend-এ নেই। বর্তমানে 1m, 5m ও 15m হিসাব সমর্থিত; 1h/4h-এর জন্য যথেষ্ট closed candle resampling যোগ করা হয়নি।';
+      else if(!indicatorSet.available)status.innerHTML='<strong>ডেটা স্ট্যাটাস:</strong> '+(indicatorSet.reason||'পর্যাপ্ত closed candle নেই')+' · '+String(data.pair||'')+' · '+String(data.market_mode||'');
+      else status.innerHTML='<strong>ডেটা স্ট্যাটাস:</strong> '+String(data.pair||'')+' · '+String(data.market_mode||'')+' · '+tf+' · '+String(indicatorSet.count||0)+' closed candles · BUY '+String(indicatorSet.buy_votes||0)+' / SELL '+String(indicatorSet.sell_votes||0)+' · vote score '+String(indicatorSet.score??0)+' (win probability নয়)।';
+    }
+    if(strategyStatus){
+      if(mmc.available===false)strategyStatus.innerHTML='<strong>MMC status:</strong> '+(mmc.reason||'কমপক্ষে ৬০টি closed candle দরকার')+'; কোনো live vote অনুমান করে দেখানো হয়নি.';
+      else strategyStatus.innerHTML='<strong>MMC status:</strong> '+String(data.pair||'')+' · '+String(data.market_mode||'')+' · BUY '+String(mmc.buy_votes||0)+' / SELL '+String(mmc.sell_votes||0)+' / neutral '+String(mmc.neutral_votes||0)+' / detected '+String(mmc.detected_concepts||0)+' · '+String(mmc.note||'Rule-based proxy votes, not a win probability.');
+    }
+  }catch(error){
+    if(status)status.innerHTML='<strong>ডেটা স্ট্যাটাস:</strong> live analysis পাওয়া যায়নি — '+String(error.message||error)+'। Candle data অনুপস্থিত/পুরোনো হলে BUY/SELL দেখানো হবে না.';
+    if(strategyStatus)strategyStatus.innerHTML='<strong>MMC status:</strong> live calculation unavailable — '+String(error.message||error);
+    document.querySelectorAll('#indicator-grid .indicator-state,#strategy-grid .indicator-state').forEach(el=>{if(el.textContent.includes('Calculating'))el.textContent='Unavailable: live candle analysis failed'});
+  }finally{
+    buttons.forEach(b=>{b.disabled=false;b.textContent=b.dataset.oldText||'↻ Calculate / Refresh';delete b.dataset.oldText});
+  }
+}
+$('analysis-refresh')?.addEventListener('click',loadLiveAnalysis);
+$('analysis-refresh-strategy')?.addEventListener('click',loadLiveAnalysis);
+$('indicator-timeframe')?.addEventListener('change',loadLiveAnalysis);
+
 function handleSidebarNav(e){
   const btn=e.target.closest?.('.nav button');
   if(!btn)return;
@@ -428,12 +512,12 @@ function handleSidebarNav(e){
   }
   if(action==='indicators'){
     $('indicators-section')?.scrollIntoView({behavior:'smooth',block:'start'});
-    closeMobile();
+    closeMobile();loadLiveAnalysis();
     return;
   }
   if(action==='strategies'){
     $('strategies-section')?.scrollIntoView({behavior:'smooth',block:'start'});
-    closeMobile();
+    closeMobile();loadLiveAnalysis();
     return;
   }
   if(action==='signal'){
