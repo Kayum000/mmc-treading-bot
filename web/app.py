@@ -291,6 +291,9 @@ _DEFAULT_SETTINGS = {
     "timezone": "Asia/Dhaka",
 }
 _USAGE_CACHE = {"data": None, "at": 0.0}
+# Emits a compact diagnostic once per closed-candle snapshot so live analysis
+# can be verified without logging raw prices or customer/session information.
+_INDICATOR_AUDIT_LAST_KEY = None
 
 def _login_configured() -> bool:
     return bool((os.getenv("APP_LOGIN_USERNAME") or "admin").strip() and (os.getenv("APP_LOGIN_PASSWORD") or "").strip())
@@ -480,6 +483,42 @@ def indicator_analysis_api():
         return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
     try:
         result = get_signal(pair, mode, automatic=False, strategy_mode=settings.get("strategy_mode", "normal"))
+        timeframe_analysis = result.get("timeframe_analysis", {}) or {}
+        indicator_set = timeframe_analysis.get("1m", {}) or result.get("indicator_analysis", {}) or {}
+        indicator_items = indicator_set.get("indicators", {}) if isinstance(indicator_set, dict) else {}
+        indicator_valid = [
+            name for name, value in indicator_items.items()
+            if isinstance(value, dict) and value.get("value") is not None
+            and value.get("signal") not in {None, "N/A"}
+        ]
+        indicator_unavailable = [
+            name for name, value in indicator_items.items()
+            if not isinstance(value, dict) or value.get("value") is None
+            or value.get("signal") in {None, "N/A"}
+        ]
+        mmc = result.get("mmc_analysis", {}) or {}
+        concept_votes = mmc.get("concepts", {}) if isinstance(mmc, dict) else {}
+        concept_unavailable = [name for name, vote in concept_votes.items() if vote == "N/A"]
+        audit_key = (
+            mode, pair, str(result.get("analysis_candle_time_utc") or ""),
+            int(indicator_set.get("count") or 0), len(indicator_items),
+            str(mmc.get("available")), len(concept_votes)
+        )
+        global _INDICATOR_AUDIT_LAST_KEY
+        if audit_key != _INDICATOR_AUDIT_LAST_KEY:
+            _INDICATOR_AUDIT_LAST_KEY = audit_key
+            print(
+                "[MMC Runtime Audit] "
+                f"pair={pair} mode={mode} candle={result.get('analysis_candle_time_utc') or 'N/A'} "
+                f"closed_1m_candles={indicator_set.get('count', 0)} "
+                f"indicators={len(indicator_items)} valid={len(indicator_valid)} "
+                f"unavailable={len(indicator_unavailable)} "
+                f"unavailable_names={','.join(indicator_unavailable) or 'none'} "
+                f"concepts={len(concept_votes)} calculated={len(concept_votes)-len(concept_unavailable)} "
+                f"unavailable_concepts={len(concept_unavailable)} "
+                f"unavailable_concept_names={','.join(concept_unavailable) or 'none'}",
+                flush=True,
+            )
         return jsonify({
             "ok": True,
             "pair": pair,
@@ -487,8 +526,8 @@ def indicator_analysis_api():
             "source": result.get("source"),
             "analysis_candle_time_utc": result.get("analysis_candle_time_utc"),
             "indicator_analysis": result.get("indicator_analysis", {"available": False, "reason": "Indicator calculation unavailable"}),
-            "timeframe_analysis": result.get("timeframe_analysis", {}),
-            "mmc_analysis": result.get("mmc_analysis", {"available": False, "note": "MMC calculation unavailable"}),
+            "timeframe_analysis": timeframe_analysis,
+            "mmc_analysis": mmc or {"available": False, "note": "MMC calculation unavailable"},
             "note": "Vote scores are rule-based analysis, not win probabilities or guarantees."
         })
     except Exception as exc:
