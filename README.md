@@ -1,4 +1,4 @@
-# MMC Trading Bot
+# MMC Trading 
 
 A market-signal engine for selected Real Forex and Quotex OTC 1-minute markets.
 
