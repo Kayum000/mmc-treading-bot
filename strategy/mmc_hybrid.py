@@ -249,9 +249,9 @@ def _concept_votes(x: pd.DataFrame, tf: dict) -> dict:
     if abs(close - prior_mid) <= 0.10 * atr:
         votes["Equilibrium"] = "DETECTED"
 
-    # Higher-timeframe bias: resample the closed 1m candles into completed
-    # 5m bars, then compare EMA20 with EMA50. Never label missing HTF history
-    # as a neutral market; mark it unavailable instead.
+    # Higher-timeframe bias: resample closed 1m candles into fully completed
+    # 5m bars and compare EMA9 with EMA21. This gives a usable 5m context with
+    # the collector's current ~120-candle history; insufficient bars stay N/A.
     try:
         htf_source = d.copy()
         htf_source["timestamp"] = pd.to_datetime(htf_source["timestamp"], utc=True, errors="coerce").dt.floor("min")
@@ -260,10 +260,10 @@ def _concept_votes(x: pd.DataFrame, tf: dict) -> dict:
         htf_count = resampler["close"].count()
         htf = resampler.agg({"open": "first", "high": "max", "low": "min", "close": "last"})
         htf = htf.loc[htf_count.reindex(htf.index).fillna(0).eq(5)].dropna(subset=["close"])
-        if len(htf) >= 50:
-            htf_ema20 = htf["close"].ewm(span=20, adjust=False).mean().iloc[-1]
-            htf_ema50 = htf["close"].ewm(span=50, adjust=False).mean().iloc[-1]
-            votes["Higher-Timeframe Bias"] = "BUY" if htf_ema20 > htf_ema50 else "SELL" if htf_ema20 < htf_ema50 else "NEUTRAL"
+        if len(htf) >= 21:
+            htf_ema9 = htf["close"].ewm(span=9, adjust=False).mean().iloc[-1]
+            htf_ema21 = htf["close"].ewm(span=21, adjust=False).mean().iloc[-1]
+            votes["Higher-Timeframe Bias"] = "BUY" if htf_ema9 > htf_ema21 else "SELL" if htf_ema9 < htf_ema21 else "NEUTRAL"
         else:
             votes["Higher-Timeframe Bias"] = "N/A"
     except (KeyError, TypeError, ValueError):
