@@ -1,7 +1,5 @@
 (() => {
   'use strict';
-  const HUB='https://biquote.io/hubs/tick';
-  const CDN='https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.29/signalr.min.js';
   const S={c:null,symbol:'',interval:'1m',bars:[],timer:null,poll:null,clock:null,drawFrame:0,drawQueued:false,lastW:0,lastH:0,scaleMin:null,scaleMax:null,clockOffsetMs:0,marketTs:0};
   const MS=()=>({'1m':60000,'5m':300000,'15m':900000,'30m':1800000,'1h':3600000,'4h':14400000,'1D':86400000}[S.interval]||60000);
   const sym=v=>String(v||'').replace('/','').toUpperCase(), num=v=>Number(v);

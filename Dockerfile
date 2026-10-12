@@ -15,11 +15,5 @@ RUN pip install --upgrade pip \
 
 COPY . .
 
-# Keep the Forex provider migration deterministic without rewriting application code.
-RUN find . -type f -name '*.py' -exec sed -i \
-    -e 's/data\.twelve_data_forex/data.biquote_forex/g' \
-    -e 's/"Twelve Data"/"BiQuote"/g' \
-    -e "s/'Twelve Data'/'BiQuote'/g" {} +
-
 # Quotex OTC uses a lightweight WebSocket client; no Chromium or Playwright is installed.
 CMD ["python", "main.py"]

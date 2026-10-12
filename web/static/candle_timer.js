@@ -177,13 +177,35 @@
   }
 
   async function pollLiveTick(){
-    if(!chartSymbol)return;try{const symbol=encodeURIComponent(chartSymbol.replace('/','').toUpperCase()),response=await fetch(`https://biquote.io/api/${symbol}`,{cache:'no-store',headers:{Accept:'application/json'}});if(!response.ok)throw new Error(`HTTP ${response.status}`);const d=await response.json(),price=Number(d?.mid ?? d?.bid ?? d?.ask),ts=Date.parse(d?.timestamp||d?.time||'')||Date.now();if(Number.isFinite(price))updateCurrentCandle(price,ts);}catch(_){/* keep chart running from last known candle */}
+    if(!chartSymbol)return;
+    if(!lastChartBars.length){await loadLiveChart(true);return;}
+    try{
+      const asset=encodeURIComponent(chartSymbol.replace('/','').toUpperCase());
+      const response=await fetch(`/quotex/real-market?asset=${asset}`,{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});
+      if(!response.ok)throw new Error(`HTTP ${response.status}`);
+      const d=await response.json(),q=d?.quote,price=Number(q?.price),rawTs=Number(q?.timestamp),ts=rawTs<1e12?rawTs*1000:rawTs;
+      if(d?.fresh&&Number.isFinite(price)&&Number.isFinite(ts))updateCurrentCandle(price,ts);
+      else{const status=document.getElementById('chart-status');if(status)status.textContent='Quotex live data waiting — collector is not sending fresh data';}
+    }catch(_){const status=document.getElementById('chart-status');if(status)status.textContent='Quotex live data unavailable — check collector connection';}
   }
 
   async function loadLiveChart(force=false){
     const pair=document.getElementById('pair')?.value||'',chart=ensureChart();if(!pair||!chart||chartRequestInFlight)return;if(!force&&pair===chartSymbol&&lastChartBars.length)return;
     chartSymbol=pair;chartRequestInFlight=true;const status=document.getElementById('chart-status');
-    try{const symbol=encodeURIComponent(pair.replace('/','').toUpperCase()),interval=encodeURIComponent(chartInterval),response=await fetch(`https://biquote.io/api/${symbol}/ohlc?interval=${interval}&limit=120`,{cache:'no-store',headers:{Accept:'application/json'}});if(!response.ok)throw new Error(`HTTP ${response.status}`);const payload=await response.json(),bars=Array.isArray(payload?.bars)?payload.bars:[];lastChartBars=bars.map(b=>({time:Date.parse(b.openTime),open:+b.open,high:+b.high,low:+b.low,close:+b.close,isOpen:!!b.isOpen})).filter(b=>Number.isFinite(b.time)&&Number.isFinite(b.open)&&Number.isFinite(b.high)&&Number.isFinite(b.low)&&Number.isFinite(b.close)).sort((a,b)=>a.time-b.time);if(!lastChartBars.length)throw new Error('No candles');const latest=lastChartBars.at(-1),price=document.getElementById('chart-price');if(price)price.textContent=`${latest.close} • ${new Date(latest.time).toISOString().replace('T',' ').replace('.000Z',' UTC')}`;if(status)status.textContent=`LIVE • BiQuote • ${chartSymbol} • ${chartInterval.toUpperCase()} • no page refresh • live candle updates`;drawLiveChart();await pollLiveTick();}catch(err){if(status)status.textContent=`Live chart unavailable: ${err.message||'data error'}`;}finally{chartRequestInFlight=false;}
+    try{
+      const asset=encodeURIComponent(pair.replace('/','').toUpperCase()),response=await fetch(`/quotex/real-market?asset=${asset}`,{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});
+      if(!response.ok)throw new Error(`HTTP ${response.status}`);
+      const payload=await response.json(),rawBars=Array.isArray(payload?.bars)?payload.bars:[];
+      const oneMinute=rawBars.map(b=>{const raw=Number(b.timestamp??b.time??b.openTime);return{time:raw<1e12?raw*1000:raw,open:+(b.open??b.o),high:+(b.high??b.h),low:+(b.low??b.l),close:+(b.close??b.c),isOpen:false};}).filter(b=>Number.isFinite(b.time)&&Number.isFinite(b.open)&&Number.isFinite(b.high)&&Number.isFinite(b.low)&&Number.isFinite(b.close)).sort((a,b)=>a.time-b.time);
+      const tf=timeframeMs(),groups=new Map();
+      for(const b of oneMinute){const bucket=Math.floor(b.time/tf)*tf,old=groups.get(bucket);if(!old)groups.set(bucket,{time:bucket,open:b.open,high:b.high,low:b.low,close:b.close,isOpen:false});else{old.high=Math.max(old.high,b.high);old.low=Math.min(old.low,b.low);old.close=b.close;}}
+      lastChartBars=Array.from(groups.values()).slice(-160);
+      if(!lastChartBars.length){if(status)status.textContent='No Quotex candles yet — start the Quotex collector';const price=document.getElementById('chart-price');if(price)price.textContent='—';return;}
+      const latest=lastChartBars.at(-1),price=document.getElementById('chart-price'),q=payload?.quote,rawTs=Number(q?.timestamp||latest.time/1000),quoteTs=rawTs<1e12?rawTs*1000:rawTs;
+      if(price)price.textContent=`${Number(q?.price)||latest.close} • ${new Date(quoteTs).toISOString().replace('T',' ').replace('.000Z',' UTC')}`;
+      if(status)status.textContent=payload?.fresh?`LIVE • Quotex WebSocket • ${chartSymbol} • ${chartInterval.toUpperCase()} • collector data`:'Quotex data is stale — reconnect the collector';
+      drawLiveChart();await pollLiveTick();
+    }catch(err){if(status)status.textContent=`Quotex chart unavailable: ${err.message||'data error'}`;}finally{chartRequestInFlight=false;}
   }
 
   function syncChartToMarket(){
