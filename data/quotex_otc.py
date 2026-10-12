@@ -63,11 +63,30 @@ def _normalise_rows(payload: Any, default_asset: str) -> list[dict[str, Any]]:
             # sub-minute seconds on the timestamp. Store the canonical candle
             # open time so exact entry-minute lookups can match it reliably.
             stamp = stamp.floor(f"{max(1, period)}s")
-            rows.append({
+            row = {
                 "timestamp": stamp,
                 "open": float(op), "high": float(hi), "low": float(lo), "close": float(cl),
                 "asset": str(item_asset), "period": period,
-            })
+            }
+            # Realized candles can carry per-minute tick counts from the local
+            # collector. Keep them explicitly separate from traded volume.
+            raw_tick_volume = item.get("tick_volume") if isinstance(item, dict) else None
+            if raw_tick_volume is not None:
+                try:
+                    tick_volume = float(raw_tick_volume)
+                    if tick_volume >= 0 and tick_volume == tick_volume and abs(tick_volume) != float("inf"):
+                        row["tick_volume"] = tick_volume
+                except (TypeError, ValueError, OverflowError):
+                    pass
+            raw_volume = item.get("volume") if isinstance(item, dict) else None
+            if raw_volume is not None:
+                try:
+                    volume = float(raw_volume)
+                    if volume >= 0 and volume == volume and abs(volume) != float("inf"):
+                        row["volume"] = volume
+                except (TypeError, ValueError, OverflowError):
+                    pass
+            rows.append(row)
         except (TypeError, ValueError, OverflowError):
             continue
     return rows
@@ -174,17 +193,17 @@ def ingest_local_ticks(payload: Any) -> int:
         old = _LOCAL_TICK_CACHE.get(asset)
         if old and now - old[0] < 120:
             frame = pd.concat([old[1], frame], ignore_index=True).drop_duplicates("timestamp").sort_values("timestamp")
-        _LOCAL_TICK_CACHE[asset] = (now, frame.tail(1000).reset_index(drop=True))
+        _LOCAL_TICK_CACHE[asset] = (now, frame.tail(10000).reset_index(drop=True))
         _LOCAL_ACTIVE_ASSET = (now, asset)
     return len(out)
 
 
-def local_ticks(asset: str, count: int = 1000) -> pd.DataFrame:
+def local_ticks(asset: str, count: int = 10000) -> pd.DataFrame:
     with _LOCAL_LOCK:
         cached = _LOCAL_TICK_CACHE.get(asset)
         if not cached or time.monotonic() - cached[0] > 75:
             return pd.DataFrame(columns=["timestamp", "askPrice", "bidPrice"])
-        return cached[1].tail(max(1, min(int(count), 1000))).copy(deep=True).reset_index(drop=True)
+        return cached[1].tail(max(1, min(int(count), 10000))).copy(deep=True).reset_index(drop=True)
 
 
 def local_active_asset() -> str | None:
