@@ -256,7 +256,8 @@ def generate_hybrid_signal(candles: pd.DataFrame, ticks: pd.DataFrame | None = N
     votes = _concept_votes(x, timeframes)
     buy = sum(v == "BUY" for v in votes.values())
     sell = sum(v == "SELL" for v in votes.values())
-    neutral = len(votes)-buy-sell
+    detected = sum(v == "DETECTED" for v in votes.values())
+    neutral = sum(v == "NEUTRAL" for v in votes.values())
     score = int(round(100*(buy-sell)/max(1, buy+sell)))
     indicator = timeframes.get("1m", {})
     ind_signal = indicator.get("signal", "WAIT")
@@ -279,7 +280,7 @@ def generate_hybrid_signal(candles: pd.DataFrame, ticks: pd.DataFrame | None = N
     # Confidence is a rule-strength score only, not a calibrated win probability.
     analysis = {
         "available": True, "concept_count": len(CONCEPTS), "concepts": votes,
-        "buy_votes": buy, "sell_votes": sell, "neutral_votes": neutral,
+        "buy_votes": buy, "sell_votes": sell, "detected_concepts": detected, "neutral_votes": neutral,
         "score": score, "direction": direction, "indicator_signal": ind_signal,
         "timeframe_signals": {k: {"available": v.get("available", False), "signal": v.get("signal", "WAIT")} for k, v in timeframes.items()},
         "note": "MMC conceptগুলো OHLC-ভিত্তিক heuristic proxy; vote score/confidence জয়ের সম্ভাবনা নয়।",
