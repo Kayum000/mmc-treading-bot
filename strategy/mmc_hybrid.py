@@ -225,16 +225,12 @@ def _concept_votes(x: pd.DataFrame, tf: dict) -> dict:
 
     # Premium/discount are location labels, not directional signals on their own.
     # Vote only when price is in the relevant half AND a matching reaction exists.
-    if close > prior_mid and sweep_bsl and bearish:
-        votes["Premium Zone"] = "SELL"
-    elif close < prior_mid and sweep_ssl and bullish:
-        votes["Discount Zone"] = "BUY"
+    if close > prior_mid:
+        votes["Premium Zone"] = "SELL" if sweep_bsl and bearish else "DETECTED"
+    elif close < prior_mid:
+        votes["Discount Zone"] = "BUY" if sweep_ssl and bullish else "DETECTED"
     if abs(close - prior_mid) <= 0.10 * atr:
-        votes["Equilibrium"] = "NEUTRAL"
-    elif close > prior_mid and bullish:
-        votes["Equilibrium"] = "BUY"
-    elif close < prior_mid and bearish:
-        votes["Equilibrium"] = "SELL"
+        votes["Equilibrium"] = "DETECTED"
 
     higher = [tf.get(k, {}) for k in ("5m", "15m")]
     usable = [item.get("signal") for item in higher
