@@ -12,7 +12,20 @@ from strategy.otc_candle_pressure import generate_signal as generate_otc_signal
 from strategy.adaptive_real import generate_adaptive_signal\nfrom strategy.indicator_engine import analyze_timeframes
 
 
-def _indicator_payload(candles: pd.DataFrame) -> dict:\n    """Attach honest indicator votes and resampled timeframe context to the signal API."""\n    try:\n        analysis = analyze_timeframes(candles)\n        one = analysis.get("1m", {})\n        return {"indicator_analysis": one, "timeframe_analysis": analysis,\n                "indicator_score": one.get("score", 0),\n                "indicator_signal": one.get("signal", "WAIT")}\n    except Exception as exc:\n        return {"indicator_analysis": {"available": False, "reason": str(exc)},\n                "timeframe_analysis": {}, "indicator_score": 0, "indicator_signal": "WAIT"}\n\n\ndef _bengali_reason(reason: str) -> str:
+def _indicator_payload(candles: pd.DataFrame) -> dict:
+    """Attach indicator votes and resampled timeframe context to the signal API."""
+    try:
+        analysis = analyze_timeframes(candles)
+        one = analysis.get("1m", {})
+        return {"indicator_analysis": one, "timeframe_analysis": analysis,
+                "indicator_score": one.get("score", 0),
+                "indicator_signal": one.get("signal", "WAIT")}
+    except Exception as exc:
+        return {"indicator_analysis": {"available": False, "reason": str(exc)},
+                "timeframe_analysis": {}, "indicator_score": 0, "indicator_signal": "WAIT"}
+
+
+def _bengali_reason(reason: str) -> str:
     text = str(reason or "").strip()
     for source, translated in (("BUY", "ক্রয়"), ("SELL", "বিক্রয়"), ("HOLD", "অপেক্ষা"), ("Bullish", "বুলিশ"), ("Bearish", "বিয়ারিশ")):
         text = text.replace(source, translated)
@@ -80,7 +93,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
             score = int(round(float(result.confidence) * 100))
             is_entry = result.action in {"BUY", "SELL"}
             signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
-            return {"pair": pair, "requested_pair": pair, "market_mode": "real", "source": "Quotex Real Market browser WebSocket", "signal": result.action, "market_bias": result.action, "entry_signal": result.action, "buy_score": score if result.action == "BUY" else 0, "sell_score": score if result.action == "SELL" else 0, "reason": _bengali_reason(f"[{result.regime} / {result.strategy}] {result.reason}"), "hold_condition": _hold_condition(result.reason, result.regime, result.strategy) if result.action == "HOLD" else None, "signal_created_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None, "signal_created_bd": signal_at_utc.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None, "signal_time_utc": signal_candle.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": signal_candle.isoformat(timespec="seconds"), "analysis_candle_time_utc": None, "entry_price": None, "entry_price_type": "closed_candle_model", "entry_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_delay_seconds": 0, "timeframe": "1-minute closed-candle adaptive", "entry_timeframe": "next 1-minute candle after closed-candle analysis", "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None, "regime": result.regime, "strategy": result.strategy, "strategy_mode": "adaptive", **_indicator_payload(candles)}
+            return {"pair": pair, "requested_pair": pair, "market_mode": "real", "source": "Quotex Real Market browser WebSocket", "signal": result.action, "market_bias": result.action, "entry_signal": result.action, "buy_score": score if result.action == "BUY" else 0, "sell_score": score if result.action == "SELL" else 0, "reason": _bengali_reason(f"[{result.regime} / {result.strategy}] {result.reason}"), "hold_condition": _hold_condition(result.reason, result.regime, result.strategy) if result.action == "HOLD" else None, "signal_created_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None, "signal_created_bd": signal_at_utc.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None, "signal_time_utc": signal_candle.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": signal_candle.isoformat(timespec="seconds"), "analysis_candle_time_utc": None, "entry_price": None, "entry_price_type": "closed_candle_model", "entry_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_delay_seconds": 0, "timeframe": "1-minute closed-candle adaptive", "entry_timeframe": "next 1-minute candle after closed-candle analysis", "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None, "regime": result.regime, "strategy": result.strategy, "strategy_mode": "adaptive", **_indicator_payload(candles), **_indicator_payload(candles)}
         return {
             "pair": pair, "requested_pair": pair, "market_mode": "real",
             "source": "Quotex Real Market browser WebSocket", "signal": "HOLD",
@@ -97,7 +110,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
             "entry_candle_time_bd": None, "entry_delay_seconds": None,
             "timeframe": "1-minute closed-candle adaptive", "entry_timeframe": "next 1-minute candle after closed-candle analysis",
             "automatic": automatic, "confidence": 0.0, "mmc_level_type": None, "mmc_level_price": None,
-            "regime": "UNKNOWN", "strategy": "NONE", "strategy_mode": "adaptive",
+            "regime": "UNKNOWN", "strategy": "NONE", "strategy_mode": "adaptive", **_indicator_payload(candles),
         }
 
     analysis_candle_time = candles.iloc[-1]["timestamp"]
@@ -135,7 +148,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
         "entry_delay_seconds": 0 if is_entry else None, "timeframe": timeframe,
         "entry_timeframe": "next 1-minute candle after closed-candle analysis", "automatic": automatic,
         "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
-        "regime": regime, "strategy": strategy_name,
+        "regime": regime, "strategy": strategy_name, **_indicator_payload(candles),
     }
 
 
