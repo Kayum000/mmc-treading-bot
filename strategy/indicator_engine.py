@@ -85,7 +85,53 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
     span_b = (h.rolling(52).max()+l.rolling(52).min())/2
     mid = (h.rolling(20).max()+l.rolling(20).min())/2
     kelt_mid = c.ewm(span=20, adjust=False).mean()
-    sar_proxy = l.rolling(2).min() if c.iloc[-1] >= c.iloc[-2] else h.rolling(2).max()
+    # Parabolic SAR (step 0.02, max 0.20), with the standard trend extreme
+    # point and prior-two-bar constraints.
+    sar_values = np.full(len(x), np.nan, dtype=float)
+    sar_uptrend = bool(c.iloc[1] >= c.iloc[0])
+    sar_af, sar_step, sar_max = 0.02, 0.02, 0.20
+    sar_ep = float(h.iloc[1]) if sar_uptrend else float(l.iloc[1])
+    sar_values[0] = float(l.iloc[0]) if sar_uptrend else float(h.iloc[0])
+    sar_values[1] = sar_values[0] + sar_af*(sar_ep-sar_values[0])
+    for i in range(2, len(x)):
+        candidate = sar_values[i-1] + sar_af*(sar_ep-sar_values[i-1])
+        if sar_uptrend:
+            candidate = min(candidate, float(l.iloc[i-1]), float(l.iloc[i-2]))
+            if float(l.iloc[i]) < candidate:
+                sar_uptrend, candidate, sar_ep, sar_af = False, sar_ep, float(l.iloc[i]), sar_step
+            elif float(h.iloc[i]) > sar_ep:
+                sar_ep, sar_af = float(h.iloc[i]), min(sar_max, sar_af+sar_step)
+        else:
+            candidate = max(candidate, float(h.iloc[i-1]), float(h.iloc[i-2]))
+            if float(h.iloc[i]) > candidate:
+                sar_uptrend, candidate, sar_ep, sar_af = True, sar_ep, float(h.iloc[i]), sar_step
+            elif float(l.iloc[i]) < sar_ep:
+                sar_ep, sar_af = float(l.iloc[i]), min(sar_max, sar_af+sar_step)
+        sar_values[i] = candidate
+    # Standard ATR-based Supertrend (period 14, multiplier 3) with recursively
+    # constrained final upper/lower bands and direction changes at band breaks.
+    st_upper = np.full(len(x), np.nan, dtype=float)
+    st_lower = np.full(len(x), np.nan, dtype=float)
+    st_direction = np.zeros(len(x), dtype=int)
+    st_line = np.full(len(x), np.nan, dtype=float)
+    for i in range(len(x)):
+        if not np.isfinite(float(atr.iloc[i])):
+            continue
+        mid_i = (float(h.iloc[i])+float(l.iloc[i]))/2
+        basic_upper, basic_lower = mid_i+3*float(atr.iloc[i]), mid_i-3*float(atr.iloc[i])
+        if i == 0 or not np.isfinite(st_upper[i-1]):
+            st_upper[i], st_lower[i] = basic_upper, basic_lower
+            st_direction[i] = 1 if float(c.iloc[i]) >= mid_i else -1
+        else:
+            st_upper[i] = basic_upper if basic_upper < st_upper[i-1] or float(c.iloc[i-1]) > st_upper[i-1] else st_upper[i-1]
+            st_lower[i] = basic_lower if basic_lower > st_lower[i-1] or float(c.iloc[i-1]) < st_lower[i-1] else st_lower[i-1]
+            if st_direction[i-1] < 0 and float(c.iloc[i]) > st_upper[i-1]:
+                st_direction[i] = 1
+            elif st_direction[i-1] > 0 and float(c.iloc[i]) < st_lower[i-1]:
+                st_direction[i] = -1
+            else:
+                st_direction[i] = st_direction[i-1]
+        st_line[i] = st_lower[i] if st_direction[i] > 0 else st_upper[i]
     vals = {}
     def add(name, value, sig="NEUTRAL"):
         try:
@@ -109,14 +155,26 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
     add("Bollinger Bands", upper.iloc[-1], trend_sig(lastc>sma.iloc[-1], lastc<sma.iloc[-1]))
     env_up, env_dn = sma*1.025, sma*0.975
     add("Envelopes", env_up.iloc[-1], trend_sig(lastc>env_up.iloc[-1], lastc<env_dn.iloc[-1]))
-    fractal = "BUY" if lastc > h.iloc[-6:-1].max() else "SELL" if lastc < l.iloc[-6:-1].min() else "NEUTRAL"
-    add("Fractal", lastc, fractal)
+    # Find confirmed 5-bar Bill Williams fractal pivots (two closed bars on
+    # each side); report the most recent pivot level and breakout direction.
+    fractal_highs, fractal_lows = [], []
+    for i in range(max(2, len(x)-30), len(x)-2):
+        if h.iloc[i] >= h.iloc[i-2:i+3].max():
+            fractal_highs.append((i, float(h.iloc[i])))
+        if l.iloc[i] <= l.iloc[i-2:i+3].min():
+            fractal_lows.append((i, float(l.iloc[i])))
+    last_fractal_high = fractal_highs[-1][1] if fractal_highs else None
+    last_fractal_low = fractal_lows[-1][1] if fractal_lows else None
+    fractal_signal = "BUY" if last_fractal_high is not None and lastc > last_fractal_high else "SELL" if last_fractal_low is not None and lastc < last_fractal_low else "NEUTRAL"
+    candidates = ([fractal_highs[-1]] if fractal_highs else []) + ([fractal_lows[-1]] if fractal_lows else [])
+    fractal_value = max(candidates, key=lambda p: p[0])[1] if candidates else None
+    add("Fractal", fractal_value, fractal_signal)
     add("Ichimoku Cloud", span_a.iloc[-1], trend_sig(lastc>max(span_a.iloc[-1],span_b.iloc[-1]), lastc<min(span_a.iloc[-1],span_b.iloc[-1])))
     add("Keltner channel", kelt_mid.iloc[-1], trend_sig(lastc>kelt_mid.iloc[-1]+2*atr.iloc[-1], lastc<kelt_mid.iloc[-1]-2*atr.iloc[-1]))
     add("Donchian channel", don_hi.iloc[-1], trend_sig(lastc>don_hi.shift(1).iloc[-1], lastc<don_lo.shift(1).iloc[-1]))
-    add("Supertrend", kelt_mid.iloc[-1] + (3*atr.iloc[-1] if lastc < kelt_mid.iloc[-1] else -3*atr.iloc[-1]), trend_sig(lastc>kelt_mid.iloc[-1], lastc<kelt_mid.iloc[-1]))
+    add("Supertrend", st_line[-1], "BUY" if st_direction[-1] > 0 else "SELL" if st_direction[-1] < 0 else "N/A")
     add("Moving Average", ema20.iloc[-1], trend_sig(ema20.iloc[-1]>ema50.iloc[-1], ema20.iloc[-1]<ema50.iloc[-1]))
-    add("Parabolic SAR", sar_proxy.iloc[-1], trend_sig(lastc>sar_proxy.iloc[-1], lastc<sar_proxy.iloc[-1]))
+    add("Parabolic SAR", sar_values[-1], trend_sig(lastc>sar_values[-1], lastc<sar_values[-1]))
     add("Zig Zag", c.pct_change(5).iloc[-1]*100, trend_sig(c.iloc[-1]>c.iloc[-6], c.iloc[-1]<c.iloc[-6]))
     add("ADX", adx.iloc[-1], trend_sig(plus_di.iloc[-1]>minus_di.iloc[-1] and adx.iloc[-1]>20, minus_di.iloc[-1]>plus_di.iloc[-1] and adx.iloc[-1]>20))
     aroon_up = 100*(14-np.argmax(h.iloc[-15:].to_numpy()[::-1]))/14
