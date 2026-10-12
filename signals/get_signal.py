@@ -76,6 +76,37 @@ def _hold_condition(reason: str, regime: str = "", strategy: str = "") -> str:
     return _bengali_reason(reason) or "BUY/SELL-এর প্রয়োজনীয় confirmation পাওয়া যায়নি"
 
 
+def _entry_candle_time(signal_at_utc: datetime, automatic: bool, latest_closed_open=None) -> datetime:
+    """Choose an actionable full-minute entry, accounting for AUTO boundary races.
+
+    AUTO is normally called about three seconds before the next minute. If the
+    HTTP request reaches the server just after that boundary, reuse the new
+    minute only during a tiny grace window and only when the immediately
+    preceding candle is confirmed closed. Otherwise always target a future
+    candle rather than publishing a timestamp that has already started.
+    """
+    current_minute = signal_at_utc.replace(second=0, microsecond=0)
+    elapsed_seconds = signal_at_utc.second + signal_at_utc.microsecond / 1_000_000
+    if automatic and elapsed_seconds <= 3.0 and latest_closed_open is not None:
+        try:
+            stamp = latest_closed_open.to_pydatetime() if hasattr(latest_closed_open, "to_pydatetime") else latest_closed_open
+            if not isinstance(stamp, datetime):
+                stamp = pd.to_datetime(stamp, utc=True).to_pydatetime()
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            stamp = stamp.astimezone(timezone.utc).replace(second=0, microsecond=0)
+            if stamp + timedelta(minutes=1) == current_minute:
+                return current_minute
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return current_minute + timedelta(minutes=1)
+
+
+def _entry_delay_seconds(signal_at_utc: datetime, entry_at_utc: datetime) -> int:
+    """Seconds until the chosen entry boundary; zero means enter now/already opened."""
+    return max(0, int(round((entry_at_utc - signal_at_utc).total_seconds())))
+
+
 def _real_signal(pair: str, automatic: bool) -> dict:
     from quotex_browser_ingest import _REAL_MARKET, _REAL_MARKET_LOCK, real_market_ticks
     asset = "".join(ch for ch in pair.upper() if ch.isalnum() or ch in "._-")
@@ -88,13 +119,10 @@ def _real_signal(pair: str, automatic: bool) -> dict:
     if age_seconds is None or age_seconds > REAL_MARKET_MAX_AGE_SECONDS:
         raise RuntimeError("Quotex Real Market collector is not connected or has no fresh data.")
 
-    # During minute N, analyze only the fully closed candle N-1.
-    # Minute N is the next 1-minute candle and therefore the entry candle.
+    # Only candles whose opening timestamp precedes the current minute may be
+    # analyzed. The latest closed candle is passed to the timing helper below.
     signal_at_utc = datetime.now(timezone.utc)
     current_minute = signal_at_utc.replace(second=0, microsecond=0)
-    # When AUTO requests a few seconds before the minute boundary, prepare the
-    # signal for the upcoming candle instead of waiting for that candle to start.
-    signal_candle = current_minute + timedelta(minutes=1)
     asset = "".join(ch for ch in pair.upper() if ch.isalnum() or ch in "._-")
 
     with _REAL_MARKET_LOCK:
@@ -111,6 +139,9 @@ def _real_signal(pair: str, automatic: bool) -> dict:
         candles["timestamp"] = pd.to_datetime(candles["timestamp"], unit="s", utc=True, errors="coerce")
         candles = candles.dropna(subset=["timestamp"])
         candles = candles[candles["timestamp"] < current_minute].reset_index(drop=True)
+
+    latest_closed_open = candles.iloc[-1]["timestamp"] if not candles.empty else None
+    signal_candle = _entry_candle_time(signal_at_utc, automatic, latest_closed_open)
 
     min_history = 60
     if len(candles) < min_history:
@@ -171,7 +202,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
         "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
         "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
-        "entry_delay_seconds": 0 if is_entry else None, "timeframe": timeframe,
+        "entry_delay_seconds": _entry_delay_seconds(signal_at_utc, signal_candle) if is_entry else None, "timeframe": timeframe,
         "entry_timeframe": "next 1-minute candle after closed-candle analysis", "automatic": automatic,
         "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
         "regime": regime, "strategy": strategy_name, "strategy_mode": "hybrid_mmc", "mmc_analysis": result.mmc_analysis, **_indicator_payload(candles, ticks=ticks),
@@ -193,10 +224,6 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
         raise RuntimeError("বর্তমান Quotex OTC মার্কেট শনাক্ত করা যায়নি। Quotex-এ একটি 1-minute OTC chart খোলা রাখুন।")
 
     signal_at_utc = datetime.now(timezone.utc)
-    current_minute = signal_at_utc.replace(second=0, microsecond=0)
-    # AUTO is scheduled a few seconds before the boundary so the signal is
-    # prepared for the upcoming entry candle before that candle starts.
-    signal_candle = current_minute + timedelta(minutes=1)
 
     # The OTC collector already publishes only fully completed 1-minute candles.
     # Match Real-Market timing: analyze the latest closed candle and use the
@@ -206,6 +233,8 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
     # exactly at the minute boundary.
     # The hybrid MMC strategy requires at least 60 closed candles.
     candles = fetch_quotex_candles(asset, count=1200)
+    latest_closed_open = candles.iloc[-1]["timestamp"] if not candles.empty else None
+    signal_candle = _entry_candle_time(signal_at_utc, automatic, latest_closed_open)
 
     ticks = local_ticks(asset)
     result = generate_hybrid_signal(candles, ticks=ticks)
@@ -230,7 +259,7 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
         "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
         "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
-        "entry_delay_seconds": 0 if is_entry else None,
+        "entry_delay_seconds": _entry_delay_seconds(signal_at_utc, signal_candle) if is_entry else None,
         "timeframe": f"1-minute/{result.strategy.lower()}",
         "entry_timeframe": "next 1-minute candle after closed-candle analysis",
         "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
