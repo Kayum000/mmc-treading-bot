@@ -154,8 +154,11 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
         trend_sig(gator_lips.iloc[-1]>gator_teeth.iloc[-1]>gator_jaw.iloc[-1],
                   gator_lips.iloc[-1]<gator_teeth.iloc[-1]<gator_jaw.iloc[-1]))
     add("Bollinger Bands", upper.iloc[-1], trend_sig(lastc>sma.iloc[-1], lastc<sma.iloc[-1]))
-    env_up, env_dn = sma*1.025, sma*0.975
-    add("Envelopes", env_up.iloc[-1], trend_sig(lastc>env_up.iloc[-1], lastc<env_dn.iloc[-1]))
+    # Standard fixed-width Envelopes baseline: 20-SMA +/- 0.1%.
+    # Upper-band extensions indicate SELL; lower-band extensions indicate BUY.
+    env_up, env_dn = sma*1.001, sma*0.999
+    env_signal = "SELL" if lastc > env_up.iloc[-1] else "BUY" if lastc < env_dn.iloc[-1] else "NEUTRAL"
+    add("Envelopes", env_up.iloc[-1], env_signal)
     # Find confirmed 5-bar Bill Williams fractal pivots (two closed bars on
     # each side); report the most recent pivot level and breakout direction.
     fractal_highs, fractal_lows = [], []
