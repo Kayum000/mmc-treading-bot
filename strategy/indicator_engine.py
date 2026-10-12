@@ -72,7 +72,10 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
     up_move, down_move = h.diff(), -l.diff()
     plus_dm = up_move.where((up_move>down_move)&(up_move>0),0).rolling(14).sum()
     minus_dm = down_move.where((down_move>up_move)&(down_move>0),0).rolling(14).sum()
-    plus_di, minus_di = 100*plus_dm/(atr.rolling(14).sum().replace(0,np.nan)), 100*minus_dm/(atr.rolling(14).sum().replace(0,np.nan))
+    # DMI/ADX uses the 14-bar True Range sum as the DI denominator.
+    # Summing a rolling ATR again delays ADX and distorts its scale.
+    tr14 = tr.rolling(14).sum()
+    plus_di, minus_di = 100*plus_dm/tr14.replace(0,np.nan), 100*minus_dm/tr14.replace(0,np.nan)
     dx = 100*(plus_di-minus_di).abs()/(plus_di+minus_di).replace(0,np.nan)
     adx = dx.rolling(14).mean()
     don_hi, don_lo = h.rolling(20).max(), l.rolling(20).min()
@@ -95,7 +98,14 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
         return "BUY" if up else "SELL" if down else "NEUTRAL"
     lastc = float(c.iloc[-1])
     # Trend family: values are proxies where platform-specific algorithms differ.
-    add("Alligator", (ema5.iloc[-1]+ema10.iloc[-1]+ema20.iloc[-1])/3, trend_sig(ema5.iloc[-1]>ema10.iloc[-1]>ema20.iloc[-1], ema5.iloc[-1]<ema10.iloc[-1]<ema20.iloc[-1]))
+    # Bill Williams Alligator approximation: SMMA-style jaw/teeth/lips with
+    # their customary forward plot offsets represented as lagged series here.
+    gator_lips = c.ewm(alpha=1/5, adjust=False).mean().shift(3)
+    gator_teeth = c.ewm(alpha=1/8, adjust=False).mean().shift(5)
+    gator_jaw = c.ewm(alpha=1/13, adjust=False).mean().shift(8)
+    add("Alligator", (gator_lips.iloc[-1]+gator_teeth.iloc[-1]+gator_jaw.iloc[-1])/3,
+        trend_sig(gator_lips.iloc[-1]>gator_teeth.iloc[-1]>gator_jaw.iloc[-1],
+                  gator_lips.iloc[-1]<gator_teeth.iloc[-1]<gator_jaw.iloc[-1]))
     add("Bollinger Bands", upper.iloc[-1], trend_sig(lastc>sma.iloc[-1], lastc<sma.iloc[-1]))
     env_up, env_dn = sma*1.025, sma*0.975
     add("Envelopes", env_up.iloc[-1], trend_sig(lastc>env_up.iloc[-1], lastc<env_dn.iloc[-1]))
@@ -128,8 +138,15 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
     roc = c.pct_change(12)*100
     add("Rate Of Change", roc.iloc[-1], trend_sig(roc.iloc[-1]>0, roc.iloc[-1]<0))
     add("Stochastic Oscillator", stoch.iloc[-1], trend_sig(stoch.iloc[-1]<20, stoch.iloc[-1]>80))
-    stc_proxy = (macd.ewm(span=10,adjust=False).mean()-macd.ewm(span=20,adjust=False).mean()).iloc[-1]
-    add("Schaff Trend Cycle", stc_proxy, trend_sig(stc_proxy>0, stc_proxy<0))
+    # Schaff Trend Cycle proxy: MACD(23, 50), stochastic normalization twice,
+    # and EMA(3) smoothing. This keeps STC on its expected 0..100 scale.
+    stc_macd = c.ewm(span=23, adjust=False).mean() - c.ewm(span=50, adjust=False).mean()
+    stc_low1, stc_high1 = stc_macd.rolling(10).min(), stc_macd.rolling(10).max()
+    stc_k1 = (100*(stc_macd-stc_low1)/(stc_high1-stc_low1).replace(0,np.nan)).ewm(span=3, adjust=False).mean()
+    stc_low2, stc_high2 = stc_k1.rolling(10).min(), stc_k1.rolling(10).max()
+    stc_series = (100*(stc_k1-stc_low2)/(stc_high2-stc_low2).replace(0,np.nan)).ewm(span=3, adjust=False).mean()
+    stc_value = stc_series.iloc[-1]
+    add("Schaff Trend Cycle", stc_value, trend_sig(stc_value>50, stc_value<50))
     vm_plus = (h-l.shift(1)).abs().rolling(14).sum()
     vm_minus = (l-h.shift(1)).abs().rolling(14).sum()
     add("Vortex", (vm_plus/vm_minus.replace(0,np.nan)).iloc[-1], trend_sig(vm_plus.iloc[-1]>vm_minus.iloc[-1], vm_minus.iloc[-1]>vm_plus.iloc[-1]))
@@ -150,13 +167,13 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
     # A moving EMA can be numerically produced early, but that does not mean its
     # advertised period has enough history behind it.
     minimums = {
-        "Alligator": 20, "Bollinger Bands": 20, "Envelopes": 20, "Fractal": 30,
+        "Alligator": 30, "Bollinger Bands": 20, "Envelopes": 20, "Fractal": 30,
         "Ichimoku Cloud": 52, "Keltner channel": 20, "Donchian channel": 20,
         "Supertrend": 14, "Moving Average": 50, "Parabolic SAR": 30, "Zig Zag": 30,
         "ADX": 27, "Aroon": 30, "Awesome Oscillator": 34, "Bears power": 30,
         "Bulls power": 30, "CCI": 20, "DeMarker": 30, "ATR": 14, "MACD": 34,
         "Momentum": 30, "RSI": 30, "Rate Of Change": 30,
-        "Stochastic Oscillator": 30, "Schaff Trend Cycle": 30, "Vortex": 30,
+        "Stochastic Oscillator": 30, "Schaff Trend Cycle": 70, "Vortex": 30,
         "Volume Oscillator": 30, "Williams %R": 30,
         "Weis Waves Volume Oscillator": 30,
     }
