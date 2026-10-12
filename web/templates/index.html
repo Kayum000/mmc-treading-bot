@@ -247,7 +247,7 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
     <div><h2 id="indicators-title">▦ Quotex Indicators</h2><p>তোমার Quotex স্ক্রিনশটে দেখা সব ২৯টি ইন্ডিকেটর—ক্যাটাগরি অনুযায়ী এক জায়গায়।</p></div>
     <button type="button" class="mini-btn" id="indicators-back">← Dashboard</button>
   </div>
-  <div class="indicators-notice" id="indicator-data-status"><strong>ডেটা স্ট্যাটাস:</strong> নির্বাচিত মার্কেটের closed-candle OHLC data দিয়ে হিসাবের অপেক্ষায়। কিছু indicator-এর জন্য approximation ব্যবহৃত হয়; volume data না থাকলে volume indicators unavailable থাকবে। OTC ও real-market data আলাদা। <button type="button" class="mini-btn" id="analysis-refresh" style="margin-left:8px">↻ Calculate / Refresh</button></div>
+  <div class="indicators-notice"><span id="indicator-status-text"><strong>ডেটা স্ট্যাটাস:</strong> নির্বাচিত মার্কেটের closed-candle OHLC data দিয়ে হিসাবের অপেক্ষায়। কিছু indicator-এর জন্য approximation ব্যবহৃত হয়; volume data না থাকলে volume indicators unavailable থাকবে। OTC ও real-market data আলাদা।</span> <button type="button" class="mini-btn" id="analysis-refresh" style="margin-left:8px">↻ Calculate / Refresh</button></div>
   <div class="indicators-tools">
     <input type="search" id="indicator-search" placeholder="Search indicator…" aria-label="Search indicators">
     <select id="indicator-timeframe" aria-label="Indicator timeframe"><option value="1m">Timeframe: 1m</option><option value="5m">Timeframe: 5m</option><option value="15m">Timeframe: 15m</option><option value="1h">Timeframe: 1h</option><option value="4h">Timeframe: 4h</option></select>
@@ -295,7 +295,7 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
     <div><h2 id="strategies-title">♜ MMC Strategy &amp; 22 Concepts</h2><p>MMC/ICT-ধাঁচের ২২টি কনসেপ্ট—নাম, ক্যাটাগরি ও কীভাবে কাজ করে।</p></div>
     <button type="button" class="mini-btn" id="strategies-back">← Dashboard</button>
   </div>
-  <div class="indicators-notice" id="strategy-data-status"><strong>গুরুত্বপূর্ণ:</strong> এগুলো ২২টি আলাদা স্বয়ংক্রিয় strategy নয়। Closed-candle OHLC rule দিয়ে যেসব concept evaluate করা যায়, তাদের vote এখানে দেখানো হবে; liquidity/order-block হলো heuristic proxy, institutional order-flow-এর প্রমাণ নয়। <button type="button" class="mini-btn" id="analysis-refresh-strategy" style="margin-left:8px">↻ Calculate / Refresh</button></div>
+  <div class="indicators-notice"><span id="strategy-status-text"><strong>গুরুত্বপূর্ণ:</strong> এগুলো ২২টি আলাদা স্বয়ংক্রিয় strategy নয়। Closed-candle OHLC rule দিয়ে যেসব concept evaluate করা যায়, তাদের vote এখানে দেখানো হবে; liquidity/order-block হলো heuristic proxy, institutional order-flow-এর প্রমাণ নয়।</span> <button type="button" class="mini-btn" id="analysis-refresh-strategy" style="margin-left:8px">↻ Calculate / Refresh</button></div>
   <div class="indicators-tools">
     <input type="search" id="strategy-search" placeholder="Search strategy / concept…" aria-label="Search strategies">
     <span class="indicators-count" id="strategies-count">22 concepts</span>
@@ -398,7 +398,7 @@ $('strategies-back')?.addEventListener('click',()=>{$('top')?.scrollIntoView({be
 
 
 async function loadLiveAnalysis(){
-  const status=$('indicator-data-status'), strategyStatus=$('strategy-data-status');
+  const status=$('indicator-status-text'), strategyStatus=$('strategy-status-text');
   const tf=$('indicator-timeframe')?.value||'1m';
   const showStatus=(el,msg)=>{if(el)el.dataset.message=msg;};
   if(status)status.innerHTML='<strong>ডেটা স্ট্যাটাস:</strong> নির্বাচিত মার্কেটের candle ও indicator হিসাব হচ্ছে…';
