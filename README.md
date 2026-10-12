@@ -4,12 +4,11 @@ A market-signal engine for selected Real Forex and Quotex OTC 1-minute markets.
 
 ## Live signal pipeline
 
-- **Real Forex:** prefers the selected pair's fresh Quotex browser WebSocket feed. If that feed is missing or older than 60 seconds, signal generation falls back to BiQuote's public Forex candles and explicitly labels the signal source; provider prices can differ from Quotex.
+- **Real Forex:** charts and signals use only the selected pair's fresh Quotex browser WebSocket collector data. If the collector is disconnected or the data is older than 60 seconds, the app reports that fresh Quotex data is unavailable; it never substitutes another provider's prices.
 - **Quotex OTC:** uses the selected OTC market from the authenticated collector attached to a user-opened Quotex chart. OTC is not substituted with Forex prices.
-- All three paths use the adaptive strategy in `strategy/adaptive_real.py`. The signal request fetches fresh provider candles; this is live/on-demand analysis, not a claim that every market is continuously streamed or that the OTC collector is always connected.
+- The adaptive strategy in `strategy/adaptive_real.py` analyzes available closed Quotex candles and ticks. Real-market signal requests fail closed when fresh Quotex data is unavailable.
 - The adaptive engine selects its logic from the detected market regime (for example TREND, BREAKOUT, RANGE, or HIGH_VOLATILITY).
 - **Tick Pressure** remains available as a fallback when the adaptive engine has suitable fresh tick data; it is not the primary strategy.
-
 ## Entry timing
 
 Signals are prepared for the upcoming 1-minute entry candle. The latest fully closed candle is used for analysis, and AUTO scheduling attempts to generate the signal a few seconds before the next minute boundary.
