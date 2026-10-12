@@ -205,7 +205,12 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
     stc_low2, stc_high2 = stc_k1.rolling(10).min(), stc_k1.rolling(10).max()
     stc_series = (100*(stc_k1-stc_low2)/(stc_high2-stc_low2).replace(0,np.nan)).ewm(span=3, adjust=False).mean()
     stc_value = stc_series.iloc[-1]
-    add("Schaff Trend Cycle", stc_value, trend_sig(stc_value>50, stc_value<50))
+    stc_previous = stc_series.iloc[-2] if len(stc_series) >= 2 else np.nan
+    if np.isfinite(stc_value) and np.isfinite(stc_previous):
+        stc_signal = "BUY" if stc_previous < 25 <= stc_value and stc_value > stc_previous else "SELL" if stc_previous > 75 >= stc_value and stc_value < stc_previous else "NEUTRAL"
+    else:
+        stc_signal = "N/A"
+    add("Schaff Trend Cycle", stc_value, stc_signal)
     vm_plus = (h-l.shift(1)).abs().rolling(14).sum()
     vm_minus = (l-h.shift(1)).abs().rolling(14).sum()
     add("Vortex", (vm_plus/vm_minus.replace(0,np.nan)).iloc[-1], trend_sig(vm_plus.iloc[-1]>vm_minus.iloc[-1], vm_minus.iloc[-1]>vm_plus.iloc[-1]))
