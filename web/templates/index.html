@@ -241,7 +241,7 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
 <article class="panel latest" id="latest-signal"><div class="panel-head"><span class="round-icon">♟</span><div><h2 class="panel-title">Latest Signal</h2></div></div></article>
 <article class="panel news" id="news"><div class="panel-head"><span class="round-icon">▣</span><div><h2 class="panel-title">News & Events</h2><div class="panel-sub">Latest Market News & Economic Events</div></div><button type="button" class="refresh" id="news-refresh">Refresh</button></div><div id="news-items"><div class="empty">Select a market to load news & events.</div></div><div class="news-footer"><span id="news-source">—</span><button type="button" class="mini-btn" id="news-more">View All News →</button></div></article>
 </section>
-<section class="chart-panel" id="chart"><div class="chart-head"><span class="round-icon">▥</span><div><b>Live Chart</b><small>Real-time price chart with indicators</small></div><div class="chart-controls"><span class="chart-live" id="chart-live">LIVE —</span><select id="chart-interval" aria-label="Chart timeframe"><option value="1m">1m</option><option value="5m">5m</option><option value="15m">15m</option><option value="1h">1h</option><option value="4h">4h</option><option value="1D">1D</option></select><button type="button" id="chart-zoom-out">−</button><button type="button" id="chart-zoom-in">+</button><button type="button" id="chart-full-view">FULL</button></div></div><div class="chart-canvas-wrap" id="live-market-chart"><div class="chart-canvas-wrap-inner"></div></div></section>
+<section class="chart-panel" id="chart"><div class="chart-head"><span class="round-icon">▥</span><div><b>Live Chart</b><small>Real-time price chart with indicators</small></div><div class="chart-controls"><span class="chart-live" id="chart-live">LIVE —</span><select id="chart-interval" aria-label="Chart timeframe"><option value="1m" selected>1m</option></select><button type="button" id="chart-zoom-out">−</button><button type="button" id="chart-zoom-in">+</button><button type="button" id="chart-full-view">FULL</button></div></div><div class="chart-canvas-wrap" id="live-market-chart"><div class="chart-canvas-wrap-inner"></div></div></section>
 <section class="indicators-panel" id="indicators-section" aria-labelledby="indicators-title">
   <div class="indicators-head">
     <div><h2 id="indicators-title">▦ Quotex Indicators</h2><p>তোমার Quotex স্ক্রিনশটে দেখা সব ২৯টি ইন্ডিকেটর—ক্যাটাগরি অনুযায়ী এক জায়গায়।</p></div>
@@ -250,7 +250,7 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
   <div class="indicators-notice"><span id="indicator-status-text"><strong>ডেটা স্ট্যাটাস:</strong> নির্বাচিত মার্কেটের closed-candle OHLC data দিয়ে হিসাবের অপেক্ষায়। কিছু indicator-এর জন্য approximation ব্যবহৃত হয়; volume data না থাকলে volume indicators unavailable থাকবে। OTC ও real-market data আলাদা।</span> <button type="button" class="mini-btn" id="analysis-refresh" style="margin-left:8px">↻ Calculate / Refresh</button></div>
   <div class="indicators-tools">
     <input type="search" id="indicator-search" placeholder="Search indicator…" aria-label="Search indicators">
-    <select id="indicator-timeframe" aria-label="Indicator timeframe"><option value="1m">Timeframe: 1m</option><option value="5m">Timeframe: 5m</option><option value="15m">Timeframe: 15m</option><option value="1h">Timeframe: 1h</option><option value="4h">Timeframe: 4h</option></select>
+    <select id="indicator-timeframe" aria-label="Indicator timeframe"><option value="1m" selected>Timeframe: 1m</option></select>
   </div>
   <div class="indicator-filters" role="group" aria-label="Filter indicators">
     <button type="button" class="indicator-filter active" data-indicator-filter="all">All (29)</button>
@@ -463,7 +463,7 @@ async function loadLiveAnalysis(){
       state.textContent=vote?('Calculated vote: '+fmtSignal(vote)):'Not calculated for this concept';
     });
     if(status){
-      if(!indicatorSet)status.innerHTML='<strong>ডেটা স্ট্যাটাস:</strong> '+tf+' timeframe calculation backend-এ নেই। বর্তমানে 1m, 5m ও 15m হিসাব সমর্থিত; 1h/4h-এর জন্য যথেষ্ট closed candle resampling যোগ করা হয়নি।';
+      if(!indicatorSet)status.innerHTML='<strong>ডেটা স্ট্যাটাস:</strong> '+tf+' timeframe calculation backend-এ নেই। বর্তমানে শুধু 1m timeframe নির্বাচন করা আছে।'; 1h/4h-এর জন্য যথেষ্ট closed candle resampling যোগ করা হয়নি।';
       else if(!indicatorSet.available)status.innerHTML='<strong>ডেটা স্ট্যাটাস:</strong> '+(indicatorSet.reason||'পর্যাপ্ত closed candle নেই')+' · '+String(data.pair||'')+' · '+String(data.market_mode||'');
       else status.innerHTML='<strong>ডেটা স্ট্যাটাস:</strong> '+String(data.pair||'')+' · '+String(data.market_mode||'')+' · '+tf+' · '+String(indicatorSet.count||0)+' closed candles · usable votes '+String(indicatorSet.usable_indicators||0)+' · BUY '+String(indicatorSet.buy_votes||0)+' / SELL '+String(indicatorSet.sell_votes||0)+' · vote score '+String(indicatorSet.score??0)+' (win probability নয়) · source '+dataSource+' · candle time '+candleStamp+'.';
     }
@@ -596,9 +596,7 @@ async function loadMarketScores(){
   put('status-strategy-score',mmc.available===false?'Unavailable':('BUY '+(mmc.buy_votes??0)+' / SELL '+(mmc.sell_votes??0)+' · '+(mmc.score??0)));
   const mtf=mmc.timeframe_signals||{};
   const one=mtf['1m']?.signal||frames['1m']?.signal||'WAIT';
-  const five=mtf['5m']?.signal||frames['5m']?.signal||'WAIT';
-  const fifteen=mtf['15m']?.signal||frames['15m']?.signal||'WAIT';
-  put('status-timeframe-score','1m '+one+' · 5m '+five+' · 15m '+fifteen);
+  put('status-timeframe-score','1m '+one);
   if(tf.available===false)put('status-indicator-score','Unavailable');
   else {
    const votes=tf.indicators?Object.values(tf.indicators).reduce((a,v)=>{if(v?.signal==='BUY')a.buy++;else if(v?.signal==='SELL')a.sell++;return a},{buy:0,sell:0}):null;
