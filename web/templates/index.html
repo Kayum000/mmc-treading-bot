@@ -483,6 +483,26 @@ $('analysis-refresh')?.addEventListener('click',loadLiveAnalysis);
 $('analysis-refresh-strategy')?.addEventListener('click',loadLiveAnalysis);
 $('indicator-timeframe')?.addEventListener('change',loadLiveAnalysis);
 
+ 
+// Automatically refresh indicator + MMC cards while the dashboard is open.
+// Poll the analysis endpoint every 15 seconds; calculations use closed-candle data.
+let liveAnalysisRefreshInFlight=false;
+const loadLiveAnalysisOriginal=loadLiveAnalysis;
+loadLiveAnalysis=async function(){
+  if(liveAnalysisRefreshInFlight)return;
+  liveAnalysisRefreshInFlight=true;
+  try{return await loadLiveAnalysisOriginal()}
+  finally{liveAnalysisRefreshInFlight=false}
+};
+function autoRefreshMarketAnalysis(){
+  if(document.visibilityState==='hidden'||!state.pair||!state.mode)return;
+  loadLiveAnalysis();
+  loadMarketScores();
+}
+setInterval(autoRefreshMarketAnalysis,15000);
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible')autoRefreshMarketAnalysis();
+});
 function handleSidebarNav(e){
   const btn=e.target.closest?.('.nav button');
   if(!btn)return;
