@@ -439,6 +439,30 @@ def auto_signal():
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
 
+@app.route("/api/indicator-analysis", methods=["GET"])
+def indicator_analysis_api():
+    """Return indicator and MMC concept calculations without sending a signal notification."""
+    settings = _settings()
+    mode = str(session.get("selected_mode", settings.get("market_mode", "")) or "").strip().lower()
+    pair = str(session.get("selected_pair", settings.get("pair", "") or "") or "").strip().upper()
+    if pair not in _valid_pairs(mode):
+        return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
+    try:
+        result = get_signal(pair, mode, automatic=False, strategy_mode=settings.get("strategy_mode", "normal"))
+        return jsonify({
+            "ok": True,
+            "pair": pair,
+            "market_mode": mode,
+            "source": result.get("source"),
+            "analysis_candle_time_utc": result.get("analysis_candle_time_utc"),
+            "indicator_analysis": result.get("indicator_analysis", {"available": False, "reason": "Indicator calculation unavailable"}),
+            "timeframe_analysis": result.get("timeframe_analysis", {}),
+            "mmc_analysis": result.get("mmc_analysis", {"available": False, "note": "MMC calculation unavailable"}),
+            "note": "Vote scores are rule-based analysis, not win probabilities or guarantees."
+        })
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
 @app.route("/api/telegram-status", methods=["GET"])
 def telegram_status():
     return jsonify({
