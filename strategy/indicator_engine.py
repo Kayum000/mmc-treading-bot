@@ -56,13 +56,15 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
     c, h, l = x.close, x.high, x.low
     prev = c.shift(1)
     tr = pd.concat([h-l, (h-prev).abs(), (l-prev).abs()], axis=1).max(axis=1)
-    atr = tr.rolling(14).mean()
+    # Wilder-style ATR smoothing used by ATR-based indicators.
+    atr = tr.ewm(alpha=1/14, adjust=False, min_periods=14).mean()
     sma = c.rolling(20).mean()
     std = c.rolling(20).std(ddof=0)
     upper, lower = sma + 2*std, sma - 2*std
     ema5, ema10, ema12, ema20, ema26, ema50 = [c.ewm(span=p, adjust=False).mean() for p in (5,10,12,20,26,50)]
     delta = c.diff()
-    gain, loss = delta.clip(lower=0).rolling(14).mean(), (-delta.clip(upper=0)).rolling(14).mean()
+    gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
     rs = gain / loss.replace(0, np.nan)
     rsi = 100 - 100/(1+rs)
     tp = (h+l+c)/3
@@ -70,14 +72,14 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
     lowest, highest = l.rolling(14).min(), h.rolling(14).max()
     stoch = 100*(c-lowest)/(highest-lowest).replace(0,np.nan)
     up_move, down_move = h.diff(), -l.diff()
-    plus_dm = up_move.where((up_move>down_move)&(up_move>0),0).rolling(14).sum()
-    minus_dm = down_move.where((down_move>up_move)&(down_move>0),0).rolling(14).sum()
-    # DMI/ADX uses the 14-bar True Range sum as the DI denominator.
-    # Summing a rolling ATR again delays ADX and distorts its scale.
-    tr14 = tr.rolling(14).sum()
-    plus_di, minus_di = 100*plus_dm/tr14.replace(0,np.nan), 100*minus_dm/tr14.replace(0,np.nan)
+    plus_dm_raw = up_move.where((up_move>down_move)&(up_move>0),0)
+    minus_dm_raw = down_move.where((down_move>up_move)&(down_move>0),0)
+    plus_dm = plus_dm_raw.ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    minus_dm = minus_dm_raw.ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    # Wilder's Directional Indicators and ADX: smoothed +DM/-DM over smoothed TR.
+    plus_di, minus_di = 100*plus_dm/atr.replace(0,np.nan), 100*minus_dm/atr.replace(0,np.nan)
     dx = 100*(plus_di-minus_di).abs()/(plus_di+minus_di).replace(0,np.nan)
-    adx = dx.rolling(14).mean()
+    adx = dx.ewm(alpha=1/14, adjust=False, min_periods=14).mean()
     don_hi, don_lo = h.rolling(20).max(), l.rolling(20).min()
     tenkan = (h.rolling(9).max()+l.rolling(9).min())/2
     kijun = (h.rolling(26).max()+l.rolling(26).min())/2
@@ -184,7 +186,8 @@ def analyze_indicators(candles: pd.DataFrame) -> dict:
     aroon_up = 100*(14-np.argmax(h.iloc[-15:].to_numpy()[::-1]))/14
     aroon_dn = 100*(14-np.argmin(l.iloc[-15:].to_numpy()[::-1]))/14
     add("Aroon", aroon_up, trend_sig(aroon_up>aroon_dn, aroon_dn>aroon_up))
-    ao = c.rolling(5).mean()-c.rolling(34).mean()
+    median_price = (h+l)/2
+    ao = median_price.rolling(5).mean()-median_price.rolling(34).mean()
     add("Awesome Oscillator", ao.iloc[-1], trend_sig(ao.iloc[-1]>0, ao.iloc[-1]<0))
     add("Bears power", (l-ema13(c)).iloc[-1], trend_sig((l-ema13(c)).iloc[-1]>0, (l-ema13(c)).iloc[-1]<0))
     add("Bulls power", (h-ema13(c)).iloc[-1], trend_sig((h-ema13(c)).iloc[-1]>0, (h-ema13(c)).iloc[-1]<0))
