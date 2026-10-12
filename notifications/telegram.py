@@ -98,12 +98,16 @@ def notify_signal(result: dict[str, Any]) -> bool:
     if action not in {"BUY", "SELL"}:
         return False
 
-    # Only forward stronger signals to Telegram. Confidence is a 0..1 score.
+    # Only forward stronger signals to Telegram. Accept either a 0..1 score
+    # or a percentage value (0..100), and fail closed if missing/invalid.
+    confidence_value = result.get("confidence", result.get("confidence_score", result.get("confidence_pct")))
     try:
-        confidence_gate = float(result.get("confidence"))
+        confidence_gate = float(confidence_value)
     except (TypeError, ValueError):
         return False
-    if confidence_gate < 0.70:
+    if confidence_gate > 1:
+        confidence_gate /= 100.0
+    if not 0.70 <= confidence_gate <= 1.0:
         return False
 
     pair = str(result.get("pair") or "Unknown pair").strip()
@@ -116,11 +120,7 @@ def notify_signal(result: dict[str, Any]) -> bool:
             return False
         _SENDING.add(key)
 
-    confidence = result.get("confidence")
-    try:
-        confidence_text = f"{float(confidence) * 100:.0f}%" if confidence is not None else "N/A"
-    except (TypeError, ValueError):
-        confidence_text = "N/A"
+    confidence_text = f"{confidence_gate * 100:.0f}%"
     entry_price = result.get("entry_price")
     try:
         price_text = f"{float(entry_price):.6f}".rstrip("0").rstrip(".") if entry_price is not None else "Not available"
