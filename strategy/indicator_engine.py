@@ -180,22 +180,8 @@ def ema13(series: pd.Series) -> pd.Series:
 
 
 def analyze_timeframes(candles: pd.DataFrame) -> dict:
+    """Analyze only closed 1-minute candles; higher timeframe filters are disabled."""
     x = _prep(candles)
     if x.empty:
-        return {tf: {"available": False, "signal": "WAIT", "reason": "candle data নেই"} for tf in ("1m","5m","15m")}
-    out = {"1m": analyze_indicators(x)}
-    indexed = x.set_index("timestamp")
-    for tf, rule, minimum in (("5m","5min",60), ("15m","15min",60)):
-        bars = indexed.resample(rule, label="left", closed="left").agg(
-            {"open":"first","high":"max","low":"min","close":"last"}
-        ).dropna().reset_index()
-        # Only use higher-timeframe candles whose entire interval has closed.
-        interval = pd.Timedelta(minutes=5 if tf == "5m" else 15)
-        last_closed_end = x["timestamp"].iloc[-1] + pd.Timedelta(minutes=1)
-        bars = bars[bars["timestamp"] + interval <= last_closed_end].reset_index(drop=True)
-        result = analyze_indicators(bars)
-        if len(bars) < minimum:
-            result.update({"available": False, "signal": "WAIT",
-                           "reason": f"{tf} বিশ্লেষণের জন্য প্রায় {minimum}টি resampled candle দরকার; আছে {len(bars)}টি"})
-        out[tf] = result
-    return out
+        return {"1m": {"available": False, "signal": "WAIT", "reason": "candle data নেই"}}
+    return {"1m": analyze_indicators(x)}
