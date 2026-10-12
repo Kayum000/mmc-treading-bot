@@ -9,7 +9,8 @@ import pandas as pd
 from data.quotex_otc import fetch_quotex_candles, OTC_PAIRS, local_active_asset, local_ticks
 from data.otc_markets import display_for_asset, asset_for_display
 from strategy.otc_candle_pressure import generate_signal as generate_otc_signal
-from strategy.adaptive_real import generate_adaptive_signal\nfrom strategy.indicator_engine import analyze_timeframes
+from strategy.adaptive_real import generate_adaptive_signal
+from strategy.indicator_engine import analyze_timeframes
 
 
 def _indicator_payload(candles: pd.DataFrame) -> dict:
