@@ -131,9 +131,9 @@ def _concept_votes(x: pd.DataFrame, tf: dict) -> dict:
     eqh = len(recent_highs) >= 2 and abs(recent_highs[-1][1] - recent_highs[-2][1]) <= tol
     eql = len(recent_lows) >= 2 and abs(recent_lows[-1][1] - recent_lows[-2][1]) <= tol
     if eqh:
-        votes["Equal Highs"] = "NEUTRAL"  # pool exists; direction comes from a sweep/reclaim
+        votes["Equal Highs"] = "DETECTED"  # liquidity pool exists; no direction until sweep/reclaim
     if eql:
-        votes["Equal Lows"] = "NEUTRAL"
+        votes["Equal Lows"] = "DETECTED"
 
     # Sweep requires piercing a prior level and closing back inside it.
     sweep_bsl = high > swing_hi and close < swing_hi
