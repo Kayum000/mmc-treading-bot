@@ -162,6 +162,37 @@ def _telegram_performance_stats(signal_id: str | None = None) -> dict:
         con.close()
 
 
+def _apply_confidence_gate(result: dict) -> dict:
+    """Suppress BUY/SELL output unless confidence is at least 70 percent."""
+    if not isinstance(result, dict):
+        return result
+    payload = dict(result)
+    action = str(payload.get("signal") or payload.get("entry_signal") or "").strip().upper()
+    if action not in {"BUY", "SELL"}:
+        return payload
+    raw_confidence = payload.get("confidence")
+    if raw_confidence is None:
+        raw_confidence = payload.get("confidence_score")
+    if raw_confidence is None:
+        raw_confidence = payload.get("confidence_pct")
+    try:
+        confidence = float(raw_confidence)
+    except (TypeError, ValueError):
+        confidence = -1.0
+    if confidence > 1:
+        confidence /= 100.0
+    if not 0.70 <= confidence <= 1.0:
+        payload["signal"] = "HOLD"
+        payload["entry_signal"] = "HOLD"
+        payload["reason"] = "Confidence below 70%; signal suppressed."
+        payload["hold_condition"] = "Confidence below 70%; no BUY/SELL signal."
+        payload["confidence_gate_passed"] = False
+    else:
+        payload["confidence"] = confidence
+        payload["confidence_gate_passed"] = True
+    return payload
+
+
 def _notify_telegram_safely(result: dict) -> None:
     """Telegram failures must not break signal generation or dashboard requests."""
     try:
@@ -406,7 +437,7 @@ def index():
         else:
             _save_settings(mode, pair, strategy_mode=strategy_mode)
             try:
-                result = get_signal(pair, mode, strategy_mode=strategy_mode)
+                result = _apply_confidence_gate(get_signal(pair, mode, strategy_mode=strategy_mode))
                 _record_signal_performance(result)
                 _notify_telegram_safely(result)
             except Exception as exc:
@@ -432,7 +463,7 @@ def auto_signal():
     if pair not in _valid_pairs(mode):
         return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
     try:
-        result = get_signal(pair, mode, automatic=True, strategy_mode=strategy_mode)
+        result = _apply_confidence_gate(get_signal(pair, mode, automatic=True, strategy_mode=strategy_mode))
         _record_signal_performance(result)
         _notify_telegram_safely(result)
         return jsonify({"ok": True, "result": result})
