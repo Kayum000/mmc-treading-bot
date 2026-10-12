@@ -110,7 +110,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
             "signal_created_bd": None,
             "signal_time_utc": None,
             "signal_time_bd": None,
-            "candle_time": None, "analysis_candle_time_utc": None,
+            "candle_time": None, "analysis_candle_time_utc": candles.iloc[-1]["timestamp"].to_pydatetime().astimezone(timezone.utc).isoformat(timespec="milliseconds") if not candles.empty else None,
             "entry_price": None, "entry_price_type": "closed_candle_model",
             "entry_time_utc": None, "entry_time_bd": None, "entry_candle_time_utc": None,
             "entry_candle_time_bd": None, "entry_delay_seconds": None,
