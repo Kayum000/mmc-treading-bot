@@ -769,20 +769,31 @@ def _score_pending_performance_once() -> None:
         if not candle:
             continue
         if row.get("result") == "অপেক্ষমাণ":
-            op, close = float(candle["o"]), float(candle["c"])
-            outcome = "লাভ" if (close > op and signal == "BUY") or (close < op and signal == "SELL") else "লস" if close != op else "DOJI"
+            candle_open, close = float(candle["o"]), float(candle["c"])
+            # Keep the existing signal/entry timing unchanged. Prefer the
+            # stored signal-time entry reference when available; for OTC this
+            # is normally the preceding closed candle's close. It is still a
+            # reference price, not a verified broker fill price.
+            try:
+                entry_reference = float(row.get("entry_price"))
+                if not (entry_reference > 0):
+                    entry_reference = candle_open
+            except (TypeError, ValueError, OverflowError):
+                entry_reference = candle_open
+            outcome = "লাভ" if (close > entry_reference and signal == "BUY") or (close < entry_reference and signal == "SELL") else "লস" if close != entry_reference else "DOJI"
+            outcome_basis = "signal entry reference বনাম সম্পূর্ণ ১-মিনিট candle close (broker fill/expiry যাচাইকৃত নয়)"
             con = _performance_db()
             try:
                 con.execute(
                     "UPDATE performance SET result=?, outcome_price=?, outcome_candle_time_utc=?, outcome_basis=?, updated_at=? WHERE id=? AND result='অপেক্ষমাণ'",
-                    (outcome, close, datetime.fromtimestamp(target_minute, timezone.utc).isoformat(), "সম্পূর্ণ entry ১-মিনিট candle open-to-close", time.time(), row["id"])
+                    (outcome, close, datetime.fromtimestamp(target_minute, timezone.utc).isoformat(), outcome_basis, time.time(), row["id"])
                 )
                 con.commit()
                 row["result"] = outcome
                 row["outcome_price"] = close
                 row["outcome_candle_time_utc"] = datetime.fromtimestamp(target_minute, timezone.utc).isoformat()
-                row["outcome_basis"] = "সম্পূর্ণ entry ১-মিনিট candle open-to-close"
-                print(f"[MMC Performance] scored mode={mode} pair={pair} signal={signal} result={outcome}", flush=True)
+                row["outcome_basis"] = outcome_basis
+                print(f"[MMC Performance] scored mode={mode} pair={pair} signal={signal} result={outcome} basis=entry-reference-to-close", flush=True)
             finally:
                 con.close()
         if row.get("result") in {"লাভ", "লস", "DOJI"} and not int(row.get("result_notified") or 0):
