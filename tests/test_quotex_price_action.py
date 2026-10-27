@@ -1,9 +1,11 @@
+import unittest
+
 import pandas as pd
 
 from strategy.quotex_price_action import generate_quotex_price_action_signal
 
 
-def candles(count=100, flat=False):
+def make_candles(count=100, flat=False):
     timestamps = pd.date_range("2026-01-01T00:00:00Z", periods=count, freq="min")
     rows = []
     price = 100.0
@@ -25,27 +27,32 @@ def candles(count=100, flat=False):
     return pd.DataFrame(rows)
 
 
-def test_insufficient_history_returns_hold():
-    result = generate_quotex_price_action_signal(candles(25))
-    assert result.action == "HOLD"
-    assert result.confidence == 0.0
-    assert result.mmc_analysis["candle_count"] == 25
+class QuotexPriceActionTests(unittest.TestCase):
+    def test_insufficient_history_returns_hold(self):
+        result = generate_quotex_price_action_signal(make_candles(25))
+        self.assertEqual(result.action, "HOLD")
+        self.assertEqual(result.confidence, 0.0)
+        self.assertEqual(result.mmc_analysis["candle_count"], 25)
+
+    def test_flat_market_returns_hold_instead_of_forced_direction(self):
+        result = generate_quotex_price_action_signal(make_candles(120, flat=True))
+        self.assertEqual(result.action, "HOLD")
+        self.assertEqual(result.regime, "NO_TRADE")
+
+    def test_missing_required_columns_returns_hold(self):
+        result = generate_quotex_price_action_signal(pd.DataFrame({"close": [1, 2, 3]}))
+        self.assertEqual(result.action, "HOLD")
+        self.assertEqual(result.regime, "NO_TRADE")
+
+    def test_confidence_is_not_described_as_win_probability(self):
+        result = generate_quotex_price_action_signal(make_candles(100))
+        self.assertEqual(
+            result.mmc_analysis["confidence_basis"],
+            "rule_strength_not_win_probability",
+        )
+        if result.action == "HOLD":
+            self.assertEqual(result.confidence, 0.0)
 
 
-def test_flat_market_returns_hold_instead_of_forced_direction():
-    result = generate_quotex_price_action_signal(candles(120, flat=True))
-    assert result.action == "HOLD"
-    assert result.regime == "NO_TRADE"
-
-
-def test_missing_required_columns_returns_hold():
-    result = generate_quotex_price_action_signal(pd.DataFrame({"close": [1, 2, 3]}))
-    assert result.action == "HOLD"
-    assert result.regime == "NO_TRADE"
-
-
-def test_strategy_never_reports_confidence_as_win_probability():
-    result = generate_quotex_price_action_signal(candles(100))
-    assert result.mmc_analysis["confidence_basis"] == "rule_strength_not_win_probability"
-    if result.action == "HOLD":
-        assert result.confidence == 0.0
+if __name__ == "__main__":
+    unittest.main()
