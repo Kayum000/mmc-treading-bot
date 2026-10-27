@@ -169,6 +169,20 @@ def _apply_confidence_gate(result: dict) -> dict:
     payload = dict(result)
     action = str(payload.get("signal") or payload.get("entry_signal") or "").strip().upper()
     if action not in {"BUY", "SELL"}:
+        # HOLD/WAIT is an analysis state, not a scheduled trade. Never show a
+        # candle close or calculated minute as an actionable entry on these cards.
+        for key in (
+            "signal_time_utc", "signal_time_bd", "candle_time",
+            "entry_time_utc", "entry_time_bd",
+            "entry_candle_time_utc", "entry_candle_time_bd",
+            "entry_price", "entry_delay_seconds",
+            "signal_created_utc", "signal_created_bd",
+        ):
+            if key in payload:
+                payload[key] = None
+        payload["buy_score"] = 0
+        payload["sell_score"] = 0
+        payload["confidence_gate_passed"] = False
         return payload
     raw_confidence = payload.get("confidence")
     if raw_confidence is None:
