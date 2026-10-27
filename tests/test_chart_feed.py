@@ -1,0 +1,55 @@
+import os
+import unittest
+from unittest.mock import patch
+
+import pandas as pd
+from flask import Flask
+
+import quotex_browser_ingest
+
+
+class TwelveDataChartEndpointTests(unittest.TestCase):
+    def setUp(self):
+        self.app = Flask(__name__)
+        self.app.secret_key = "test-only"
+        quotex_browser_ingest.init_quotex_browser_ingest(self.app)
+        self.client = self.app.test_client()
+        quotex_browser_ingest._TWELVE_CHART_CACHE.clear()
+
+    def test_real_chart_uses_twelve_data_when_key_is_configured(self):
+        frame = pd.DataFrame([{
+            "timestamp": pd.Timestamp("2026-10-27T12:00:00Z"),
+            "open": 1.10,
+            "high": 1.11,
+            "low": 1.09,
+            "close": 1.105,
+        }])
+        with patch.dict(os.environ, {"TWELVEDATA_API_KEY": "test-key"}), patch.object(
+            quotex_browser_ingest, "fetch_twelve_data_candles", return_value=frame
+        ) as fetch:
+            response = self.client.get("/quotex/real-market?asset=EURUSD")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["source"], "Twelve Data 1-minute Forex candles")
+        self.assertEqual(payload["bars"][0]["close"], 1.105)
+        self.assertEqual(payload["quote"]["price"], 1.105)
+        fetch.assert_called_once_with("EURUSD", count=180)
+
+    def test_provider_failure_does_not_fall_back_to_quotex_prices(self):
+        with patch.dict(os.environ, {"TWELVEDATA_API_KEY": "test-key"}), patch.object(
+            quotex_browser_ingest,
+            "fetch_twelve_data_candles",
+            side_effect=RuntimeError("provider unavailable"),
+        ):
+            response = self.client.get("/quotex/real-market?asset=EURUSD")
+
+        self.assertEqual(response.status_code, 503)
+        payload = response.get_json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["bars"], [])
+        self.assertEqual(payload["source"], "Twelve Data 1-minute Forex candles")
+
+
+if __name__ == "__main__":
+    unittest.main()
