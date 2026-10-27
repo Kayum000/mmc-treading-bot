@@ -257,7 +257,7 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
     score = int(round(float(result.confidence) * 100)) if is_entry else 0
     return {
         "pair": pair, "requested_pair": requested_pair, "detected_asset": asset, "market_mode": "quotex_otc",
-        "source": "Quotex OTC local Windows/Android screen collector + hybrid MMC strategy",
+        "source": "Quotex OTC local Windows/Android screen collector + strict Price Action strategy",
         "signal": result.action, "market_bias": result.action,
         "entry_signal": result.action, "buy_score": score if result.action == "BUY" else 0,
         "sell_score": score if result.action == "SELL" else 0, "reason": _bengali_reason(f"[{result.regime} / {result.strategy}] {result.reason}"),
