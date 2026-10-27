@@ -8,7 +8,7 @@ import pandas as pd
 
 from data.quotex_otc import fetch_quotex_candles, OTC_PAIRS, local_active_asset, local_ticks
 from data.otc_markets import display_for_asset, asset_for_display
-from strategy.mmc_hybrid import generate_hybrid_signal
+from strategy.quotex_price_action import generate_quotex_price_action_signal
 from strategy.indicator_engine import analyze_timeframes
 
 
@@ -144,7 +144,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
 
     min_history = 60
     if len(candles) < min_history:
-        result = generate_hybrid_signal(candles, ticks=ticks)
+        result = generate_quotex_price_action_signal(candles)
         if result.action in {"BUY", "SELL"}:
             score = int(round(float(result.confidence) * 100))
             is_entry = result.action in {"BUY", "SELL"}
