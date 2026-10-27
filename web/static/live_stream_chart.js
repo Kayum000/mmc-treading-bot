@@ -31,7 +31,7 @@
   }
   function normalizeBackendBars(rows){
     return (rows||[]).map(b=>({
-      t:(()=>{const v=typeof b.t==='number'?b.t:Date.parse(b.timestamp||b.openTime||b.time);return Number.isFinite(v)&&v<1e12?v*1000:v;})(),
+      t:(()=>{const raw=b.t??b.timestamp??b.openTime??b.time;const v=typeof raw==='number'?raw:Date.parse(raw);return Number.isFinite(v)&&v<1e12?v*1000:v;})(),
       o:num(b.o??b.open),h:num(b.h??b.high),l:num(b.l??b.low),c:num(b.c??b.close)
     })).filter(b=>Number.isFinite(b.t)&&[b.o,b.h,b.l,b.c].every(Number.isFinite)).sort((a,b)=>a.t-b.t).slice(-240);
   }
