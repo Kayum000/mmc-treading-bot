@@ -11,12 +11,16 @@ from flask import jsonify, request, session
 from data.quotex_otc import ingest_local_candles, ingest_local_ticks, local_stream_status, local_active_asset, local_candles_payload
 from data.otc_markets import display_for_asset, OTC_DISPLAY_PAIRS
 from signals.get_signal import get_signal
+from data.twelve_data import fetch_twelve_data_candles
 
 logger = logging.getLogger(__name__)
 
 _REAL_MARKET_LOCK = threading.Lock()
 _REAL_MARKET: dict[str, dict] = {}
 REAL_MARKET_MAX_AGE_SECONDS = 60
+TWELVE_CHART_CACHE_SECONDS = 15
+_TWELVE_CHART_CACHE: dict[str, dict] = {}
+_TWELVE_CHART_CACHE_LOCK = threading.Lock()
 
 
 def _collector_secret_valid() -> bool:
@@ -161,6 +165,58 @@ def init_quotex_browser_ingest(app):
     @app.route("/quotex/real-market", methods=["GET"])
     def quotex_real_market():
         asset = _real_asset(request.args.get("asset")) or _real_asset(session.get("selected_pair", ""))
+
+        # The web chart and signal strategy must use the same real-Forex provider.
+        # Keep OTC on its separate Quotex candle endpoint. Cache provider requests
+        # briefly because the browser polls this endpoint every two seconds.
+        if os.getenv("TWELVEDATA_API_KEY", "").strip():
+            now = time.time()
+            with _TWELVE_CHART_CACHE_LOCK:
+                cached = _TWELVE_CHART_CACHE.get(asset)
+                if cached and now - cached["cached_at"] < TWELVE_CHART_CACHE_SECONDS:
+                    payload = dict(cached["payload"])
+                    payload["cache_age_seconds"] = round(now - cached["cached_at"], 1)
+                    return jsonify(payload)
+            try:
+                frame = fetch_twelve_data_candles(asset, count=180)
+                bars = []
+                for _, row in frame.iterrows():
+                    stamp = row["timestamp"]
+                    bars.append({
+                        "timestamp": int(stamp.timestamp()),
+                        "open": float(row["open"]),
+                        "high": float(row["high"]),
+                        "low": float(row["low"]),
+                        "close": float(row["close"]),
+                    })
+                latest = frame.iloc[-1]
+                latest_ts = int(latest["timestamp"].timestamp())
+                quote = {"price": float(latest["close"]), "timestamp": latest_ts}
+                payload = {
+                    "ok": bool(bars),
+                    "asset": asset,
+                    "bars": bars,
+                    "quote": quote,
+                    "updated_at": now,
+                    "age_seconds": round(max(0, now - latest_ts), 1),
+                    "fresh": bool(bars),
+                    "source": "Twelve Data 1-minute Forex candles",
+                    "note": "Chart updates from provider candles; quote is the latest completed candle close, not a tick-by-tick Quotex quote.",
+                }
+                with _TWELVE_CHART_CACHE_LOCK:
+                    _TWELVE_CHART_CACHE[asset] = {"cached_at": now, "payload": payload}
+                return jsonify(payload)
+            except Exception as exc:
+                # Do not silently show Quotex collector prices as if they were
+                # Twelve Data prices when the configured Forex provider fails.
+                logger.warning("TWELVE_DATA_CHART_UNAVAILABLE asset=%s reason=%s", asset, str(exc)[:180])
+                return jsonify({
+                    "ok": False, "asset": asset, "bars": [], "quote": None,
+                    "updated_at": None, "age_seconds": None, "fresh": False,
+                    "source": "Twelve Data 1-minute Forex candles",
+                    "error": str(exc)[:180],
+                }), 503
+
         with _REAL_MARKET_LOCK:
             state = _REAL_MARKET.get(asset, {"bars": [], "quote": None})
             updated_at = state.get("updated_at")
