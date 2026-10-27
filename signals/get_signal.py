@@ -3,12 +3,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 import time
+import os
 
 import pandas as pd
 
 from data.quotex_otc import fetch_quotex_candles, OTC_PAIRS, local_active_asset, local_ticks
 from data.otc_markets import display_for_asset, asset_for_display
-from strategy.mmc_hybrid import generate_hybrid_signal
+from strategy.quotex_price_action import generate_quotex_price_action_signal
 from strategy.indicator_engine import analyze_timeframes
 
 
@@ -73,6 +74,20 @@ def _hold_condition(reason: str, regime: str = "", strategy: str = "") -> str:
         return "Volatility বেশি, কিন্তু পরিষ্কার breakout পাওয়া যায়নি"
     if "market regime unclear" in raw:
         return "Market regime পরিষ্কারভাবে শনাক্ত হয়নি"
+    if "পর্যাপ্ত closed 1-minute candle" in raw or "at least 60" in raw:
+        return "পর্যাপ্ত বন্ধ ১-মিনিট candle history নেই"
+    if "৫-মিনিটের trend" in raw or "trend পরিষ্কার নয়" in raw:
+        return "৫-মিনিটের Trend পরিষ্কার নয়"
+    if "confirmation candle দুর্বল" in raw or "doji" in raw:
+        return "Confirmation candle দুর্বল বা Doji"
+    if "trend, level ও candle confirmation" in raw:
+        return "Trend, Support/Resistance ও Confirmation একদিকে মেলেনি"
+    if "invalidation level" in raw:
+        return "দাম Invalidation Level ভেঙেছে; সেটআপ বাতিল"
+    if "পরস্পরবিরোধী setup" in raw:
+        return "পরস্পরবিরোধী Setup পাওয়া গেছে"
+    if "atr/price range" in raw:
+        return "দামের Range নির্ভরযোগ্য নয়"
     return _bengali_reason(reason) or "BUY/SELL-এর প্রয়োজনীয় confirmation পাওয়া যায়নি"
 
 
@@ -106,7 +121,59 @@ def _entry_delay_seconds(signal_at_utc: datetime, entry_at_utc: datetime) -> int
     return max(0, int(round((entry_at_utc - signal_at_utc).total_seconds())))
 
 
+def _twelvedata_real_signal(pair: str, automatic: bool) -> dict:
+    """Build the standard signal payload from fresh, completed Twelve Data Forex candles."""
+    from data.twelve_data import fetch_twelve_data_candles, normalize_forex_symbol
+
+    symbol = normalize_forex_symbol(pair)
+    candles = fetch_twelve_data_candles(symbol, count=1200)
+    signal_at_utc = datetime.now(timezone.utc)
+    latest = candles.iloc[-1]
+    latest_open = latest["timestamp"]
+    signal_candle = _entry_candle_time(signal_at_utc, automatic, latest_open)
+    result = generate_quotex_price_action_signal(candles)
+    signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
+    is_entry = result.action in {"BUY", "SELL"}
+    score = int(round(float(result.confidence) * 100)) if is_entry else 0
+    last_close = float(latest["close"])
+    return {
+        "pair": symbol, "requested_pair": pair, "market_mode": "real",
+        "source": "Twelve Data Forex 1-minute OHLC API",
+        "signal": result.action, "market_bias": result.action, "entry_signal": result.action,
+        "buy_score": score if result.action == "BUY" else 0,
+        "sell_score": score if result.action == "SELL" else 0,
+        "reason": _bengali_reason(f"[{result.regime} / {result.strategy}] {result.reason}"),
+        "hold_condition": _hold_condition(result.reason, result.regime, result.strategy) if result.action == "HOLD" else None,
+        "signal_created_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None,
+        "signal_created_bd": signal_at_utc.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
+        "signal_time_utc": signal_candle.isoformat(timespec="seconds"),
+        "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"),
+        "candle_time": signal_candle.isoformat(timespec="seconds") if is_entry else None,
+        "analysis_candle_time_utc": latest_open.to_pydatetime().astimezone(timezone.utc).isoformat(timespec="milliseconds"),
+        "signal_candle_open": float(latest["open"]),
+        "signal_candle_close": last_close,
+        "signal_candle_color": "green" if last_close > float(latest["open"]) else "red" if last_close < float(latest["open"]) else "doji",
+        "entry_price": last_close,
+        "entry_price_type": "latest_closed_provider_candle_close_reference",
+        "entry_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
+        "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
+        "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
+        "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
+        "entry_delay_seconds": _entry_delay_seconds(signal_at_utc, signal_candle) if is_entry else None,
+        "timeframe": f"1-minute/{result.strategy.lower()}",
+        "entry_timeframe": "next 1-minute candle after closed-candle analysis",
+        "automatic": automatic, "confidence": result.confidence,
+        "mmc_level_type": None, "mmc_level_price": None,
+        "regime": result.regime, "strategy": result.strategy,
+        "strategy_mode": "quotex_price_action", "mmc_analysis": result.mmc_analysis,
+        **_indicator_payload(candles),
+    }
+
+
 def _real_signal(pair: str, automatic: bool) -> dict:
+    if os.getenv("TWELVEDATA_API_KEY", "").strip():
+        return _twelvedata_real_signal(pair, automatic)
+
     from quotex_browser_ingest import _REAL_MARKET, _REAL_MARKET_LOCK, real_market_ticks
     asset = "".join(ch for ch in pair.upper() if ch.isalnum() or ch in "._-")
 
@@ -144,12 +211,12 @@ def _real_signal(pair: str, automatic: bool) -> dict:
 
     min_history = 60
     if len(candles) < min_history:
-        result = generate_hybrid_signal(candles, ticks=ticks)
+        result = generate_quotex_price_action_signal(candles)
         if result.action in {"BUY", "SELL"}:
             score = int(round(float(result.confidence) * 100))
             is_entry = result.action in {"BUY", "SELL"}
             signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
-            return {"pair": pair, "requested_pair": pair, "market_mode": "real", "source": "Quotex Real Market browser WebSocket", "signal": result.action, "market_bias": result.action, "entry_signal": result.action, "buy_score": score if result.action == "BUY" else 0, "sell_score": score if result.action == "SELL" else 0, "reason": _bengali_reason(f"[{result.regime} / {result.strategy}] {result.reason}"), "hold_condition": _hold_condition(result.reason, result.regime, result.strategy) if result.action == "HOLD" else None, "signal_created_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None, "signal_created_bd": signal_at_utc.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None, "signal_time_utc": signal_candle.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": signal_candle.isoformat(timespec="seconds"), "analysis_candle_time_utc": None, "entry_price": None, "entry_price_type": "closed_candle_model", "entry_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_delay_seconds": 0, "timeframe": "1-minute closed-candle hybrid MMC", "entry_timeframe": "next 1-minute candle after closed-candle analysis", "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None, "regime": result.regime, "strategy": result.strategy, "strategy_mode": "hybrid_mmc", "mmc_analysis": result.mmc_analysis, **_indicator_payload(candles, ticks=ticks)}
+            return {"pair": pair, "requested_pair": pair, "market_mode": "real", "source": "Quotex Real Market browser WebSocket", "signal": result.action, "market_bias": result.action, "entry_signal": result.action, "buy_score": score if result.action == "BUY" else 0, "sell_score": score if result.action == "SELL" else 0, "reason": _bengali_reason(f"[{result.regime} / {result.strategy}] {result.reason}"), "hold_condition": _hold_condition(result.reason, result.regime, result.strategy) if result.action == "HOLD" else None, "signal_created_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None, "signal_created_bd": signal_at_utc.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None, "signal_time_utc": signal_candle.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": signal_candle.isoformat(timespec="seconds"), "analysis_candle_time_utc": None, "entry_price": None, "entry_price_type": "closed_candle_model", "entry_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_delay_seconds": 0, "timeframe": "1-minute closed-candle price action", "entry_timeframe": "next 1-minute candle after closed-candle analysis", "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None, "regime": result.regime, "strategy": result.strategy, "strategy_mode": "quotex_price_action", "mmc_analysis": result.mmc_analysis, **_indicator_payload(candles, ticks=ticks)}
         return {
             "pair": pair, "requested_pair": pair, "market_mode": "real",
             "source": "Quotex Real Market browser WebSocket", "signal": "HOLD",
@@ -164,13 +231,13 @@ def _real_signal(pair: str, automatic: bool) -> dict:
             "entry_price": None, "entry_price_type": "closed_candle_model",
             "entry_time_utc": None, "entry_time_bd": None, "entry_candle_time_utc": None,
             "entry_candle_time_bd": None, "entry_delay_seconds": None,
-            "timeframe": "1-minute closed-candle hybrid MMC", "entry_timeframe": "next 1-minute candle after closed-candle analysis",
+            "timeframe": "1-minute closed-candle price action", "entry_timeframe": "next 1-minute candle after closed-candle analysis",
             "automatic": automatic, "confidence": 0.0, "mmc_level_type": None, "mmc_level_price": None,
-            "regime": "UNKNOWN", "strategy": "NONE", "strategy_mode": "hybrid_mmc", "mmc_analysis": result.mmc_analysis, **_indicator_payload(candles, ticks=ticks),
+            "regime": "UNKNOWN", "strategy": "NONE", "strategy_mode": "quotex_price_action", "mmc_analysis": result.mmc_analysis, **_indicator_payload(candles, ticks=ticks),
         }
 
     analysis_candle_time = candles.iloc[-1]["timestamp"]
-    result = generate_hybrid_signal(candles, ticks=ticks)
+    result = generate_quotex_price_action_signal(candles, ticks=ticks)
     timeframe = f"1-minute/{result.strategy.lower()}"
     regime = result.regime
     strategy_name = result.strategy
@@ -204,7 +271,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
         "entry_delay_seconds": _entry_delay_seconds(signal_at_utc, signal_candle) if is_entry else None, "timeframe": timeframe,
         "entry_timeframe": "next 1-minute candle after closed-candle analysis", "automatic": automatic,
         "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
-        "regime": regime, "strategy": strategy_name, "strategy_mode": "hybrid_mmc", "mmc_analysis": result.mmc_analysis, **_indicator_payload(candles, ticks=ticks),
+        "regime": regime, "strategy": strategy_name, "strategy_mode": "quotex_price_action", "mmc_analysis": result.mmc_analysis, **_indicator_payload(candles, ticks=ticks),
     }
 
 
@@ -236,14 +303,14 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
     signal_candle = _entry_candle_time(signal_at_utc, automatic, latest_closed_open)
 
     ticks = local_ticks(asset)
-    result = generate_hybrid_signal(candles, ticks=ticks)
+    result = generate_quotex_price_action_signal(candles, ticks=ticks)
     last = candles.iloc[-1] if not candles.empty else None
     signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
     is_entry = result.action in {"BUY", "SELL"}
     score = int(round(float(result.confidence) * 100)) if is_entry else 0
     return {
         "pair": pair, "requested_pair": requested_pair, "detected_asset": asset, "market_mode": "quotex_otc",
-        "source": "Quotex OTC local Windows/Android screen collector + hybrid MMC strategy",
+        "source": "Quotex OTC local Windows/Android screen collector + strict Price Action strategy",
         "signal": result.action, "market_bias": result.action,
         "entry_signal": result.action, "buy_score": score if result.action == "BUY" else 0,
         "sell_score": score if result.action == "SELL" else 0, "reason": _bengali_reason(f"[{result.regime} / {result.strategy}] {result.reason}"),
@@ -262,7 +329,7 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
         "timeframe": f"1-minute/{result.strategy.lower()}",
         "entry_timeframe": "next 1-minute candle after closed-candle analysis",
         "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
-        "regime": result.regime, "strategy": result.strategy, "strategy_mode": "hybrid_mmc", "mmc_analysis": result.mmc_analysis,
+        "regime": result.regime, "strategy": result.strategy, "strategy_mode": "quotex_price_action", "mmc_analysis": result.mmc_analysis,
         **_indicator_payload(candles, ticks=ticks),
     }
 
