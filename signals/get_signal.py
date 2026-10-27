@@ -73,6 +73,20 @@ def _hold_condition(reason: str, regime: str = "", strategy: str = "") -> str:
         return "Volatility বেশি, কিন্তু পরিষ্কার breakout পাওয়া যায়নি"
     if "market regime unclear" in raw:
         return "Market regime পরিষ্কারভাবে শনাক্ত হয়নি"
+    if "পর্যাপ্ত closed 1-minute candle" in raw or "at least 60" in raw:
+        return "পর্যাপ্ত বন্ধ ১-মিনিট candle history নেই"
+    if "৫-মিনিটের trend" in raw or "trend পরিষ্কার নয়" in raw:
+        return "৫-মিনিটের Trend পরিষ্কার নয়"
+    if "confirmation candle দুর্বল" in raw or "doji" in raw:
+        return "Confirmation candle দুর্বল বা Doji"
+    if "trend, level ও candle confirmation" in raw:
+        return "Trend, Support/Resistance ও Confirmation একদিকে মেলেনি"
+    if "invalidation level" in raw:
+        return "দাম Invalidation Level ভেঙেছে; সেটআপ বাতিল"
+    if "পরস্পরবিরোধী setup" in raw:
+        return "পরস্পরবিরোধী Setup পাওয়া গেছে"
+    if "atr/price range" in raw:
+        return "দামের Range নির্ভরযোগ্য নয়"
     return _bengali_reason(reason) or "BUY/SELL-এর প্রয়োজনীয় confirmation পাওয়া যায়নি"
 
 
