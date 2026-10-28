@@ -56,7 +56,7 @@ def _hold(reason: str, analysis: dict | None = None) -> PriceActionSignal:
 
 
 def generate_quotex_price_action_signal(candles: pd.DataFrame) -> PriceActionSignal:
-    """Evaluate trend + support/resistance + closed-candle confirmation.
+    """Evaluate support/resistance + closed-candle price-action setup.
 
     The caller must supply completed 1-minute candles only. This function does
     not place trades, choose stake size, or guarantee a useful expiry.
@@ -71,30 +71,6 @@ def generate_quotex_price_action_signal(candles: pd.DataFrame) -> PriceActionSig
     d = x.copy().reset_index(drop=True)
     last = d.iloc[-1]
     prior = d.iloc[-2]
-    ts = pd.to_datetime(d["timestamp"], utc=True).dt.floor("min")
-    d["bar_minute"] = ts
-    grouped = d.set_index("bar_minute").sort_index()
-    resampler = grouped.resample("5min", label="left", closed="left")
-    counts = resampler["close"].count()
-    m5 = resampler.agg({"open": "first", "high": "max", "low": "min", "close": "last"})
-    m5 = m5.loc[counts.reindex(m5.index).fillna(0).eq(5)].dropna(subset=["close"])
-    if len(m5) < 21:
-        return _hold(
-            "৫-মিনিটের Trend যাচাই করার মতো সম্পূর্ণ history নেই",
-            {"candle_count": len(x), "m5_candles": len(m5), "available": False},
-        )
-
-    ema9 = m5["close"].ewm(span=9, adjust=False).mean()
-    ema21 = m5["close"].ewm(span=21, adjust=False).mean()
-    if ema9.iloc[-1] > ema21.iloc[-1] and m5["close"].iloc[-1] >= m5["close"].iloc[-2]:
-        trend = "BUY"
-    elif ema9.iloc[-1] < ema21.iloc[-1] and m5["close"].iloc[-1] <= m5["close"].iloc[-2]:
-        trend = "SELL"
-    else:
-        return _hold("৫-মিনিটের Trend পরিষ্কার নয়; ট্রেড বাদ", {
-            "available": True, "trend": "NEUTRAL", "m5_candles": len(m5),
-        })
-
     d["tr"] = pd.concat([
         d["high"] - d["low"],
         (d["high"] - d["close"].shift(1)).abs(),
@@ -103,7 +79,7 @@ def generate_quotex_price_action_signal(candles: pd.DataFrame) -> PriceActionSig
     atr_series = d["tr"].rolling(14).mean()
     atr = float(atr_series.iloc[-2])
     if not np.isfinite(atr) or atr <= 0:
-        return _hold("ATR/price range নির্ভরযোগ্য নয়; ট্রেড বাদ", {"available": True, "trend": trend})
+        return _hold("ATR/price range নির্ভরযোগ্য নয়; ট্রেড বাদ", {"available": True, })
 
     # Recent 20 bars define reference levels; the signal candle is excluded.
     lookback = d.iloc[-21:-1]
@@ -121,7 +97,7 @@ def generate_quotex_price_action_signal(candles: pd.DataFrame) -> PriceActionSig
     # Reject doji/small-body candles; wait for a decisive close.
     if body < 0.20 * atr or candle_range < 0.25 * atr:
         return _hold("Confirmation candle দুর্বল/Doji; পরের সেটআপের জন্য অপেক্ষা", {
-            "available": True, "trend": trend, "support": support, "resistance": resistance,
+            "available": True, "support": support, "resistance": resistance,
             "atr": atr, "setup": "WEAK_CANDLE",
         })
 
@@ -150,35 +126,35 @@ def generate_quotex_price_action_signal(candles: pd.DataFrame) -> PriceActionSig
     sell_setup = bearish_rejection or bearish_retest
     if buy_setup and sell_setup:
         return _hold("একই candle-এ পরস্পরবিরোধী setup; ট্রেড বাদ", {
-            "available": True, "trend": trend, "support": support, "resistance": resistance,
+            "available": True, "support": support, "resistance": resistance,
             "setup": "CONFLICT",
         })
 
-    if trend == "BUY" and buy_setup:
+    if buy_setup:
         action = "BUY"
         setup = "SUPPORT_REJECTION" if bullish_rejection else "BREAKOUT_RETEST"
         invalidation = support if bullish_rejection else base_high
-        confirmation = "Bullish close + support rejection/retest; M5 trend aligned"
-    elif trend == "SELL" and sell_setup:
+        confirmation = "Bullish close + support rejection/retest"
+    elif sell_setup:
         action = "SELL"
         setup = "RESISTANCE_REJECTION" if bearish_rejection else "BREAKDOWN_RETEST"
         invalidation = resistance if bearish_rejection else base_low
-        confirmation = "Bearish close + resistance rejection/retest; M5 trend aligned"
+        confirmation = "Bearish close + resistance rejection/retest"
     else:
-        return _hold("Trend, level ও candle confirmation একদিকে মেলেনি; ট্রেড বাদ", {
-            "available": True, "trend": trend, "support": support, "resistance": resistance,
+        return _hold("Level ও candle setup মেলেনি; ট্রেড বাদ", {
+            "available": True, "support": support, "resistance": resistance,
             "setup": "NO_CONFLUENCE", "buy_setup": buy_setup, "sell_setup": sell_setup,
         })
 
     # A confirmation is invalid if price already closed through its level.
     if action == "BUY" and close <= float(invalidation):
         return _hold("দাম invalidation level-এর নিচে/সমান close করেছে", {
-            "available": True, "trend": trend, "support": support, "resistance": resistance,
+            "available": True, "support": support, "resistance": resistance,
             "setup": "INVALIDATED",
         })
     if action == "SELL" and close >= float(invalidation):
         return _hold("দাম invalidation level-এর ওপরে/সমান close করেছে", {
-            "available": True, "trend": trend, "support": support, "resistance": resistance,
+            "available": True, "support": support, "resistance": resistance,
             "setup": "INVALIDATED",
         })
 
@@ -190,7 +166,7 @@ def generate_quotex_price_action_signal(candles: pd.DataFrame) -> PriceActionSig
     analysis = {
         "available": True,
         "direction": action,
-        "trend": trend,
+        ,
         "setup": setup,
         "confirmation": confirmation,
         "support": support,
@@ -198,7 +174,6 @@ def generate_quotex_price_action_signal(candles: pd.DataFrame) -> PriceActionSig
         "invalidation_level": float(invalidation),
         "atr": atr,
         "candle_count": len(d),
-        "m5_candles": len(m5),
         "confidence_basis": "rule_strength_not_win_probability",
         "expiry_guidance": "১ ও ২ মিনিট expiry Demo-তে আলাদা করে পরীক্ষা করো; কোনোটিই নিশ্চিতভাবে ভালো নয়",
         "risk_note": "Binary Options-এ হারলে Stake-এর পুরোটা হারানোর ঝুঁকি থাকে; signal লাভের নিশ্চয়তা নয়",
