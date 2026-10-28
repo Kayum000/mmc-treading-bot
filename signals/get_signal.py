@@ -237,7 +237,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
         }
 
     analysis_candle_time = candles.iloc[-1]["timestamp"]
-    result = generate_quotex_price_action_signal(candles, ticks=ticks)
+    result = generate_quotex_price_action_signal(candles)
     timeframe = f"1-minute/{result.strategy.lower()}"
     regime = result.regime
     strategy_name = result.strategy
@@ -303,7 +303,7 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
     signal_candle = _entry_candle_time(signal_at_utc, automatic, latest_closed_open)
 
     ticks = local_ticks(asset)
-    result = generate_quotex_price_action_signal(candles, ticks=ticks)
+    result = generate_quotex_price_action_signal(candles)
     last = candles.iloc[-1] if not candles.empty else None
     signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
     is_entry = result.action in {"BUY", "SELL"}
