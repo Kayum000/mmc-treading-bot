@@ -95,6 +95,19 @@ def generate_quotex_price_action_signal(candles: pd.DataFrame) -> PriceActionSig
             "available": True, "trend": "NEUTRAL", "m5_candles": len(m5),
         })
 
+    # Require the latest fully formed M5 candle itself to confirm the EMA trend.
+    # This is stricter than EMA alignment alone: an opposing or doji M5 bar means HOLD.
+    latest_m5 = m5.iloc[-1]
+    m5_bullish = float(latest_m5["close"]) > float(latest_m5["open"])
+    m5_bearish = float(latest_m5["close"]) < float(latest_m5["open"])
+    if (trend == "BUY" and not m5_bullish) or (trend == "SELL" and not m5_bearish):
+        return _hold("শেষ সম্পূর্ণ ৫-মিনিট candle-এর দিক Trend-এর সঙ্গে মেলেনি; ট্রেড বাদ", {
+            "available": True, "trend": trend, "m5_candles": len(m5),
+            "m5_confirmation": "OPPOSING_OR_DOJI",
+            "m5_last_open": float(latest_m5["open"]),
+            "m5_last_close": float(latest_m5["close"]),
+        })
+
     d["tr"] = pd.concat([
         d["high"] - d["low"],
         (d["high"] - d["close"].shift(1)).abs(),
