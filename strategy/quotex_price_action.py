@@ -166,7 +166,6 @@ def generate_quotex_price_action_signal(candles: pd.DataFrame) -> PriceActionSig
     analysis = {
         "available": True,
         "direction": action,
-        ,
         "setup": setup,
         "confirmation": confirmation,
         "support": support,
