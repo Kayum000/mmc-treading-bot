@@ -71,23 +71,23 @@ def _entry_delay_seconds(signal_at_utc: datetime, entry_at_utc: datetime) -> int
     return max(0, int(round((entry_at_utc - signal_at_utc).total_seconds())))
 
 
-def _twelvedata_real_signal(pair: str, automatic: bool) -> dict:
-    """Build the standard signal payload from fresh, completed Twelve Data Forex candles."""
-    provider = os.getenv("MARKET_DATA_PROVIDER", "twelvedata").strip().lower()
+def _biquote_real_signal(pair: str, automatic: bool) -> dict:
+    """Build the standard signal payload from fresh, completed biquote Forex candles."""
+    provider = os.getenv("MARKET_DATA_PROVIDER", "biquote").strip().lower()
     if provider == "oanda":
         from data.oanda import fetch_oanda_candles, fetch_oanda_quote, normalize_oanda_instrument
         symbol = normalize_oanda_instrument(pair)
         candles = fetch_oanda_candles(symbol, count=1200)
         live_quote = fetch_oanda_quote(symbol)
         source_label = "OANDA v20 live pricing + completed M1 candles"
-    elif provider in {"twelvedata", "twelve_data"}:
-        from data.twelve_data import fetch_twelve_data_candles, normalize_forex_symbol
-        symbol = normalize_forex_symbol(pair)
-        candles = fetch_twelve_data_candles(symbol, count=1200)
-        live_quote = None
-        source_label = "Twelve Data Forex 1-minute OHLC API"
+    elif provider == "biquote":
+        from data.biquote import fetch_biquote_candles, fetch_biquote_quote, normalize_biquote_symbol
+        symbol = normalize_biquote_symbol(pair)
+        candles = fetch_biquote_candles(symbol, count=1200)
+        live_quote = fetch_biquote_quote(symbol)
+        source_label = "biquote live bid/ask + completed M1 OHLC candles"
     else:
-        raise RuntimeError("MARKET_DATA_PROVIDER must be 'oanda' or 'twelvedata'.")
+        raise RuntimeError("MARKET_DATA_PROVIDER must be 'biquote' or 'oanda'.")
     signal_at_utc = datetime.now(timezone.utc)
     latest = candles.iloc[-1]
     latest_open = latest["timestamp"]
@@ -116,7 +116,7 @@ def _twelvedata_real_signal(pair: str, automatic: bool) -> dict:
         "signal_candle_color": "green" if last_close > float(latest["open"]) else "red" if last_close < float(latest["open"]) else "doji",
         "entry_price": float(live_quote["price"]) if live_quote else last_close,
         "live_quote": live_quote,
-        "entry_price_type": "oanda_live_bid_ask_midpoint" if live_quote else "latest_closed_provider_candle_close_reference",
+        "entry_price_type": "live_bid_ask_midpoint" if live_quote else "latest_closed_provider_candle_close_reference",
         "entry_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
         "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
@@ -132,13 +132,11 @@ def _twelvedata_real_signal(pair: str, automatic: bool) -> dict:
 
 
 def _real_signal(pair: str, automatic: bool) -> dict:
-    provider = os.getenv("MARKET_DATA_PROVIDER", "twelvedata").strip().lower()
-    if provider == "oanda":
-        return _twelvedata_real_signal(pair, automatic)
-    if provider in {"twelvedata", "twelve_data"} and os.getenv("TWELVEDATA_API_KEY", "").strip():
-        return _twelvedata_real_signal(pair, automatic)
-    if provider not in {"oanda", "twelvedata", "twelve_data"}:
-        raise RuntimeError("MARKET_DATA_PROVIDER must be 'oanda' or 'twelvedata'.")
+    provider = os.getenv("MARKET_DATA_PROVIDER", "biquote").strip().lower()
+    if provider in {"biquote", "oanda"}:
+        return _biquote_real_signal(pair, automatic)
+    if provider not in {"quotex_collector", "browser"}:
+        raise RuntimeError("MARKET_DATA_PROVIDER must be 'biquote', 'oanda', or 'quotex_collector'.")
 
     from quotex_browser_ingest import _REAL_MARKET, _REAL_MARKET_LOCK, real_market_ticks
     asset = "".join(ch for ch in pair.upper() if ch.isalnum() or ch in "._-")

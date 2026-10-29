@@ -711,18 +711,15 @@ def _outcome_candles(mode: str, pair: str) -> list[dict]:
         return [{"t": row["timestamp"].timestamp(), "o": float(row["open"]), "c": float(row["close"])}
                 for _, row in frame.iterrows()]
     if mode == "real":
-        # Score outcomes from the same configured provider used for Real Forex
-        # signals whenever its credentials are available. Previously this path
-        # only checked the browser collector cache, so valid Twelve Data/OANDA
-        # signals could remain pending indefinitely when that cache was empty.
-        provider = os.getenv("MARKET_DATA_PROVIDER", "twelvedata").strip().lower()
+        # Score outcomes using the same configured provider used for Real Forex signals.
+        provider = os.getenv("MARKET_DATA_PROVIDER", "biquote").strip().lower()
         frame = None
-        if provider in {"oanda"}:
+        if provider == "oanda":
             from data.oanda import fetch_oanda_candles
-            frame = fetch_oanda_candles(pair, count=5000)
-        elif provider in {"twelvedata", "twelve_data"} and os.getenv("TWELVEDATA_API_KEY", "").strip():
-            from data.twelve_data import fetch_twelve_data_candles
-            frame = fetch_twelve_data_candles(pair, count=5000)
+            frame = fetch_oanda_candles(pair, count=1000)
+        elif provider == "biquote":
+            from data.biquote import fetch_biquote_candles
+            frame = fetch_biquote_candles(pair, count=1000)
 
         if frame is not None:
             now_epoch = time.time()
