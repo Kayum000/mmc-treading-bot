@@ -12,6 +12,7 @@ from data.quotex_otc import ingest_local_candles, ingest_local_ticks, local_stre
 from data.otc_markets import display_for_asset, OTC_DISPLAY_PAIRS
 from signals.get_signal import get_signal
 from data.twelve_data import fetch_twelve_data_candles
+from data.oanda import fetch_oanda_candles, fetch_oanda_quote
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +170,11 @@ def init_quotex_browser_ingest(app):
         # The web chart and signal strategy must use the same real-Forex provider.
         # Keep OTC on its separate Quotex candle endpoint. Cache provider requests
         # briefly because the browser polls this endpoint every two seconds.
-        if os.getenv("TWELVEDATA_API_KEY", "").strip():
+        provider = os.getenv("MARKET_DATA_PROVIDER", "twelvedata").strip().lower()
+        use_oanda = provider == "oanda"
+        use_twelve = provider in {"twelvedata", "twelve_data"} and bool(os.getenv("TWELVEDATA_API_KEY", "").strip())
+        if use_oanda or use_twelve:
+            source_label = "OANDA live quote + completed M1 candles" if use_oanda else "Twelve Data 1-minute Forex candles"
             now = time.time()
             with _TWELVE_CHART_CACHE_LOCK:
                 cached = _TWELVE_CHART_CACHE.get(asset)
@@ -178,7 +183,7 @@ def init_quotex_browser_ingest(app):
                     payload["cache_age_seconds"] = round(now - cached["cached_at"], 1)
                     return jsonify(payload)
             try:
-                frame = fetch_twelve_data_candles(asset, count=180)
+                frame = fetch_oanda_candles(asset, count=180) if use_oanda else fetch_twelve_data_candles(asset, count=180)
                 bars = []
                 for _, row in frame.iterrows():
                     stamp = row["timestamp"]
@@ -191,7 +196,11 @@ def init_quotex_browser_ingest(app):
                     })
                 latest = frame.iloc[-1]
                 latest_ts = int(latest["timestamp"].timestamp())
-                quote = {"price": float(latest["close"]), "timestamp": latest_ts}
+                if use_oanda:
+                    quote = fetch_oanda_quote(asset)
+                    quote["timestamp"] = int(quote["timestamp"])
+                else:
+                    quote = {"price": float(latest["close"]), "timestamp": latest_ts}
                 payload = {
                     "ok": bool(bars),
                     "asset": asset,
@@ -200,8 +209,8 @@ def init_quotex_browser_ingest(app):
                     "updated_at": now,
                     "age_seconds": round(max(0, now - latest_ts), 1),
                     "fresh": bool(bars),
-                    "source": "Twelve Data 1-minute Forex candles",
-                    "note": "Chart updates from provider candles; quote is the latest completed candle close, not a tick-by-tick Quotex quote.",
+                    "source": source_label,
+                    "note": "OANDA quote is live bid/ask midpoint; bars are completed provider M1 candles." if use_oanda else "Chart updates from provider candles; quote is the latest completed candle close, not a tick-by-tick Quotex quote.",
                 }
                 with _TWELVE_CHART_CACHE_LOCK:
                     _TWELVE_CHART_CACHE[asset] = {"cached_at": now, "payload": payload}
@@ -209,7 +218,7 @@ def init_quotex_browser_ingest(app):
             except Exception as exc:
                 # Do not silently show Quotex collector prices as if they were
                 # Twelve Data prices when the configured Forex provider fails.
-                logger.warning("TWELVE_DATA_CHART_UNAVAILABLE asset=%s reason=%s", asset, str(exc)[:180])
+                logger.warning("FOREX_PROVIDER_CHART_UNAVAILABLE provider=%s asset=%s reason=%s", provider, asset, str(exc)[:180])
                 return jsonify({
                     "ok": False, "asset": asset, "bars": [], "quote": None,
                     "updated_at": None, "age_seconds": None, "fresh": False,
