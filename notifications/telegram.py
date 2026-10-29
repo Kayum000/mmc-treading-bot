@@ -111,7 +111,7 @@ def notify_signal(result: dict[str, Any]) -> bool:
         return False
     if confidence_gate > 1:
         confidence_gate /= 100.0
-    if not 0.70 <= confidence_gate <= 1.0:
+    if not 0.50 <= confidence_gate <= 1.0:
         return False
 
     pair = str(result.get("pair") or "Unknown pair").strip()
