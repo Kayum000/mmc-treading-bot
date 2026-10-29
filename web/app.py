@@ -363,7 +363,7 @@ def _valid_pairs(mode: str):
     if mode == "real":
         try:
             from data.biquote import known_biquote_symbols
-            return sorted(set(REAL_PAIRS) | set(known_biquote_symbols()))
+            return sorted(set(REAL_PAIRS) | {pair.replace("/", "") for pair in REAL_PAIRS} | set(known_biquote_symbols()))
         except Exception:
             return REAL_PAIRS
     return QUOTEX_OTC_PAIRS if mode == "quotex_otc" else []
