@@ -16,11 +16,11 @@ A market-signal engine for selected Real Forex and Quotex OTC 1-minute markets.
 
 ## Entry timing
 
-Signals are prepared for the upcoming 1-minute entry candle. The latest fully closed candle is used for analysis, and AUTO scheduling attempts to generate the signal a few seconds before the next minute boundary.
+Signals are prepared for the upcoming 1-minute entry candle. The latest fully closed candle is used for analysis, and AUTO scheduling attempts to generate the signal a few seconds before the next minute boundary. Actionable signals expose `expiry_minutes=5` and an expiry timestamp five minutes after the scheduled entry boundary.
 
 ## Performance
 
-Performance is based on the signal/entry candle's completed 1-minute candle:
+Performance is based on the completed 1-minute candle ending at the configured five-minute expiry:
 
 - BUY + green/bullish candle close → লাভ
 - BUY + red/bearish candle close → লস
