@@ -6,6 +6,8 @@ OHLC candles are passed to the strategy; a fresh bid/ask quote is required.
 from __future__ import annotations
 
 import re
+import threading
+import time
 
 import pandas as pd
 import requests
@@ -13,13 +15,65 @@ import requests
 BASE_URL = "https://biquote.io/api"
 _TIMEOUT_SECONDS = 12
 _MAX_BARS = 1000
+_SYMBOL_CACHE_TTL = 300
+_SYMBOL_CACHE_LOCK = threading.Lock()
+_SYMBOL_CACHE = {"items": [], "fetched_at": 0.0}
+_DISCOVERED_SYMBOLS = {}
+
+
+def _normalize_symbol_item(item):
+    if not isinstance(item, dict):
+        return None
+    name = str(item.get("name") or item.get("symbol") or "").strip().upper()
+    if not re.fullmatch(r"[A-Z0-9._-]{2,24}", name) or "OTC" in name:
+        return None
+    return {"symbol": name, "name": str(item.get("description") or item.get("displayName") or name).strip(),
+            "type": str(item.get("type") or item.get("assetClass") or "Other").strip(),
+            "exchange": str(item.get("exchange") or "").strip(), "source": str(item.get("source") or "").strip()}
+
+
+def fetch_biquote_symbols(query="", limit=100):
+    """Discover real-market instruments from biquote's catalog/search API."""
+    q = str(query or "").strip()
+    cap = max(1, min(int(limit), 200))
+    url = f"{BASE_URL}/symbols/search" if q else f"{BASE_URL}/active"
+    params = {"q": q, "limit": cap} if q else {}
+    if not q:
+        now = time.time()
+        with _SYMBOL_CACHE_LOCK:
+            if _SYMBOL_CACHE["items"] and now - float(_SYMBOL_CACHE["fetched_at"]) < _SYMBOL_CACHE_TTL:
+                return list(_SYMBOL_CACHE["items"])[:cap]
+    try:
+        response = requests.get(url, params=params, timeout=_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise RuntimeError("biquote market catalog/search is temporarily unavailable.") from exc
+    items = payload if isinstance(payload, list) else payload.get("items", payload.get("symbols", [])) if isinstance(payload, dict) else []
+    cleaned, seen = [], set()
+    for raw in items if isinstance(items, list) else []:
+        item = _normalize_symbol_item(raw)
+        if item and item["symbol"] not in seen:
+            seen.add(item["symbol"])
+            cleaned.append(item)
+    with _SYMBOL_CACHE_LOCK:
+        for item in cleaned:
+            _DISCOVERED_SYMBOLS[item["symbol"]] = item
+        if not q:
+            _SYMBOL_CACHE.update(items=cleaned, fetched_at=time.time())
+    return cleaned[:cap]
+
+
+def known_biquote_symbols():
+    with _SYMBOL_CACHE_LOCK:
+        return sorted(set(_DISCOVERED_SYMBOLS))
 
 
 def normalize_biquote_symbol(pair: str) -> str:
-    """Normalize EURUSD, EUR/USD, or EUR-USD to biquote's EURUSD ticker."""
-    raw = str(pair or "").strip().upper().replace("/", "").replace("_", "").replace("-", "")
-    if not re.fullmatch(r"[A-Z]{6}", raw):
-        raise ValueError("biquote Real Forex mode expects a pair such as EURUSD or EUR/USD.")
+    """Normalize Forex, metal, crypto, index, or stock-CFD symbols."""
+    raw = str(pair or "").strip().upper().replace("/", "").replace(" ", "")
+    if not re.fullmatch(r"[A-Z0-9][A-Z0-9._-]{1,23}", raw) or "OTC" in raw:
+        raise ValueError("Invalid biquote real-market symbol.")
     return raw
 
 
