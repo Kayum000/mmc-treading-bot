@@ -531,10 +531,28 @@ def auto_signal():
         return jsonify({"ok": False, "error": "প্রথমে একটি মার্কেট নির্বাচন করুন।"}), 400
     try:
         result = _apply_confidence_gate(get_signal(pair, mode, automatic=True, strategy_mode=strategy_mode))
+        # Emit a compact diagnostic record so HOLD decisions can be explained
+        # from Render logs without logging raw provider payloads or credentials.
+        result = result if isinstance(result, dict) else {}
+        analysis = result.get("mmc_analysis") or {}
+        analysis = analysis if isinstance(analysis, dict) else {}
+        print(
+            "[MMC Signal Diagnostic] "
+            f"pair={pair} mode={mode} source={result.get('source') or 'unknown'} "
+            f"action={result.get('signal') or result.get('entry_signal') or 'unknown'} "
+            f"confidence={result.get('confidence', 'N/A')} "
+            f"analysis_candle={result.get('analysis_candle_time_utc') or 'N/A'} "
+            f"candle_count={analysis.get('candle_count', analysis.get('count', 'N/A'))} "
+            f"m5_count={analysis.get('m5_count', 'N/A')} m15_count={analysis.get('m15_count', 'N/A')} "
+            f"bias_5m={analysis.get('bias_5m', 'N/A')} bias_15m={analysis.get('bias_15m', 'N/A')} "
+            f"setup={analysis.get('setup', 'N/A')} reason={str(result.get('reason') or 'N/A')[:220]}",
+            flush=True,
+        )
         _record_signal_performance(result)
         _notify_telegram_safely(result)
         return jsonify({"ok": True, "result": result})
     except Exception as exc:
+        print(f"[MMC Signal Diagnostic] pair={pair} mode={mode} error_type={type(exc).__name__}", flush=True)
         return jsonify({"ok": False, "error": str(exc)}), 502
 
 @app.route("/api/indicator-analysis", methods=["GET"])
