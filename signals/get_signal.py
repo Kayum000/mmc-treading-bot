@@ -364,7 +364,24 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False, st
     if mode == "real":
         if not pair:
             raise ValueError("No real market selected")
-        return _real_signal(pair, automatic)
-    if mode == "quotex_otc":
-        return _otc_signal(pair, automatic)
-    raise ValueError("Unsupported market mode")
+        result = _real_signal(pair, automatic)
+    elif mode == "quotex_otc":
+        result = _otc_signal(pair, automatic)
+    else:
+        raise ValueError("Unsupported market mode")
+
+    # All actionable entries use a five-minute expiry measured from the scheduled
+    # entry candle boundary. HOLD states never expose a fake expiry timestamp.
+    result["expiry_minutes"] = 5
+    entry_stamp = result.get("signal_time_utc") or result.get("entry_time_utc")
+    if result.get("signal") in {"BUY", "SELL"} and entry_stamp:
+        entry_dt = pd.to_datetime(entry_stamp, utc=True, errors="coerce")
+        if not pd.isna(entry_dt):
+            expiry_dt = entry_dt + pd.Timedelta(minutes=5)
+            result["expiry_time_utc"] = expiry_dt.isoformat(timespec="seconds")
+            result["expiry_time_bd"] = expiry_dt.tz_convert("Asia/Dhaka").strftime("%d %b %Y, %H:%M:%S")
+    else:
+        result["expiry_time_utc"] = None
+        result["expiry_time_bd"] = None
+    result["entry_timeframe"] = "১-মিনিট closed-candle analysis; ৫ মিনিট expiry"
+    return result
