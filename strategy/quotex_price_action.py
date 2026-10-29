@@ -43,7 +43,7 @@ def _hold(reason: str, analysis: dict | None = None) -> PriceActionSignal:
                     "setup": details.get("setup", "NONE"),
                     "confidence_basis": "rule_strength_not_win_probability", "note": reason,
                     "expiry_minutes": 30})
-    return PriceActionSignal("HOLD", 0.0, reason, "NO_TRADE", "FOREX_STRUCTURE_PA_1M_MTF", details)
+    return PriceActionSignal("HOLD", 0.0, reason, "NO_TRADE", "FOREX_STRUCTURE_PA_30M_MTF", details)
 
 
 def _resample_closed(x: pd.DataFrame, minutes: int) -> pd.DataFrame:
