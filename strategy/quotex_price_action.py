@@ -88,15 +88,26 @@ def _structure_bias(x: pd.DataFrame) -> tuple[str, dict]:
     return "NEUTRAL", info
 
 
-def generate_quotex_price_action_signal(candles: pd.DataFrame) -> PriceActionSignal:
-    """Analyze completed M30 price action with H1 structure and a 30-minute expiry."""
-    x = _clean(candles)
-    if len(x) < 720:
-        return _hold("৩০-মিনিট বিশ্লেষণের জন্য পর্যাপ্ত closed candle history নেই (কমপক্ষে ৭২০টি ১-মিনিট candle দরকার)",
-                     {"candle_count": len(x), "available": False, "analysis_timeframe": "30m", "expiry_minutes": 30})
+def generate_quotex_price_action_signal(
+    candles: pd.DataFrame,
+    candles_30m: pd.DataFrame | None = None,
+    candles_1h: pd.DataFrame | None = None,
+) -> PriceActionSignal:
+    """Analyze completed M30 price action with H1 structure and a 30-minute expiry.
 
-    m30 = _resample_closed(x, 30)
-    h1 = _resample_closed(x, 60)
+    Providers with native M30/H1 history should pass it directly. Other collectors
+    may fall back to aggregation from M1, but only with enough completed history.
+    """
+    x = _clean(candles)
+    if candles_30m is not None and candles_1h is not None:
+        m30 = _clean(candles_30m)
+        h1 = _clean(candles_1h)
+    else:
+        if len(x) < 720:
+            return _hold("৩০-মিনিট বিশ্লেষণের জন্য পর্যাপ্ত closed candle history নেই (কমপক্ষে ৭২০টি ১-মিনিট candle দরকার)",
+                         {"candle_count": len(x), "available": False, "analysis_timeframe": "30m", "expiry_minutes": 30})
+        m30 = _resample_closed(x, 30)
+        h1 = _resample_closed(x, 60)
     if len(m30) < 20 or len(h1) < 12:
         return _hold("বন্ধ ৩০-মিনিট/১-ঘণ্টার context যথেষ্ট নেই; সিগন্যাল বাদ",
                      {"available": False, "candle_count": len(x), "m30_count": len(m30), "h1_count": len(h1),
