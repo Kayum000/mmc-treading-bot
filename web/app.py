@@ -1,6 +1,8 @@
 """Web UI for Real Forex and Quotex OTC signal generation."""
 from __future__ import annotations
 
+import math
+
 import hmac
 import os
 import time
