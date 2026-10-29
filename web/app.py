@@ -338,14 +338,20 @@ def _valid_login(username: str, password: str) -> bool:
     )
 
 def _usage_view():
-    """Report that the dashboard's real-market feed comes from the Quotex collector."""
+    """Report the configured live market-data provider accurately."""
     now = time.time()
     if _USAGE_CACHE["data"] is not None and now - _USAGE_CACHE["at"] < 30:
         return _USAGE_CACHE["data"]
-    data = {
-        "api": {"provider": "Quotex browser WebSocket", "api_key_required": False},
-        "credits": {},
+    configured = (os.getenv("MARKET_DATA_PROVIDER") or "biquote").strip().lower()
+    providers = {
+        "biquote": {"provider": "biquote public REST API", "api_key_required": False},
+        "oanda": {"provider": "OANDA v20 REST API", "api_key_required": True},
+        "quotex_collector": {"provider": "Quotex browser WebSocket collector", "api_key_required": False},
+        "browser": {"provider": "Quotex browser WebSocket collector", "api_key_required": False},
     }
+    api = dict(providers.get(configured, {"provider": f"Unsupported provider: {configured}", "api_key_required": None}))
+    api["configured_provider"] = configured
+    data = {"api": api, "credits": {}}
     _USAGE_CACHE["data"] = data
     _USAGE_CACHE["at"] = now
     return data

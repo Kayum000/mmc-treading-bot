@@ -1,4 +1,4 @@
-"""biquote Forex market-data ingestion.
+"""biquote real-market data ingestion for provider-supported instruments.
 
 Uses the public biquote REST API (no API key). Only completed, fresh 1-minute
 OHLC candles are passed to the strategy; a fresh bid/ask quote is required.
@@ -120,7 +120,7 @@ def fetch_biquote_candles(pair: str, count: int = 1200) -> pd.DataFrame:
         raise RuntimeError("biquote latest completed M1 candle is stale (over 5 minutes old).")
     values = frame[["open", "high", "low", "close"]]
     if (values <= 0).any().any():
-        raise RuntimeError("biquote returned invalid non-positive Forex prices.")
+        raise RuntimeError("biquote returned invalid non-positive market prices.")
     if ((frame["high"] < frame[["open", "close", "low"]].max(axis=1)).any()
             or (frame["low"] > frame[["open", "close", "high"]].min(axis=1)).any()):
         raise RuntimeError("biquote returned inconsistent OHLC values.")

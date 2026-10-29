@@ -72,7 +72,7 @@ def _entry_delay_seconds(signal_at_utc: datetime, entry_at_utc: datetime) -> int
 
 
 def _biquote_real_signal(pair: str, automatic: bool) -> dict:
-    """Build the standard signal payload from fresh, completed biquote Forex candles."""
+    """Build the standard signal payload from fresh, completed biquote market candles."""
     provider = os.getenv("MARKET_DATA_PROVIDER", "biquote").strip().lower()
     if provider == "oanda":
         from data.oanda import fetch_oanda_candles, fetch_oanda_quote, normalize_oanda_instrument
@@ -158,9 +158,8 @@ def _real_signal(pair: str, automatic: bool) -> dict:
     with _REAL_MARKET_LOCK:
         state = dict(_REAL_MARKET.get(asset) or {})
         candle_rows = list(state.get("bars") or [])[-1200:]
-    # Real quotes are stored in quote_history. Build the same normalized tick
-    # DataFrame used by the shared hybrid MMC strategy; do this after releasing
-    # the market lock because real_market_ticks() acquires the same lock.
+    # Real quotes are stored in quote_history. Read the latest quote after
+    # releasing the market lock because real_market_ticks() acquires that lock.
     ticks = real_market_ticks(asset, count=10000)
     if ticks.empty:
         ticks = None
@@ -261,7 +260,7 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
     # Do not apply a second server-clock filter here; small clock skew between
     # the local collector and Render can otherwise hide the newest valid candle
     # exactly at the minute boundary.
-    # The hybrid MMC strategy requires at least 60 closed candles.
+    # The price-action strategy needs sufficient closed 1-minute candle history.
     candles = fetch_quotex_candles(asset, count=1200)
     latest_closed_open = candles.iloc[-1]["timestamp"] if not candles.empty else None
     signal_candle = _entry_candle_time(signal_at_utc, automatic, latest_closed_open)
