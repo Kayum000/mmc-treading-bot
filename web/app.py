@@ -543,8 +543,8 @@ def auto_signal():
             f"confidence={result.get('confidence', 'N/A')} "
             f"analysis_candle={result.get('analysis_candle_time_utc') or 'N/A'} "
             f"candle_count={analysis.get('candle_count', analysis.get('count', 'N/A'))} "
-            f"m5_count={analysis.get('m5_count', 'N/A')} m15_count={analysis.get('m15_count', 'N/A')} "
-            f"bias_5m={analysis.get('bias_5m', 'N/A')} bias_15m={analysis.get('bias_15m', 'N/A')} "
+            f"m30_count={analysis.get('m30_count', 'N/A')} h1_count={analysis.get('h1_count', 'N/A')} "
+            f"bias_30m={analysis.get('bias_30m', 'N/A')} bias_1h={analysis.get('bias_1h', 'N/A')} "
             f"setup={analysis.get('setup', 'N/A')} reason={str(result.get('reason') or 'N/A')[:220]}",
             flush=True,
         )
