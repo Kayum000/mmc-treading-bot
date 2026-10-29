@@ -134,6 +134,8 @@ def generate_quotex_price_action_signal(candles: pd.DataFrame) -> PriceActionSig
 
     details = {
         "available": True, "expiry_minutes": 5, "analysis_timeframe": "1m",
+        "candle_count": int(len(x)), "m5_count": int(len(m5)), "m15_count": int(len(m15)),
+        "latest_closed_candle_time_utc": last["timestamp"].isoformat(),
         "context_timeframes": ["5m", "15m"], "bias_5m": bias5, "bias_15m": bias15,
         "structure_5m": structure5, "structure_15m": structure15,
         "support": level_low, "resistance": level_high,
