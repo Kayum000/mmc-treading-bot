@@ -25,6 +25,16 @@ class ThirtyMinuteAnalysisTests(unittest.TestCase):
         self.assertGreaterEqual(result.mmc_analysis.get("m30_count", 0), 20)
         self.assertGreaterEqual(result.mmc_analysis.get("h1_count", 0), 12)
 
+
+    def test_native_m30_h1_history_works_with_short_m1_history(self):
+        m1 = candles(300)
+        m30 = candles(3000).iloc[::30].reset_index(drop=True)
+        h1 = candles(3000).iloc[::60].reset_index(drop=True)
+        result = generate_quotex_price_action_signal(m1, candles_30m=m30, candles_1h=h1)
+        self.assertEqual(result.mmc_analysis["analysis_timeframe"], "30m")
+        self.assertEqual(result.mmc_analysis["m30_count"], len(m30))
+        self.assertEqual(result.mmc_analysis["h1_count"], len(h1))
+
     def test_incomplete_m30_bar_is_excluded(self):
         x = candles(1201)
         m30 = _resample_closed(x, 30)

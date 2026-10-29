@@ -44,6 +44,20 @@ class BiquoteForexTests(unittest.TestCase):
         self.assertEqual(float(frame.iloc[0]["close"]), 1.05)
         self.assertEqual(frame.iloc[0]["timestamp"], now - pd.Timedelta(minutes=2))
 
+
+    @patch("data.biquote.requests.get")
+    def test_fetches_native_30_minute_candles(self, get):
+        now = pd.Timestamp.now(tz="UTC").floor("min")
+        opened = (now.floor("30min") - pd.Timedelta(minutes=30))
+        get.return_value.raise_for_status.return_value = None
+        get.return_value.json.return_value = {"bars": [
+            {"openTime": opened.isoformat(), "open": 1.1, "high": 1.2, "low": 1.0,
+             "close": 1.15, "isOpen": False}
+        ]}
+        frame = fetch_biquote_candles("EURUSD", count=100, interval="30m")
+        self.assertEqual(get.call_args.kwargs["params"]["interval"], "30m")
+        self.assertEqual(frame.iloc[0]["interval"], "30m")
+
     @patch("data.biquote.requests.get")
     def test_requires_fresh_bid_ask_quote(self, get):
         now = pd.Timestamp.now(tz="UTC")

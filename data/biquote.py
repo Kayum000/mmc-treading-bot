@@ -77,22 +77,26 @@ def normalize_biquote_symbol(pair: str) -> str:
     return raw
 
 
-def fetch_biquote_candles(pair: str, count: int = 1200) -> pd.DataFrame:
-    """Fetch and validate completed M1 candles; never synthesize missing bars."""
+def fetch_biquote_candles(pair: str, count: int = 1200, interval: str = "1m") -> pd.DataFrame:
+    """Fetch and validate completed OHLC candles for a supported provider interval."""
     symbol = normalize_biquote_symbol(pair)
-    limit = max(60, min(int(count), _MAX_BARS))
+    interval = str(interval or "1m").strip().lower()
+    interval_minutes = {"1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440}
+    if interval not in interval_minutes:
+        raise ValueError("Unsupported biquote candle interval.")
+    limit = max(20, min(int(count), 1000))
     try:
         response = requests.get(f"{BASE_URL}/{symbol}/ohlc",
-                                params={"interval": "1m", "limit": limit}, timeout=_TIMEOUT_SECONDS)
+                                params={"interval": interval, "limit": limit}, timeout=_TIMEOUT_SECONDS)
         response.raise_for_status()
         payload = response.json()
     except requests.RequestException as exc:
-        raise RuntimeError("biquote candle request failed; check provider availability and network.") from exc
+        raise RuntimeError(f"biquote {interval} candle request failed; check provider availability and network.") from exc
     except ValueError as exc:
         raise RuntimeError("biquote returned an unreadable candle response.") from exc
     bars = payload.get("bars") if isinstance(payload, dict) else None
     if not isinstance(bars, list) or not bars:
-        raise RuntimeError(f"biquote returned no M1 candles for {symbol}.")
+        raise RuntimeError(f"biquote returned no {interval} candles for {symbol}.")
     rows = []
     for bar in bars:
         if not isinstance(bar, dict) or bar.get("isOpen") is True:
@@ -109,15 +113,16 @@ def fetch_biquote_candles(pair: str, count: int = 1200) -> pd.DataFrame:
     frame = pd.DataFrame(rows)
     required = ["timestamp", "open", "high", "low", "close"]
     if frame.empty:
-        raise RuntimeError(f"biquote returned no completed M1 candles for {symbol}.")
+        raise RuntimeError(f"biquote returned no completed {interval} candles for {symbol}.")
     frame = frame.dropna(subset=required).sort_values("timestamp").drop_duplicates("timestamp").reset_index(drop=True)
     now = pd.Timestamp.now(tz="UTC")
-    frame = frame.loc[frame["timestamp"] < now.floor("min")].reset_index(drop=True)
+    frame = frame.loc[frame["timestamp"] + pd.Timedelta(minutes=interval_minutes[interval]) <= now].reset_index(drop=True)
     if frame.empty:
-        raise RuntimeError(f"biquote has no completed 1-minute candles for {symbol}.")
+        raise RuntimeError(f"biquote has no completed {interval} candles for {symbol}.")
     latest_open = frame.iloc[-1]["timestamp"]
-    if (now - latest_open).total_seconds() > 300:
-        raise RuntimeError("biquote latest completed M1 candle is stale (over 5 minutes old).")
+    max_age_seconds = max(300, interval_minutes[interval] * 60 * 2)
+    if (now - (latest_open + pd.Timedelta(minutes=interval_minutes[interval]))).total_seconds() > max_age_seconds:
+        raise RuntimeError(f"biquote latest completed {interval} candle is stale.")
     values = frame[["open", "high", "low", "close"]]
     if (values <= 0).any().any():
         raise RuntimeError("biquote returned invalid non-positive market prices.")
@@ -125,6 +130,7 @@ def fetch_biquote_candles(pair: str, count: int = 1200) -> pd.DataFrame:
             or (frame["low"] > frame[["open", "close", "high"]].min(axis=1)).any()):
         raise RuntimeError("biquote returned inconsistent OHLC values.")
     frame["source"] = "biquote"
+    frame["interval"] = interval
     return frame.tail(limit).reset_index(drop=True)
 
 
