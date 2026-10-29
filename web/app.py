@@ -709,7 +709,33 @@ def _outcome_candles(mode: str, pair: str) -> list[dict]:
         return [{"t": row["timestamp"].timestamp(), "o": float(row["open"]), "c": float(row["close"])}
                 for _, row in frame.iterrows()]
     if mode == "real":
-        # Real Market signals use the authenticated Quotex browser collector cache.
+        # Score outcomes from the same configured provider used for Real Forex
+        # signals whenever its credentials are available. Previously this path
+        # only checked the browser collector cache, so valid Twelve Data/OANDA
+        # signals could remain pending indefinitely when that cache was empty.
+        provider = os.getenv("MARKET_DATA_PROVIDER", "twelvedata").strip().lower()
+        frame = None
+        if provider in {"oanda"}:
+            from data.oanda import fetch_oanda_candles
+            frame = fetch_oanda_candles(pair, count=240)
+        elif provider in {"twelvedata", "twelve_data"} and os.getenv("TWELVEDATA_API_KEY", "").strip():
+            from data.twelve_data import fetch_twelve_data_candles
+            frame = fetch_twelve_data_candles(pair, count=240)
+
+        if frame is not None:
+            now_epoch = time.time()
+            closed_bars = []
+            for _, row in frame.iterrows():
+                try:
+                    stamp = float(row["timestamp"].timestamp())
+                    op, close = float(row["open"]), float(row["close"])
+                except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
+                    continue
+                if stamp + 60 <= now_epoch:
+                    closed_bars.append({"t": stamp, "o": op, "c": close})
+            return closed_bars
+
+        # Legacy / browser-ingest mode: use the authenticated Quotex collector cache.
         from quotex_browser_ingest import _REAL_MARKET, _REAL_MARKET_LOCK
         asset = "".join(ch for ch in pair.upper() if ch.isalnum() or ch in "._-")
         with _REAL_MARKET_LOCK:
