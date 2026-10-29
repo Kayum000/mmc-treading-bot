@@ -1,6 +1,6 @@
 """Real-Forex-style market-structure and price-action engine.
 
-The live signal is evaluated on closed 1-minute candles with completed 5m/15m
+The live signal is evaluated on closed 30-minute candles with completed 1h
 context. No indicator votes drive the decision. Confidence is a rule-strength
 heuristic, not a calibrated probability of winning.
 """
@@ -42,7 +42,7 @@ def _hold(reason: str, analysis: dict | None = None) -> PriceActionSignal:
     details.update({"available": bool(details.get("available", False)), "direction": "HOLD",
                     "setup": details.get("setup", "NONE"),
                     "confidence_basis": "rule_strength_not_win_probability", "note": reason,
-                    "expiry_minutes": 5})
+                    "expiry_minutes": 30})
     return PriceActionSignal("HOLD", 0.0, reason, "NO_TRADE", "FOREX_STRUCTURE_PA_1M_MTF", details)
 
 
@@ -89,42 +89,42 @@ def _structure_bias(x: pd.DataFrame) -> tuple[str, dict]:
 
 
 def generate_quotex_price_action_signal(candles: pd.DataFrame) -> PriceActionSignal:
-    """Analyze M1 price action with completed M5/M15 structure and a 5m expiry."""
+    """Analyze completed M30 price action with H1 structure and a 30-minute expiry."""
     x = _clean(candles)
-    if len(x) < 180:
-        return _hold("Multi-timeframe বিশ্লেষণের জন্য পর্যাপ্ত closed ১-মিনিট candle নেই (কমপক্ষে ১৮০টি দরকার)",
-                     {"candle_count": len(x), "available": False})
+    if len(x) < 720:
+        return _hold("৩০-মিনিট বিশ্লেষণের জন্য পর্যাপ্ত closed candle history নেই (কমপক্ষে ৭২০টি ১-মিনিট candle দরকার)",
+                     {"candle_count": len(x), "available": False, "analysis_timeframe": "30m", "expiry_minutes": 30})
 
-    m5 = _resample_closed(x, 5)
-    m15 = _resample_closed(x, 15)
-    if len(m5) < 12 or len(m15) < 8:
-        return _hold("বন্ধ ৫-মিনিট/১৫-মিনিট context যথেষ্ট নেই; সিগন্যাল বাদ",
-                     {"available": False, "m5_count": len(m5), "m15_count": len(m15)})
+    m30 = _resample_closed(x, 30)
+    h1 = _resample_closed(x, 60)
+    if len(m30) < 20 or len(h1) < 12:
+        return _hold("বন্ধ ৩০-মিনিট/১-ঘণ্টার context যথেষ্ট নেই; সিগন্যাল বাদ",
+                     {"available": False, "candle_count": len(x), "m30_count": len(m30), "h1_count": len(h1),
+                      "analysis_timeframe": "30m", "context_timeframes": ["1h"], "expiry_minutes": 30})
 
-    bias5, structure5 = _structure_bias(m5)
-    bias15, structure15 = _structure_bias(m15)
-    last = x.iloc[-1]
-    prior = x.iloc[-31:-1]
+    bias30, structure30 = _structure_bias(m30)
+    bias60, structure60 = _structure_bias(h1)
+    last = m30.iloc[-1]
+    prior = m30.iloc[-11:-1]
     op, high, low, close = (float(last[k]) for k in ("open", "high", "low", "close"))
     candle_range = max(high - low, 1e-12)
     body = abs(close - op)
     upper_wick = high - max(op, close)
     lower_wick = min(op, close) - low
     close_position = (close - low) / candle_range
-    # ATR is used only to normalize price distance, not as a directional indicator.
-    tr = pd.concat([x["high"] - x["low"],
-                    (x["high"] - x["close"].shift(1)).abs(),
-                    (x["low"] - x["close"].shift(1)).abs()], axis=1).max(axis=1)
+    tr = pd.concat([m30["high"] - m30["low"],
+                    (m30["high"] - m30["close"].shift(1)).abs(),
+                    (m30["low"] - m30["close"].shift(1)).abs()], axis=1).max(axis=1)
     atr = float(tr.rolling(14).mean().iloc[-2])
     if not np.isfinite(atr) or atr <= 0:
-        return _hold("Price range নির্ভরযোগ্য নয়; সিগন্যাল বাদ", {"available": True})
+        return _hold("৩০-মিনিট price range নির্ভরযোগ্য নয়; সিগন্যাল বাদ",
+                     {"available": True, "analysis_timeframe": "30m", "expiry_minutes": 30})
 
     recent_high = float(prior["high"].max())
     recent_low = float(prior["low"].min())
-    # Liquidity reference levels use confirmed M5 swing points when available.
-    swing5_highs, swing5_lows = _swings(m5)
-    level_high = swing5_highs[-1][1] if swing5_highs else recent_high
-    level_low = swing5_lows[-1][1] if swing5_lows else recent_low
+    swing_highs, swing_lows = _swings(m30)
+    level_high = swing_highs[-1][1] if swing_highs else recent_high
+    level_low = swing_lows[-1][1] if swing_lows else recent_low
     bullish_sweep = low < level_low and close > level_low and close > op and close_position >= 0.65
     bearish_sweep = high > level_high and close < level_high and close < op and close_position <= 0.35
     bullish_bos = close > recent_high and close > op and close_position >= 0.70 and body >= 0.35 * atr
@@ -133,39 +133,37 @@ def generate_quotex_price_action_signal(candles: pd.DataFrame) -> PriceActionSig
     bearish_rejection = high >= recent_high - 0.12 * atr and close < recent_high and close < op and upper_wick >= max(body, 0.25 * candle_range) and close_position <= 0.35
 
     details = {
-        "available": True, "expiry_minutes": 5, "analysis_timeframe": "1m",
-        "candle_count": int(len(x)), "m5_count": int(len(m5)), "m15_count": int(len(m15)),
+        "available": True, "expiry_minutes": 30, "analysis_timeframe": "30m",
+        "candle_count": int(len(x)), "m30_count": int(len(m30)), "h1_count": int(len(h1)),
         "latest_closed_candle_time_utc": last["timestamp"].isoformat(),
-        "context_timeframes": ["5m", "15m"], "bias_5m": bias5, "bias_15m": bias15,
-        "structure_5m": structure5, "structure_15m": structure15,
+        "context_timeframes": ["1h"], "bias_30m": bias30, "bias_1h": bias60,
+        "structure_30m": structure30, "structure_1h": structure60,
         "support": level_low, "resistance": level_high,
-        "recent_1m_low": recent_low, "recent_1m_high": recent_high,
+        "recent_30m_low": recent_low, "recent_30m_high": recent_high,
         "liquidity_sweep": "bullish" if bullish_sweep else "bearish" if bearish_sweep else None,
         "break_of_structure": "bullish" if bullish_bos else "bearish" if bearish_bos else None,
         "confidence_basis": "rule_strength_not_win_probability",
-        "risk_note": "Price-action setups are probabilistic; no signal guarantees profit.",
+        "risk_note": "30m price-action setups are probabilistic; no signal guarantees profit.",
     }
-
-    # Do not trade against either higher-timeframe structure or when either is unclear.
-    if bias5 == "NEUTRAL" or bias15 == "NEUTRAL":
-        return _hold("৫-মিনিট/১৫-মিনিট market structure পরিষ্কার নয়; অপেক্ষা", details)
-    if bias5 != bias15:
-        return _hold("৫-মিনিট ও ১৫-মিনিট market structure পরস্পরবিরোধী; সিগন্যাল বাদ", details)
+    if bias30 == "NEUTRAL" or bias60 == "NEUTRAL":
+        return _hold("৩০-মিনিট/১-ঘণ্টার market structure পরিষ্কার নয়; অপেক্ষা", details)
+    if bias30 != bias60:
+        return _hold("৩০-মিনিট ও ১-ঘণ্টার market structure পরস্পরবিরোধী; সিগন্যাল বাদ", details)
     if body < 0.18 * atr or candle_range < 0.25 * atr:
-        return _hold("Confirmation candle দুর্বল/Doji; সিগন্যাল বাদ", details)
+        return _hold("৩০-মিনিট confirmation candle দুর্বল/Doji; সিগন্যাল বাদ", details)
 
     buy_setup = bullish_sweep or bullish_bos or bullish_rejection
     sell_setup = bearish_sweep or bearish_bos or bearish_rejection
     if buy_setup and sell_setup:
-        return _hold("একই candle-এ পরস্পরবিরোধী price-action setup; সিগন্যাল বাদ", details)
-    if bias5 == "BULLISH" and buy_setup:
+        return _hold("একই ৩০-মিনিট candle-এ পরস্পরবিরোধী price-action setup; সিগন্যাল বাদ", details)
+    if bias30 == "BULLISH" and buy_setup:
         action = "BUY"
         setup = "LIQUIDITY_SWEEP_RECLAIM" if bullish_sweep else "BREAK_OF_STRUCTURE" if bullish_bos else "DEMAND_REJECTION"
-    elif bias5 == "BEARISH" and sell_setup:
+    elif bias30 == "BEARISH" and sell_setup:
         action = "SELL"
         setup = "LIQUIDITY_SWEEP_RECLAIM" if bearish_sweep else "BREAK_OF_STRUCTURE" if bearish_bos else "SUPPLY_REJECTION"
     else:
-        return _hold("Higher-timeframe bias ও ১-মিনিট entry confirmation একদিকে মেলেনি; সিগন্যাল বাদ", details)
+        return _hold("১-ঘণ্টার bias ও ৩০-মিনিট confirmation একদিকে মেলেনি; সিগন্যাল বাদ", details)
 
     confidence = 0.70
     if (bullish_sweep if action == "BUY" else bearish_sweep):
@@ -176,9 +174,9 @@ def generate_quotex_price_action_signal(candles: pd.DataFrame) -> PriceActionSig
         confidence += 0.04
     confidence = min(0.85, confidence)
     details.update({"direction": action, "setup": setup, "confidence": confidence,
-                    "confirmation": f"{bias15} 15m + {bias5} 5m structure aligned with 1m {setup.lower()}",
+                    "confirmation": f"{bias60} 1h + {bias30} 30m structure aligned with 30m {setup.lower()}",
                     "entry_invalidation_level": level_low if action == "BUY" else level_high})
-    reason = f"{action}: ১৫-মিনিট ও ৫-মিনিট structure aligned; ১-মিনিটে {setup} confirmation; ৫ মিনিট expiry."
+    reason = f"{action}: ১-ঘণ্টা ও ৩০-মিনিট structure aligned; ৩০-মিনিটে {setup} confirmation; ৩০ মিনিট expiry."
     return PriceActionSignal(action, confidence, reason,
                              "PA_BULLISH" if action == "BUY" else "PA_BEARISH",
-                             "FOREX_STRUCTURE_PA_1M_MTF", details)
+                             "FOREX_STRUCTURE_PA_30M_MTF", details)
