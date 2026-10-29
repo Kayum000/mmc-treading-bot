@@ -22,10 +22,10 @@ class ForexStructureStrategyTests(unittest.TestCase):
     def test_insufficient_history_returns_hold(self):
         result = generate_quotex_price_action_signal(make_candles(90))
         self.assertEqual(result.action, "HOLD")
-        self.assertEqual(result.mmc_analysis["expiry_minutes"], 5)
+        self.assertEqual(result.mmc_analysis["expiry_minutes"], 30)
 
     def test_flat_market_returns_hold(self):
-        result = generate_quotex_price_action_signal(make_candles(240, flat=True))
+        result = generate_quotex_price_action_signal(make_candles(900, flat=True))
         self.assertEqual(result.action, "HOLD")
 
     def test_resampling_excludes_incomplete_higher_timeframe_bar(self):
@@ -34,7 +34,7 @@ class ForexStructureStrategyTests(unittest.TestCase):
         self.assertTrue(((m5["timestamp"] + pd.Timedelta(minutes=5)) <= (x.iloc[-1]["timestamp"] + pd.Timedelta(minutes=1))).all())
 
     def test_confidence_is_not_win_probability(self):
-        result = generate_quotex_price_action_signal(make_candles())
+        result = generate_quotex_price_action_signal(make_candles(900))
         self.assertEqual(result.mmc_analysis["confidence_basis"], "rule_strength_not_win_probability")
 
 
