@@ -10,46 +10,6 @@ import pandas as pd
 from data.quotex_otc import fetch_quotex_candles, OTC_PAIRS, local_active_asset, local_ticks
 from data.otc_markets import display_for_asset, asset_for_display
 from strategy.quotex_price_action import generate_quotex_price_action_signal
-from strategy.indicator_engine import analyze_timeframes
-
-
-def _indicator_payload(candles: pd.DataFrame, ticks: pd.DataFrame | None = None) -> dict:
-    """Attach indicator votes, deriving clearly labelled tick-volume where needed."""
-    try:
-        prepared = candles
-        if (
-            isinstance(candles, pd.DataFrame) and not candles.empty
-            and "timestamp" in candles.columns and "tick_volume" not in candles.columns
-            and isinstance(ticks, pd.DataFrame) and not ticks.empty and "timestamp" in ticks.columns
-        ):
-            tick_times = pd.to_datetime(ticks["timestamp"], utc=True, errors="coerce").dropna()
-            tick_buckets = tick_times.dt.floor("min")
-            if not tick_buckets.empty:
-                counts = tick_buckets.value_counts(sort=False)
-                first_bucket, last_bucket = tick_buckets.min(), tick_buckets.max()
-                candle_times = pd.to_datetime(candles["timestamp"], utc=True, errors="coerce")
-                candle_buckets = candle_times.dt.floor("min")
-                covered = candle_buckets.ge(first_bucket) & candle_buckets.le(last_bucket)
-                # Count incoming quote updates per minute. This is a tick-volume
-                # proxy, not traded volume. Keep candles outside the observed
-                # tick-history window as NaN, never inventing zero-volume bars.
-                tick_counts = candle_buckets.map(counts)
-                prepared = candles.copy()
-                prepared["tick_volume"] = tick_counts.fillna(0).where(covered)
-        analysis = analyze_timeframes(prepared)
-        one = analysis.get("1m", {})
-        return {"indicator_analysis": one, "timeframe_analysis": analysis,
-                "indicator_score": one.get("score", 0),
-                "indicator_signal": one.get("signal", "WAIT")}
-    except Exception as exc:
-        return {"indicator_analysis": {"available": False, "reason": str(exc)},
-                "timeframe_analysis": {}, "indicator_score": 0, "indicator_signal": "WAIT"}
-
-
-def _apply_mtf_filter(result, candles: pd.DataFrame):
-    """Suppress entries only when both higher timeframes are available and oppose them."""
-    # 1m-only strategy: higher-timeframe confirmation is disabled.
-    return result
 
 
 def _bengali_reason(reason: str) -> str:
@@ -178,7 +138,6 @@ def _twelvedata_real_signal(pair: str, automatic: bool) -> dict:
         "mmc_level_type": None, "mmc_level_price": None,
         "regime": result.regime, "strategy": result.strategy,
         "strategy_mode": "quotex_price_action", "mmc_analysis": result.mmc_analysis,
-        **_indicator_payload(candles),
     }
 
 
@@ -233,7 +192,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
             score = int(round(float(result.confidence) * 100))
             is_entry = result.action in {"BUY", "SELL"}
             signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
-            return {"pair": pair, "requested_pair": pair, "market_mode": "real", "source": "Quotex Real Market browser WebSocket", "signal": result.action, "market_bias": result.action, "entry_signal": result.action, "buy_score": score if result.action == "BUY" else 0, "sell_score": score if result.action == "SELL" else 0, "reason": _bengali_reason(f"[{result.regime} / {result.strategy}] {result.reason}"), "hold_condition": _hold_condition(result.reason, result.regime, result.strategy) if result.action == "HOLD" else None, "signal_created_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None, "signal_created_bd": signal_at_utc.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None, "signal_time_utc": signal_candle.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": signal_candle.isoformat(timespec="seconds"), "analysis_candle_time_utc": None, "entry_price": None, "entry_price_type": "closed_candle_model", "entry_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_delay_seconds": 0, "timeframe": "1-minute closed-candle price action", "entry_timeframe": "next 1-minute candle after closed-candle analysis", "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None, "regime": result.regime, "strategy": result.strategy, "strategy_mode": "quotex_price_action", "mmc_analysis": result.mmc_analysis, **_indicator_payload(candles, ticks=ticks)}
+            return {"pair": pair, "requested_pair": pair, "market_mode": "real", "source": "Quotex Real Market browser WebSocket", "signal": result.action, "market_bias": result.action, "entry_signal": result.action, "buy_score": score if result.action == "BUY" else 0, "sell_score": score if result.action == "SELL" else 0, "reason": _bengali_reason(f"[{result.regime} / {result.strategy}] {result.reason}"), "hold_condition": _hold_condition(result.reason, result.regime, result.strategy) if result.action == "HOLD" else None, "signal_created_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None, "signal_created_bd": signal_at_utc.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None, "signal_time_utc": signal_candle.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": signal_candle.isoformat(timespec="seconds"), "analysis_candle_time_utc": None, "entry_price": None, "entry_price_type": "closed_candle_model", "entry_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_delay_seconds": 0, "timeframe": "1-minute closed-candle price action", "entry_timeframe": "next 1-minute candle after closed-candle analysis", "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None, "regime": result.regime, "strategy": result.strategy, "strategy_mode": "quotex_price_action", "mmc_analysis": result.mmc_analysis}
         return {
             "pair": pair, "requested_pair": pair, "market_mode": "real",
             "source": "Quotex Real Market browser WebSocket", "signal": "HOLD",
@@ -250,7 +209,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
             "entry_candle_time_bd": None, "entry_delay_seconds": None,
             "timeframe": "1-minute closed-candle price action", "entry_timeframe": "next 1-minute candle after closed-candle analysis",
             "automatic": automatic, "confidence": 0.0, "mmc_level_type": None, "mmc_level_price": None,
-            "regime": "UNKNOWN", "strategy": "NONE", "strategy_mode": "quotex_price_action", "mmc_analysis": result.mmc_analysis, **_indicator_payload(candles, ticks=ticks),
+            "regime": "UNKNOWN", "strategy": "NONE", "strategy_mode": "quotex_price_action", "mmc_analysis": result.mmc_analysis,
         }
 
     analysis_candle_time = candles.iloc[-1]["timestamp"]
@@ -288,7 +247,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
         "entry_delay_seconds": _entry_delay_seconds(signal_at_utc, signal_candle) if is_entry else None, "timeframe": timeframe,
         "entry_timeframe": "next 1-minute candle after closed-candle analysis", "automatic": automatic,
         "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
-        "regime": regime, "strategy": strategy_name, "strategy_mode": "quotex_price_action", "mmc_analysis": result.mmc_analysis, **_indicator_payload(candles, ticks=ticks),
+        "regime": regime, "strategy": strategy_name, "strategy_mode": "quotex_price_action", "mmc_analysis": result.mmc_analysis,
     }
 
 
@@ -347,7 +306,6 @@ def _otc_signal(pair: str, automatic: bool) -> dict:
         "entry_timeframe": "next 1-minute candle after closed-candle analysis",
         "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None,
         "regime": result.regime, "strategy": result.strategy, "strategy_mode": "quotex_price_action", "mmc_analysis": result.mmc_analysis,
-        **_indicator_payload(candles, ticks=ticks),
     }
 
 
