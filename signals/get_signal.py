@@ -24,16 +24,6 @@ def _hold_condition(reason: str, regime: str = "", strategy: str = "") -> str:
     raw = str(reason or "").strip().lower()
     if "insufficient candle history" in raw:
         return "পর্যাপ্ত ১-মিনিট বন্ধ candle history নেই"
-    if "trend alignment absent" in raw:
-        return "Trend-এর EMA20/EMA50 alignment নিশ্চিত হয়নি"
-    if "breakout not confirmed" in raw:
-        return "২০-bar high/low breakout নিশ্চিত হয়নি"
-    if "mean-reversion setup absent" in raw:
-        return "Bollinger Band + RSI mean-reversion setup পাওয়া যায়নি"
-    if "high volatility without clean breakout" in raw:
-        return "Volatility বেশি, কিন্তু পরিষ্কার breakout পাওয়া যায়নি"
-    if "market regime unclear" in raw:
-        return "Market regime পরিষ্কারভাবে শনাক্ত হয়নি"
     if "পর্যাপ্ত closed 1-minute candle" in raw or "at least 60" in raw:
         return "পর্যাপ্ত বন্ধ ১-মিনিট candle history নেই"
     if "৫-মিনিটের trend" in raw or "trend পরিষ্কার নয়" in raw:
