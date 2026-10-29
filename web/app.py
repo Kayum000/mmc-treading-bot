@@ -833,8 +833,8 @@ def _score_pending_performance_once() -> None:
             con = _performance_db()
             try:
                 con.execute(
-                    "UPDATE performance SET result=?, outcome_price=?, outcome_candle_time_utc=?, outcome_basis=?, result_notified=0, updated_at=? WHERE id=? AND (result='অপেক্ষমাণ' OR outcome_basis IS NULL OR outcome_basis NOT LIKE '৫-মিনিট expiry%')",
-                    (outcome, expiry_price, outcome_time, basis, time.time(), row["id"])
+                    "UPDATE performance SET result=?, entry_price=?, outcome_price=?, outcome_candle_time_utc=?, outcome_basis=?, result_notified=0, updated_at=? WHERE id=? AND (result='অপেক্ষমাণ' OR outcome_basis IS NULL OR outcome_basis NOT LIKE '৫-মিনিট expiry%')",
+                    (outcome, entry_price, expiry_price, outcome_time, basis, time.time(), row["id"])
                 )
                 con.commit()
                 row["result"] = outcome
