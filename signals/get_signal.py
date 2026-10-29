@@ -67,16 +67,18 @@ def _biquote_real_signal(pair: str, automatic: bool) -> dict:
     elif provider == "biquote":
         from data.biquote import fetch_biquote_candles, fetch_biquote_quote, normalize_biquote_symbol
         symbol = normalize_biquote_symbol(pair)
-        candles = fetch_biquote_candles(symbol, count=1200)
+        candles = fetch_biquote_candles(symbol, count=1200, interval="1m")
+        candles_30m = fetch_biquote_candles(symbol, count=100, interval="30m")
+        candles_1h = fetch_biquote_candles(symbol, count=100, interval="1h")
         live_quote = fetch_biquote_quote(symbol)
-        source_label = "biquote live bid/ask + completed M1 OHLC candles"
+        source_label = "biquote live bid/ask + completed M30/H1 OHLC candles"
     else:
         raise RuntimeError("MARKET_DATA_PROVIDER must be 'biquote' or 'oanda'.")
     signal_at_utc = datetime.now(timezone.utc)
     latest = candles.iloc[-1]
     latest_open = latest["timestamp"]
     signal_candle = _entry_candle_time(signal_at_utc, automatic, latest_open)
-    result = generate_quotex_price_action_signal(candles)
+    result = generate_quotex_price_action_signal(candles, candles_30m=candles_30m if provider == "biquote" else None, candles_1h=candles_1h if provider == "biquote" else None)
     signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
     is_entry = result.action in {"BUY", "SELL"}
     score = int(round(float(result.confidence) * 100)) if is_entry else 0
