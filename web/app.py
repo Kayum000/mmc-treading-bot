@@ -354,7 +354,13 @@ def _valid_strategy_modes():
     return {"normal", "candle_reaction"}
 
 def _valid_pairs(mode: str):
-    return REAL_PAIRS if mode == "real" else QUOTEX_OTC_PAIRS if mode == "quotex_otc" else []
+    if mode == "real":
+        try:
+            from data.biquote import known_biquote_symbols
+            return sorted(set(REAL_PAIRS) | set(known_biquote_symbols()))
+        except Exception:
+            return REAL_PAIRS
+    return QUOTEX_OTC_PAIRS if mode == "quotex_otc" else []
 
 def _settings():
     value = dict(_DEFAULT_SETTINGS)
@@ -432,6 +438,28 @@ def require_dashboard():
             return jsonify({"ok": False, "error": "লগইন প্রয়োজন।"}), 401
         return redirect(url_for("login"))
     return None
+
+@app.route("/api/markets", methods=["GET"])
+def api_markets():
+    mode = request.args.get("mode", "real").strip().lower()
+    query = request.args.get("q", "").strip()[:80]
+    try:
+        if mode == "quotex_otc":
+            markets = [{"symbol": p, "name": p, "type": "Quotex OTC"} for p in QUOTEX_OTC_PAIRS
+                       if not query or query.lower() in p.lower()]
+            return jsonify({"ok": True, "mode": mode, "markets": markets, "count": len(markets)})
+        if mode != "real":
+            return jsonify({"ok": False, "error": "Unsupported market mode."}), 400
+        from data.biquote import fetch_biquote_symbols
+        markets = fetch_biquote_symbols(query=query, limit=100 if query else 200)
+        if not query:
+            existing = {item["symbol"] for item in markets}
+            markets.extend({"symbol": p.replace("/", ""), "name": p, "type": "Forex"}
+                           for p in REAL_PAIRS if p.replace("/", "") not in existing)
+        return jsonify({"ok": True, "mode": mode, "markets": markets, "count": len(markets),
+                        "source": "biquote", "searchable": True})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc), "markets": []}), 503
 
 @app.route("/select-market", methods=["POST"])
 def select_market():
