@@ -707,7 +707,7 @@ def _outcome_candles(mode: str, pair: str) -> list[dict]:
         asset = asset_for_display(pair)
         if not asset:
             return []
-        frame = fetch_quotex_candles(asset, interval="1m", count=240)
+        frame = fetch_quotex_candles(asset, interval="1m", count=5000)
         return [{"t": row["timestamp"].timestamp(), "o": float(row["open"]), "c": float(row["close"])}
                 for _, row in frame.iterrows()]
     if mode == "real":
@@ -719,10 +719,10 @@ def _outcome_candles(mode: str, pair: str) -> list[dict]:
         frame = None
         if provider in {"oanda"}:
             from data.oanda import fetch_oanda_candles
-            frame = fetch_oanda_candles(pair, count=240)
+            frame = fetch_oanda_candles(pair, count=5000)
         elif provider in {"twelvedata", "twelve_data"} and os.getenv("TWELVEDATA_API_KEY", "").strip():
             from data.twelve_data import fetch_twelve_data_candles
-            frame = fetch_twelve_data_candles(pair, count=240)
+            frame = fetch_twelve_data_candles(pair, count=5000)
 
         if frame is not None:
             now_epoch = time.time()
@@ -770,7 +770,7 @@ def _score_pending_performance_once() -> None:
     con = _performance_db()
     try:
         rows = [_performance_row(r) for r in con.execute(
-            "SELECT * FROM performance WHERE result='অপেক্ষমাণ' OR outcome_basis='সম্পূর্ণ entry ১-মিনিট candle open-to-close' OR (result IN ('লাভ','লস','DOJI') AND result_notified=0) ORDER BY updated_at DESC LIMIT 200"
+            "SELECT * FROM performance WHERE result='অপেক্ষমাণ' OR outcome_basis IS NULL OR outcome_basis NOT LIKE '৫-মিনিট expiry%' OR (result IN ('লাভ','লস','DOJI') AND result_notified=0) ORDER BY updated_at DESC LIMIT 200"
         ).fetchall()]
     finally:
         con.close()
@@ -788,8 +788,10 @@ def _score_pending_performance_once() -> None:
         # Keep old pending rows eligible for a retry. If historical price data
         # is unavailable, the row remains pending; never invent an outcome.
         key = (mode, pair)
-        # One-minute expiry: wait until the exact entry minute has fully closed.
-        if row.get("result") == "অপেক্ষমাণ" and now < (int(entry_epoch // 60) * 60) + 60:
+        # Five-minute expiry is measured from the scheduled entry-minute boundary.
+        entry_minute = int(entry_epoch // 60) * 60
+        expiry_epoch = entry_minute + 5 * 60
+        if now < expiry_epoch:
             continue
         if key not in candle_cache:
             try:
@@ -797,21 +799,26 @@ def _score_pending_performance_once() -> None:
             except Exception as exc:
                 print(f"[MMC Performance] candle lookup failed mode={mode} pair={pair}: {exc}", flush=True)
                 candle_cache[key] = []
-        target_minute = int(entry_epoch // 60) * 60
-        # The expiry price is the close of the exact entry-minute candle. Compare
-        # it against the recorded entry quote, not candle open-vs-close direction.
-        # Missing entry quote or candle means pending, never a guessed win/loss.
-        candle = next((
+        # Score against the close of the M1 candle that ends at entry + 5 minutes.
+        # The entry-minute open is used as the consistent historical fill proxy.
+        entry_candle = next((
             b for b in candle_cache[key]
-            if int(float(b["t"]) // 60) * 60 == target_minute
+            if int(float(b["t"]) // 60) * 60 == entry_minute
             and float(b["t"]) + 60 <= now
         ), None)
-        if not candle:
+        expiry_candle = next((
+            b for b in candle_cache[key]
+            if int(float(b["t"]) // 60) * 60 == expiry_epoch - 60
+            and float(b["t"]) + 60 <= now
+        ), None)
+        if not entry_candle or not expiry_candle:
             continue
-        if row.get("result") == "অপেক্ষমাণ":
+        basis = "৫-মিনিট expiry close বনাম entry-minute open"
+        needs_rescore = row.get("result") == "অপেক্ষমাণ" or row.get("outcome_basis") != basis
+        if needs_rescore:
             try:
-                entry_price = float(row.get("entry_price"))
-                expiry_price = float(candle["c"])
+                entry_price = float(entry_candle["o"])
+                expiry_price = float(expiry_candle["c"])
             except (TypeError, ValueError, OverflowError):
                 continue
             if not math.isfinite(entry_price) or not math.isfinite(expiry_price) or entry_price <= 0 or expiry_price <= 0:
@@ -822,20 +829,21 @@ def _score_pending_performance_once() -> None:
                 outcome = "লাভ"
             else:
                 outcome = "লস"
-            outcome_time = datetime.fromtimestamp(target_minute + 60, timezone.utc).isoformat()
-            basis = "১-মিনিট expiry close বনাম recorded entry price"
+            outcome_time = datetime.fromtimestamp(expiry_epoch, timezone.utc).isoformat()
             con = _performance_db()
             try:
                 con.execute(
-                    "UPDATE performance SET result=?, outcome_price=?, outcome_candle_time_utc=?, outcome_basis=?, updated_at=? WHERE id=? AND (result='অপেক্ষমাণ' OR outcome_basis='সম্পূর্ণ entry ১-মিনিট candle open-to-close')",
+                    "UPDATE performance SET result=?, outcome_price=?, outcome_candle_time_utc=?, outcome_basis=?, result_notified=0, updated_at=? WHERE id=? AND (result='অপেক্ষমাণ' OR outcome_basis IS NULL OR outcome_basis NOT LIKE '৫-মিনিট expiry%')",
                     (outcome, expiry_price, outcome_time, basis, time.time(), row["id"])
                 )
                 con.commit()
                 row["result"] = outcome
+                row["entry_price"] = entry_price
                 row["outcome_price"] = expiry_price
                 row["outcome_candle_time_utc"] = outcome_time
                 row["outcome_basis"] = basis
-                print(f"[MMC Performance] scored mode={mode} pair={pair} signal={signal} entry={entry_price} expiry={expiry_price} result={outcome}", flush=True)
+                row["result_notified"] = 0
+                print(f"[MMC Performance] scored mode={mode} pair={pair} entry_open={entry_price} expiry_close={expiry_price} result={outcome}", flush=True)
             finally:
                 con.close()
         if row.get("result") in {"লাভ", "লস", "DOJI"} and not int(row.get("result_notified") or 0):
