@@ -20,14 +20,15 @@ Signals are prepared for the upcoming 1-minute entry candle. The latest fully cl
 
 ## Performance
 
-Performance is based on the completed 1-minute candle ending at the configured five-minute expiry:
+Performance is scored after the five-minute expiry using the entry-minute open as a historical fill proxy and the close of the 1-minute candle ending at entry + 5 minutes:
 
-- BUY + green/bullish candle close → লাভ
-- BUY + red/bearish candle close → লস
-- SELL + red/bearish candle close → লাভ
-- SELL + green/bullish candle close → লস
+- BUY + expiry close above entry-minute open → লাভ
+- BUY + expiry close below entry-minute open → লস
+- SELL + expiry close below entry-minute open → লাভ
+- SELL + expiry close above entry-minute open → লস
+- Equal entry and expiry prices → DOJI
 
-A candle-colour result is a simple outcome label, not a full account-level profit calculation; payout, spread, execution timing, and other trading costs may affect actual results.
+This is an OHLC-based outcome label, not an account-level profit calculation. Spread, slippage, execution timing, broker quote differences, and payout are not modeled.
 
 ## Strategy boundary
 
