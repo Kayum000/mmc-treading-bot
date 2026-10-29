@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from data.biquote import normalize_biquote_symbol, fetch_biquote_candles, fetch_biquote_quote
+from data.biquote import normalize_biquote_symbol, fetch_biquote_candles, fetch_biquote_quote, fetch_biquote_symbols
 
 
 class BiquoteForexTests(unittest.TestCase):
@@ -13,9 +13,23 @@ class BiquoteForexTests(unittest.TestCase):
     def test_normalizes_slash_pair(self):
         self.assertEqual(normalize_biquote_symbol("gbp/usd"), "GBPUSD")
 
-    def test_rejects_non_forex_symbol(self):
+    def test_accepts_multiple_real_asset_classes(self):
+        for symbol in ("XAUUSD", "BTCUSD", "US500", "AAPL"):
+            self.assertEqual(normalize_biquote_symbol(symbol), symbol)
+
+    def test_rejects_otc_symbol(self):
         with self.assertRaises(ValueError):
             normalize_biquote_symbol("EURUSD_OTC")
+
+    @patch("data.biquote.requests.get")
+    def test_search_filters_otc_symbols(self, get):
+        get.return_value.raise_for_status.return_value = None
+        get.return_value.json.return_value = [
+            {"name": "XAUUSD", "description": "Gold / US Dollar", "type": "Commodity"},
+            {"name": "EURUSD_otc", "description": "OTC", "type": "Forex"},
+        ]
+        rows = fetch_biquote_symbols("gold", limit=20)
+        self.assertEqual([row["symbol"] for row in rows], ["XAUUSD"])
 
     @patch("data.biquote.requests.get")
     def test_returns_only_closed_candles_in_ascending_order(self, get):
