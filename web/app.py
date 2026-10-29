@@ -770,7 +770,7 @@ def _score_pending_performance_once() -> None:
     con = _performance_db()
     try:
         rows = [_performance_row(r) for r in con.execute(
-            "SELECT * FROM performance WHERE result='অপেক্ষমাণ' OR outcome_basis IS NULL OR outcome_basis NOT LIKE '৫-মিনিট expiry%' OR (result IN ('লাভ','লস','DOJI') AND result_notified=0) ORDER BY updated_at DESC LIMIT 200"
+            "SELECT * FROM performance WHERE result='অপেক্ষমাণ' OR outcome_basis IS NULL OR outcome_basis NOT LIKE '৫-মিনিট expiry%%' OR (result IN ('লাভ','লস','DOJI') AND result_notified=0) ORDER BY updated_at DESC LIMIT 200"
         ).fetchall()]
     finally:
         con.close()
@@ -833,7 +833,7 @@ def _score_pending_performance_once() -> None:
             con = _performance_db()
             try:
                 con.execute(
-                    "UPDATE performance SET result=?, entry_price=?, outcome_price=?, outcome_candle_time_utc=?, outcome_basis=?, result_notified=0, updated_at=? WHERE id=? AND (result='অপেক্ষমাণ' OR outcome_basis IS NULL OR outcome_basis NOT LIKE '৫-মিনিট expiry%')",
+                    "UPDATE performance SET result=?, entry_price=?, outcome_price=?, outcome_candle_time_utc=?, outcome_basis=?, result_notified=0, updated_at=? WHERE id=? AND (result='অপেক্ষমাণ' OR outcome_basis IS NULL OR outcome_basis NOT LIKE '৫-মিনিট expiry%%')",
                     (outcome, entry_price, expiry_price, outcome_time, basis, time.time(), row["id"])
                 )
                 con.commit()
