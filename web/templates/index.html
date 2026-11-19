@@ -134,7 +134,6 @@ body{background:var(--mmc-bg)!important;color:var(--mmc-text)!important}
   .app.compact-sidebar .nav button[data-action="market"]::before{content:"♢"}
   .app.compact-sidebar .nav button[data-scroll="news"]::before{content:"▤"}
   .app.compact-sidebar .nav button[data-scroll="chart"]::before{content:"⌁"}
-  .app.compact-sidebar .nav button[data-action="indicators"]::before{content:"▦"}
   .app.compact-sidebar .nav button[data-action="strategies"]::before{content:"♜"}
   .app.compact-sidebar .nav button[data-action="settings"]::before{content:"⚙"}
 }
@@ -204,7 +203,6 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
     <button data-action="market">♢ &nbsp; Market Selection</button>
     <button data-scroll="news">▤ &nbsp; News & Events</button>
     <button data-scroll="chart">⌁ &nbsp; Live Chart</button>
-    <button data-action="indicators">▦ &nbsp; Indicators</button>
     <button data-action="strategies">♜ &nbsp; Strategy</button>
     <a class="download-app" id="download-app-action" href="https://github.com/Kayum000/mmc-treading-bot/releases/download/latest/app-debug.apk">🖥️ Windows App Download</a>
     <button data-action="settings">⚙ &nbsp; Settings</button>
@@ -254,57 +252,7 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
 <article class="panel news" id="news"><div class="panel-head"><span class="round-icon">▣</span><div><h2 class="panel-title">News & Events</h2><div class="panel-sub">Latest Market News & Economic Events</div></div><button type="button" class="refresh" id="news-refresh">Refresh</button></div><div id="news-items"><div class="empty">Select a market to load news & events.</div></div><div class="news-footer"><span id="news-source">—</span><button type="button" class="mini-btn" id="news-more">View All News →</button></div></article>
 </section>
 <section class="chart-panel" id="chart"><div class="chart-head"><span class="round-icon">▥</span><div><b>Live Chart</b><small>Real-time price chart with indicators</small></div><div class="chart-controls"><span class="chart-live" id="chart-live">LIVE —</span><select id="chart-interval" aria-label="Chart timeframe"><option value="1m" selected>1m</option></select><button type="button" id="chart-zoom-out">−</button><button type="button" id="chart-zoom-in">+</button><button type="button" id="chart-full-view">FULL</button></div></div><div class="chart-canvas-wrap" id="live-market-chart"><div class="chart-canvas-wrap-inner"></div></div></section>
-<section class="indicators-panel" id="indicators-section" aria-labelledby="indicators-title">
-  <div class="indicators-head">
-    <div><h2 id="indicators-title">▦ Quotex Indicators</h2><p>তোমার Quotex স্ক্রিনশটে দেখা সব ২৯টি ইন্ডিকেটর—ক্যাটাগরি অনুযায়ী এক জায়গায়।</p></div>
-    <button type="button" class="mini-btn" id="indicators-back">← Dashboard</button>
-  </div>
-  <div class="indicators-notice"><span id="indicator-status-text"><strong>ডেটা স্ট্যাটাস:</strong> নির্বাচিত মার্কেটের closed-candle OHLC data দিয়ে হিসাবের অপেক্ষায়। কিছু indicator-এর জন্য approximation ব্যবহৃত হয়; volume data না থাকলে volume indicators unavailable থাকবে। OTC ও real-market data আলাদা।</span> <button type="button" class="mini-btn" id="analysis-refresh" style="margin-left:8px">↻ Calculate / Refresh</button></div>
-  <div class="indicators-tools">
-    <input type="search" id="indicator-search" placeholder="Search indicator…" aria-label="Search indicators">
-    <select id="indicator-timeframe" aria-label="Indicator timeframe"><option value="1m" selected>Timeframe: 1m</option></select>
-  </div>
-  <div class="indicator-filters" role="group" aria-label="Filter indicators">
-    <button type="button" class="indicator-filter active" data-indicator-filter="all">All (29)</button>
-    <button type="button" class="indicator-filter" data-indicator-filter="trend">Trend (11)</button>
-    <button type="button" class="indicator-filter" data-indicator-filter="oscillator">Oscillators (18)</button>
-  </div>
-  <div class="indicators-count" id="indicators-count">Showing 29 indicators</div>
-  <div class="indicator-grid" id="indicator-grid">
-    <article class="indicator-card" data-category="trend" data-name="Alligator"><div class="indicator-card-top"><h3>Alligator</h3></div><span class="indicator-category">Trend</span><div class="indicator-summary">Trend direction and alignment of smoothed moving averages.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="trend" data-name="Bollinger Bands"><div class="indicator-card-top"><h3>Bollinger Bands</h3></div><span class="indicator-category">Trend / Volatility</span><div class="indicator-summary">Price position relative to upper, middle and lower bands.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="trend" data-name="Envelopes"><div class="indicator-card-top"><h3>Envelopes</h3></div><span class="indicator-category">Trend</span><div class="indicator-summary">20-SMA ±0.1% fixed envelope; upper extension is SELL, lower extension is BUY.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="trend" data-name="Fractal"><div class="indicator-card-top"><h3>Fractal</h3></div><span class="indicator-category">Trend / Structure</span><div class="indicator-summary">Potential local swing highs and lows after confirmation.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="trend" data-name="Ichimoku Cloud"><div class="indicator-card-top"><h3>Ichimoku Cloud</h3></div><span class="indicator-category">Trend</span><div class="indicator-summary">Cloud position, conversion/base lines and trend context.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="trend" data-name="Keltner channel"><div class="indicator-card-top"><h3>Keltner Channel</h3></div><span class="indicator-category">Trend / Volatility</span><div class="indicator-summary">Price position within an EMA and ATR channel.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="trend" data-name="Donchian channel"><div class="indicator-card-top"><h3>Donchian Channel</h3></div><span class="indicator-category">Trend / Breakout</span><div class="indicator-summary">Highest high and lowest low across a selected period.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="trend" data-name="Supertrend"><div class="indicator-card-top"><h3>Supertrend</h3></div><span class="indicator-category">Trend</span><div class="indicator-summary">ATR-based trend direction and trailing band.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="trend" data-name="Moving Average"><div class="indicator-card-top"><h3>Moving Average</h3></div><span class="indicator-category">Trend</span><div class="indicator-summary">Smoothed price direction and price/average crossover context.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="trend" data-name="Parabolic SAR"><div class="indicator-card-top"><h3>Parabolic SAR</h3></div><span class="indicator-category">Trend</span><div class="indicator-summary">Potential trend-following stop-and-reversal points.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="trend" data-name="Zig Zag"><div class="indicator-card-top"><h3>Zig Zag</h3></div><span class="indicator-category">Trend / Structure</span><div class="indicator-summary">OHLC-only 5-bar swing-momentum proxy; it does not reproduce Quotex Depth/Deviation/Backstep settings.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="ADX"><div class="indicator-card-top"><h3>ADX</h3></div><span class="indicator-category">Oscillator / Strength</span><div class="indicator-summary">Measures trend strength, not direction by itself.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="Aroon"><div class="indicator-card-top"><h3>Aroon</h3></div><span class="indicator-category">Oscillator / Trend</span><div class="indicator-summary">Tracks how recently highs and lows occurred.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="Awesome Oscillator"><div class="indicator-card-top"><h3>Awesome Oscillator</h3></div><span class="indicator-category">Oscillator / Momentum</span><div class="indicator-summary">Compares short- and long-period median-price averages.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="Bears power"><div class="indicator-card-top"><h3>Bears Power</h3></div><span class="indicator-category">Oscillator / Momentum</span><div class="indicator-summary">Estimates selling pressure relative to an EMA.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="Bulls power"><div class="indicator-card-top"><h3>Bulls Power</h3></div><span class="indicator-category">Oscillator / Momentum</span><div class="indicator-summary">Estimates buying pressure relative to an EMA.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="CCI"><div class="indicator-card-top"><h3>CCI</h3></div><span class="indicator-category">Oscillator / Momentum</span><div class="indicator-summary">Shows price deviation from its statistical average.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="DeMarker"><div class="indicator-card-top"><h3>DeMarker</h3></div><span class="indicator-category">Oscillator</span><div class="indicator-summary">Compares recent high/low pressure to assess stretched conditions.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="ATR"><div class="indicator-card-top"><h3>ATR</h3></div><span class="indicator-category">Oscillator / Volatility</span><div class="indicator-summary">Measures average range; it does not predict direction alone.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="MACD"><div class="indicator-card-top"><h3>MACD</h3></div><span class="indicator-category">Oscillator / Momentum</span><div class="indicator-summary">Tracks the difference between fast and slow EMAs and signal line.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="Momentum"><div class="indicator-card-top"><h3>Momentum</h3></div><span class="indicator-category">Oscillator / Momentum</span><div class="indicator-summary">Measures the speed of price movement over a lookback period.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="RSI"><div class="indicator-card-top"><h3>RSI</h3></div><span class="indicator-category">Oscillator / Momentum</span><div class="indicator-summary">Measures relative upward versus downward price changes.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="Rate Of Change"><div class="indicator-card-top"><h3>Rate of Change</h3></div><span class="indicator-category">Oscillator / Momentum</span><div class="indicator-summary">Percentage price change over a chosen lookback period.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="Stochastic Oscillator"><div class="indicator-card-top"><h3>Stochastic Oscillator</h3></div><span class="indicator-category">Oscillator / Momentum</span><div class="indicator-summary">Compares closing price with its recent high-low range.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="Schaff Trend Cycle"><div class="indicator-card-top"><h3>Schaff Trend Cycle</h3></div><span class="indicator-category">Oscillator / Trend</span><div class="indicator-summary">MACD-derived cycle measure used to assess trend momentum.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="Vortex"><div class="indicator-card-top"><h3>Vortex</h3></div><span class="indicator-category">Oscillator / Trend</span><div class="indicator-summary">Compares upward and downward directional movement.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="Volume Oscillator"><div class="indicator-card-top"><h3>Volume Oscillator</h3></div><span class="indicator-category">Oscillator / Volume</span><div class="indicator-summary">Compares short/long volume averages. Uses real candle volume if available; otherwise a clearly labelled quote-tick count proxy (not traded volume).</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="Williams %R"><div class="indicator-card-top"><h3>Williams %R</h3></div><span class="indicator-category">Oscillator / Momentum</span><div class="indicator-summary">Shows close location within a recent high-low range.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-    <article class="indicator-card" data-category="oscillator" data-name="Weis Waves Volume Oscillator"><div class="indicator-card-top"><h3>Weis Waves Volume Oscillator</h3></div><span class="indicator-category">Oscillator / Volume</span><div class="indicator-summary">Uses signed 5/20-candle volume/tick-count proxy; requires recent tick history and is not full Weis-wave segmentation.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
-  </div>
-  <div class="indicators-head" style="margin-top:18px"><div><h3>127 Technical Confirmation Checks — M1</h3><p>প্রতিটি বন্ধ ১-মিনিট candle থেকে ১২৭টি parameterized confirmation vote।</p></div></div>
-  <div id="confirmation127-summary" class="indicators-count">Waiting for M1 analysis…</div>
-  <div id="confirmation127-list" class="indicator-grid"></div>
-</section>
+
 <section class="indicators-panel" id="strategies-section" aria-labelledby="strategies-title">
   <div class="indicators-head">
     <div><h2 id="strategies-title">♜ MMC Strategy &amp; 22 Concepts</h2><p>MMC/ICT-ধাঁচের ২২টি কনসেপ্ট—নাম, ক্যাটাগরি ও কীভাবে কাজ করে।</p></div>
@@ -557,10 +505,6 @@ function handleSidebarNav(e){
   if(target==='chart'){
     $('chart')?.scrollIntoView({behavior:'smooth',block:'start'});
     closeMobile();
-    return;
-  }
-  if(action==='indicators'){
-    closeMobile();openAnalysisModal('indicators-section');
     return;
   }
   if(action==='strategies'){
