@@ -307,7 +307,7 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
 <div class="modal" id="modal"><div class="modal-card"><button class="modal-close" id="modal-close">×</button><h3 id="modal-title">Notice</h3><p id="modal-body">—</p><div id="modal-extra"></div></div></div><div class="toast" id="toast"></div>
 <script src="{{ url_for('static',filename='signal_alert.js') }}?v=20261012-confidence-gate-5"></script>
 <script src="{{ url_for('static',filename='candle_timer.js') }}?v=20261012-clean-1"></script>
-<script src="{{ url_for('static',filename='live_stream_chart.js') }}?v=20260921-6"></script>
+<script src="{{ url_for('static',filename='live_stream_chart.js') }}?v=20261119-livechart-fix1"></script>
 <script>
 (()=>{
 'use strict';
@@ -338,11 +338,11 @@ function applyCompactSidebar(){
 const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(m){toastEl.textContent=m;toastEl.classList.add('show');clearTimeout(toastEl._t);toastEl._t=setTimeout(()=>toastEl.classList.remove('show'),2600)}
 const analysisSectionMarkers={};
-['indicators-section','strategies-section'].forEach(id=>{const node=$(id);if(!node||!node.parentNode)return;const marker=document.createComment('mmc-home-'+id);node.parentNode.insertBefore(marker,node);analysisSectionMarkers[id]=marker;});
-function restoreAnalysisSections(){Object.entries(analysisSectionMarkers).forEach(([id,marker])=>{const node=$(id),host=$('analysis-modal-host');if(node&&host&&host.contains(node)&&marker.parentNode)marker.parentNode.insertBefore(node,marker.nextSibling);});}
+['indicators-section','strategies-section'].forEach(id=>{const node=$(id);if(!node||!node.parentNode)return;const marker=document.createComment('mmc-home-'+id);node.parentNode.insertBefore(marker,node);analysisSectionMarkers[id]=marker;node.hidden=true;});
+function restoreAnalysisSections(){Object.entries(analysisSectionMarkers).forEach(([id,marker])=>{const node=$(id),host=$('analysis-modal-host');if(node&&host&&host.contains(node)&&marker.parentNode)marker.parentNode.insertBefore(node,marker.nextSibling);if(node)node.hidden=true;});}
 function modalOpen(title,body,extra=''){restoreAnalysisSections();window.__mmcModalPageScrollY=window.scrollY;$('modal-title').textContent=title;$('modal-body').textContent=body;$('modal-extra').innerHTML=extra;modal.querySelector('.modal-card')?.classList.remove('performance-modal','analysis-modal');modal.classList.add('open')}
 function closeModal(){restoreAnalysisSections();modal.classList.remove('open');modal.querySelector('.modal-card')?.classList.remove('performance-modal','analysis-modal');const y=Number(window.__mmcModalPageScrollY||0);document.documentElement.style.scrollBehavior='auto';window.scrollTo(0,y);requestAnimationFrame(()=>document.documentElement.style.removeProperty('scroll-behavior'))}
-function openAnalysisModal(sectionId){const section=$(sectionId);if(!section)return;const title=sectionId==='indicators-section'?'▦ Quotex Indicators':'♜ MMC Strategy & 22 Concepts';modalOpen(title,'নির্বাচিত মার্কেটের সর্বশেষ closed-candle data দিয়ে গণনা করা ফলাফল।','<div id="analysis-modal-host"></div>');modal.querySelector('.modal-card')?.classList.add('analysis-modal');$('analysis-modal-host')?.appendChild(section);$('modal-extra').scrollTop=0;loadLiveAnalysis();}
+function openAnalysisModal(sectionId){const section=$(sectionId);if(!section)return;const title=sectionId==='indicators-section'?'▦ Indicators':'♜ MMC Strategy & 22 Concepts';modalOpen(title,'নির্বাচিত মার্কেটের সর্বশেষ closed-candle data দিয়ে গণনা করা ফলাফল।','<div id="analysis-modal-host"></div>');modal.querySelector('.modal-card')?.classList.add('analysis-modal');section.hidden=false;$('analysis-modal-host')?.appendChild(section);$('modal-extra').scrollTop=0;loadLiveAnalysis();}
 $('modal-close').onclick=closeModal;modal.onclick=e=>{if(e.target===modal)closeModal()};
 $('menu').onclick=()=>{$('sidebar').classList.toggle('open')};
 $('indicators-back')?.addEventListener('click',closeModal);
