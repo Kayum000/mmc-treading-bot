@@ -822,9 +822,9 @@ def _score_pending_performance_once() -> None:
             """SELECT * FROM performance
                WHERE result='অপেক্ষমাণ'
                   OR outcome_basis IS NULL
-                  OR (strategy='FOREX_STRUCTURE_PA_M1_MTF' AND outcome_basis NOT LIKE '১-মিনিট expiry%%')
-                  OR (strategy='FOREX_STRUCTURE_PA_30M_MTF' AND outcome_basis NOT LIKE '৩০-মিনিট expiry%%')
-                  OR (COALESCE(strategy, '') NOT IN ('FOREX_STRUCTURE_PA_30M_MTF','FOREX_STRUCTURE_PA_M1_MTF') AND outcome_basis NOT LIKE '৫-মিনিট expiry%%')
+                  OR (strategy='FOREX_STRUCTURE_PA_M1_MTF' AND outcome_basis NOT LIKE '1-মিনিট expiry%%')
+                  OR (strategy='FOREX_STRUCTURE_PA_30M_MTF' AND outcome_basis NOT LIKE '30-মিনিট expiry%%')
+                  OR (COALESCE(strategy, '') NOT IN ('FOREX_STRUCTURE_PA_30M_MTF','FOREX_STRUCTURE_PA_M1_MTF') AND outcome_basis NOT LIKE '5-মিনিট expiry%%')
                   OR (result IN ('লাভ','লস','DOJI') AND result_notified=0)
                ORDER BY updated_at DESC LIMIT 200"""
         ).fetchall()]
