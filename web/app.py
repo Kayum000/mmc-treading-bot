@@ -579,6 +579,20 @@ def indicator_analysis_api():
             or value.get("signal") in {None, "N/A"}
         ]
         mmc = result.get("mmc_analysis", {}) or {}
+        confirmation_matrix = mmc.get("technical_confirmation_127", {}) if isinstance(mmc, dict) else {}
+        confirmation_checks = confirmation_matrix.get("checks", {}) if isinstance(confirmation_matrix, dict) else {}
+        if confirmation_checks:
+            indicator_items = {
+                name: {"value": 1 if vote == "BUY" else -1 if vote == "SELL" else 0,
+                       "signal": vote, "minimum_candles": 200, "data_source": "completed 1m OHLC"}
+                for name, vote in confirmation_checks.items()
+            }
+            indicator_set = {"available": True, "count": len(indicator_items), "indicators": indicator_items,
+                             "buy_votes": confirmation_matrix.get("buy", 0),
+                             "sell_votes": confirmation_matrix.get("sell", 0),
+                             "neutral_votes": confirmation_matrix.get("neutral", 0)}
+            indicator_valid = [name for name, value in indicator_items.items() if value.get("signal") not in {"N/A", None}]
+            indicator_unavailable = []
         concept_votes = mmc.get("concepts", {}) if isinstance(mmc, dict) else {}
         concept_unavailable = [name for name, vote in concept_votes.items() if vote == "N/A"]
         audit_key = (
@@ -607,8 +621,9 @@ def indicator_analysis_api():
             "market_mode": mode,
             "source": result.get("source"),
             "analysis_candle_time_utc": result.get("analysis_candle_time_utc"),
-            "indicator_analysis": result.get("indicator_analysis", {"available": False, "reason": "Indicator calculation unavailable"}),
-            "timeframe_analysis": timeframe_analysis,
+            "indicator_analysis": indicator_set or result.get("indicator_analysis", {"available": False, "reason": "Indicator calculation unavailable"}),
+            "timeframe_analysis": {"1m": indicator_set} if confirmation_checks else timeframe_analysis,
+            "technical_confirmation_127": confirmation_matrix,
             "mmc_analysis": mmc or {"available": False, "note": "MMC calculation unavailable"},
             "note": "Vote scores are rule-based analysis, not win probabilities or guarantees."
         })
