@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 import pandas as pd
 
 from strategy.quotex_price_action import generate_quotex_price_action_signal, _resample_closed, _structure_bias, _technical_confirmation_matrix
@@ -27,6 +28,14 @@ class OneMinuteForexStructureStrategyTests(unittest.TestCase):
     def test_flat_market_returns_hold(self):
         result = generate_quotex_price_action_signal(make_candles(900, flat=True))
         self.assertEqual(result.action, "HOLD")
+
+    def test_indicator_votes_cannot_trigger_without_price_action_setup(self):
+        matrix = {"total": 127, "buy": 127, "sell": 0, "neutral": 0,
+                  "direction": "BUY", "agreement": 1.0, "checks": {}}
+        with patch("strategy.quotex_price_action._technical_confirmation_matrix", return_value=matrix):
+            result = generate_quotex_price_action_signal(make_candles(900, flat=True))
+        self.assertEqual(result.action, "HOLD")
+        self.assertFalse(result.mmc_analysis["indicator_vote_summary"]["used_for_signal"])
 
     def test_resampling_excludes_incomplete_higher_timeframe_bar(self):
         x = make_candles(241)
