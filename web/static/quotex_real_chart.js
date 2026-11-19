@@ -1,11 +1,11 @@
 (() => {
   'use strict';
   const S = { canvas:null, poll:null, bars:[], quote:null, asset:'', lastW:0, lastH:0, loading:false };
-  const modeEl = () => document.getElementById('mode');
+  const modeEl = () => document.querySelector('.mode-btn.active');
   const pairEl = () => document.getElementById('pair');
   const chartEl = () => document.getElementById('live-market-chart');
   const wrapEl = () => chartEl()?.querySelector('.chart-canvas-wrap');
-  const realMode = () => (modeEl()?.value || '').toLowerCase() === 'real';
+  const realMode = () => String(modeEl()?.dataset?.mode || window.__mmcMarketMode || 'real').toLowerCase() === 'real';
   const assetForPair = p => String(p || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
   const num = v => { const n = Number(v); return Number.isFinite(n) ? n : NaN; };
   const ts = v => { const n = Number(v); if (!Number.isFinite(n)) return 0; return n < 1e12 ? n * 1000 : n; };
