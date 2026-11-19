@@ -1,7 +1,8 @@
-"""Indicator-confluence signal engine using 127 parameterized M1 checks.
+"""M1 price-action and market-structure signal engine.
 
-Signals are decided from completed 1-minute OHLC candles. M5/M15 structure is
-displayed as context only and does not veto the indicator direction.
+Signals come from completed-candle liquidity sweeps, BOS and level rejections.
+The 127 technical checks are calculated for the dashboard popup only; they do
+not create or override trade direction. M5/M15 provide higher-timeframe context.
 Confidence is a rule-strength heuristic, not a calibrated probability of winning.
 """
 from __future__ import annotations
@@ -179,8 +180,8 @@ def generate_quotex_price_action_signal(
     Use completed M1 candles for the setup and aggregate them into M5/M15 context.
     """
     x = _clean(candles)
-    if len(x) < 60:
-        return _hold("১-মিনিট বিশ্লেষণের জন্য কমপক্ষে ৬০টি বন্ধ candle দরকার",
+    if len(x) < 200:
+        return _hold("নির্ভরযোগ্য M1 structure ও ১২৭টি confirmation check-এর জন্য কমপক্ষে ২০০টি বন্ধ candle দরকার",
                      {"candle_count": len(x), "available": False, "analysis_timeframe": "1m", "expiry_minutes": 1})
     m1 = x
     m5 = _resample_closed(x, 5)
@@ -234,44 +235,63 @@ def generate_quotex_price_action_signal(
     if confirmations["total"] != 127:
         return _hold(f"Indicator calculation incomplete ({confirmations['total']}/127); সিগন্যাল বাদ", details)
 
-    # The 127 M1 indicator checks are the signal source. They are parameterized
-    # variants (not 127 independent indicators), so require breadth and a clear
-    # vote margin rather than treating every vote as statistically independent.
-    directional_votes = confirmations["buy"] + confirmations["sell"]
-    participation = directional_votes / confirmations["total"]
-    agreement = confirmations["agreement"]
-    net_votes = confirmations["buy"] - confirmations["sell"]
+    # Keep the 127 checks visible in the Indicators popup, but never use
+    # their vote count as a trade trigger. Direction must come from price action.
     details["indicator_vote_summary"] = {
         "source_timeframe": "1m",
         "total_checks": confirmations["total"],
         "buy_votes": confirmations["buy"],
         "sell_votes": confirmations["sell"],
         "neutral_votes": confirmations["neutral"],
-        "directional_participation": round(participation, 4),
-        "directional_agreement": agreement,
-        "net_votes": net_votes,
-        "minimum_directional_votes": 45,
-        "minimum_agreement": 0.60,
-        "minimum_net_votes": 15,
+        "used_for_signal": False,
+        "purpose": "dashboard_confirmation_display_only",
     }
-    if directional_votes < 45 or participation < (45 / 127):
-        return _hold(f"১-মিনিট indicator vote যথেষ্ট নয় ({directional_votes}/127 directional checks); অপেক্ষা", details)
-    if agreement < 0.60 or abs(net_votes) < 15:
-        return _hold(f"১-মিনিট indicator মতৈক্য দুর্বল (agreement {agreement:.0%}, net votes {net_votes}); সিগন্যাল বাদ", details)
 
-    action = "BUY" if net_votes > 0 else "SELL"
-    confidence = min(0.82, 0.58 + max(0.0, agreement - 0.60) * 0.45 + max(0.0, participation - 0.35) * 0.15)
-    setup = "INDICATOR_CONFLUENCE"
+    bullish_setups = [
+        ("LIQUIDITY_SWEEP", bullish_sweep),
+        ("BREAK_OF_STRUCTURE", bullish_bos),
+        ("LEVEL_REJECTION", bullish_rejection),
+    ]
+    bearish_setups = [
+        ("LIQUIDITY_SWEEP", bearish_sweep),
+        ("BREAK_OF_STRUCTURE", bearish_bos),
+        ("LEVEL_REJECTION", bearish_rejection),
+    ]
+    bullish_name = next((name for name, active in bullish_setups if active), None)
+    bearish_name = next((name for name, active in bearish_setups if active), None)
+
+    if bullish_name and bearish_name:
+        return _hold("একই M1 candle-এ BUY ও SELL উভয় price-action setup; direction পরিষ্কার নয়", details)
+    if not bullish_name and not bearish_name:
+        return _hold("M1 market level-এ নিশ্চিত liquidity sweep, BOS বা rejection পাওয়া যায়নি; অপেক্ষা", details)
+
+    action = "BUY" if bullish_name else "SELL"
+    setup = bullish_name or bearish_name
+    opposite = "BEARISH" if action == "BUY" else "BULLISH"
+    aligned = "BULLISH" if action == "BUY" else "BEARISH"
+    reversal = setup == "LIQUIDITY_SWEEP"
+
+    # A reversal sweep may turn the M1 structure; otherwise do not trade
+    # directly against a confirmed M1 swing sequence.
+    if bias1 == opposite and not reversal:
+        return _hold(f"M1 structure {bias1}; {action} setup structure-এর বিপরীতে, sweep নেই", details)
+    if bias5 == opposite and bias15 == opposite and not reversal:
+        return _hold(f"M5 ও M15 দুটিই {opposite}; M1 {action} setup-এর বিপক্ষে higher-timeframe context", details)
+
+    confidence = 0.62
+    confidence += 0.10 if setup == "LIQUIDITY_SWEEP" else 0.08 if setup == "BREAK_OF_STRUCTURE" else 0.06
+    confidence += 0.04 if bias1 == aligned else 0.0
+    confidence += 0.02 if bias5 == aligned or bias15 == aligned else 0.0
+    confidence = min(0.82, confidence)
     details.update({
         "direction": action,
         "setup": setup,
         "confidence": round(confidence, 4),
-        "signal_basis": "127 parameterized technical indicator checks on completed M1 candles",
-        "confirmation": f"{action} from M1 indicator confluence: {confirmations['buy']} BUY vs {confirmations['sell']} SELL votes; M5/M15 are informational only",
+        "signal_basis": "completed M1 price action: liquidity sweep, break of structure, or level rejection",
+        "confirmation": f"{action} from M1 {setup}; M1={bias1}, M5={bias5}, M15={bias15}. 127 checks are display-only.",
         "entry_invalidation_level": level_low if action == "BUY" else level_high,
     })
-    reason = (f"{action}: ১-মিনিটের ১২৭ indicator check-এ "
-              f"BUY {confirmations['buy']} / SELL {confirmations['sell']}; ১ মিনিট expiry.")
+    reason = f"{action}: M1 {setup} level setup confirmed; M5/M15 context checked; ১ মিনিট expiry."
     return PriceActionSignal(action, confidence, reason,
-                             "INDICATOR_BULLISH" if action == "BUY" else "INDICATOR_BEARISH",
+                             "PRICE_ACTION_BULLISH" if action == "BUY" else "PRICE_ACTION_BEARISH",
                              "FOREX_STRUCTURE_PA_M1_MTF", details)
