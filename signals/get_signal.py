@@ -44,8 +44,16 @@ def _hold_condition(reason: str, regime: str = "", strategy: str = "") -> str:
 def _entry_candle_time(signal_at_utc: datetime, automatic: bool, latest_closed_open=None) -> datetime:
     """Schedule entry at the next 1-minute candle boundary after closed-candle analysis."""
     current = signal_at_utc.astimezone(timezone.utc)
+    if latest_closed_open is not None:
+        latest_open = latest_closed_open.to_pydatetime() if hasattr(latest_closed_open, "to_pydatetime") else latest_closed_open
+        if latest_open.tzinfo is None:
+            latest_open = latest_open.replace(tzinfo=timezone.utc)
+        target = latest_open.astimezone(timezone.utc) + timedelta(minutes=1)
+        # Enter the candle immediately following the latest fully closed candle.
+        # If the feed is over one candle behind, skip stale entry timing.
+        if target <= current < target + timedelta(minutes=1):
+            return target
     current_boundary = current.replace(second=0, microsecond=0)
-    # A signal is never backdated into an already-open M1 candle.
     return current_boundary + timedelta(minutes=1)
 
 
