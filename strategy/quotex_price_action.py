@@ -120,13 +120,13 @@ def generate_quotex_price_action_signal(
     upper_wick = high - max(op, close)
     lower_wick = min(op, close) - low
     close_position = (close - low) / candle_range
-    tr = pd.concat([m1["high"] - m30["low"],
-                    (m30["high"] - m30["close"].shift(1)).abs(),
-                    (m30["low"] - m30["close"].shift(1)).abs()], axis=1).max(axis=1)
+    tr = pd.concat([m1["high"] - m1["low"],
+                    (m1["high"] - m1["close"].shift(1)).abs(),
+                    (m1["low"] - m1["close"].shift(1)).abs()], axis=1).max(axis=1)
     atr = float(tr.rolling(14).mean().iloc[-2])
     if not np.isfinite(atr) or atr <= 0:
-        return _hold("৩০-মিনিট price range নির্ভরযোগ্য নয়; সিগন্যাল বাদ",
-                     {"available": True, "analysis_timeframe": "30m", "expiry_minutes": 30})
+        return _hold("১-মিনিট price range নির্ভরযোগ্য নয়; সিগন্যাল বাদ",
+                     {"available": True, "analysis_timeframe": "1m", "expiry_minutes": 1})
 
     recent_high = float(prior["high"].max())
     recent_low = float(prior["low"].min())
@@ -151,7 +151,7 @@ def generate_quotex_price_action_signal(
         "liquidity_sweep": "bullish" if bullish_sweep else "bearish" if bearish_sweep else None,
         "break_of_structure": "bullish" if bullish_bos else "bearish" if bearish_bos else None,
         "confidence_basis": "rule_strength_not_win_probability",
-        "risk_note": "30m price-action setups are probabilistic; no signal guarantees profit.",
+        "risk_note": "1m price-action setups are probabilistic; no signal guarantees profit.",
     }
     if bias1 == "NEUTRAL" or bias5 == "NEUTRAL" or bias15 == "NEUTRAL":
         return _hold("১/৫/১৫-মিনিট market structure পরিষ্কার নয়; অপেক্ষা", details)
