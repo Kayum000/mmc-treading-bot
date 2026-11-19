@@ -77,7 +77,7 @@ def normalize_biquote_symbol(pair: str) -> str:
     return raw
 
 
-def fetch_biquote_candles(pair: str, count: int = 1200, interval: str = "1m") -> pd.DataFrame:
+def fetch_biquote_candles(pair: str, count: int = 1200, interval: str = "1m", require_fresh: bool = True) -> pd.DataFrame:
     """Fetch and validate completed OHLC candles for a supported provider interval."""
     symbol = normalize_biquote_symbol(pair)
     interval = str(interval or "1m").strip().lower()
@@ -121,7 +121,7 @@ def fetch_biquote_candles(pair: str, count: int = 1200, interval: str = "1m") ->
         raise RuntimeError(f"biquote has no completed {interval} candles for {symbol}.")
     latest_open = frame.iloc[-1]["timestamp"]
     max_age_seconds = max(300, interval_minutes[interval] * 60 * 2)
-    if (now - (latest_open + pd.Timedelta(minutes=interval_minutes[interval]))).total_seconds() > max_age_seconds:
+    if require_fresh and (now - (latest_open + pd.Timedelta(minutes=interval_minutes[interval]))).total_seconds() > max_age_seconds:
         raise RuntimeError(f"biquote latest completed {interval} candle is stale.")
     values = frame[["open", "high", "low", "close"]]
     if (values <= 0).any().any():
