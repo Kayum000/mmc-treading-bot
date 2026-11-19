@@ -8,17 +8,17 @@ A single-strategy market-signal engine for provider-supported real markets (Fore
 - **Quotex OTC:** signals use closed candles from the selected OTC market collected from the user's authenticated Quotex browser session. OTC is not substituted with Forex prices.
 - The provider quote is a live bid/ask midpoint; the strategy analyzes only completed provider candles. biquote/OANDA prices may differ from Quotex prices, and this integration does not place trades.
 - Real-market and Quotex OTC signals route through `generate_quotex_price_action_signal()` from `strategy/quotex_price_action.py` via `signals/get_signal.py`. biquote is a separate real-market feed and does not claim its prices exactly match Quotex's feed or OTC prices.
-- The live strategy analyzes completed 30-minute candles with completed 1-hour market-structure context. biquote supplies native M30/H1 candles; OANDA and the Quotex collector may derive those timeframes from completed 1-minute candles. It checks confirmed swing highs/lows (HH/HL or LH/LL), support/resistance, liquidity sweeps/reclaims, break of structure, and supply/demand rejection. It does not use indicator votes to decide direction.
-- BUY/SELL requires aligned directional structure on both 30m and 1h plus a matching 30m price-action setup. Neutral/conflicting context, weak candles, insufficient history, or missing confluence returns HOLD (no signal).
-- Actionable signals are scheduled for the next 30-minute candle boundary and expire 30 minutes after that entry boundary. Performance scoring compares the entry-minute open with the close of the 1-minute candle ending at entry + 30 minutes for `FOREX_STRUCTURE_PA_30M_MTF` signals. Legacy strategies retain their 5-minute scoring rule. This is an OHLC-based historical fill proxy; spread, slippage, broker execution, and payout are not modeled. The bot does not place trades or guarantee profitability.
+- The live strategy analyzes each completed 1-minute candle, with completed 5-minute and 15-minute market-structure context. It checks confirmed swing highs/lows (HH/HL or LH/LL), support/resistance, liquidity sweeps/reclaims, break of structure, and supply/demand rejection. It does not use indicator votes to decide direction.
+- BUY/SELL requires aligned directional structure on 1m, 5m and 15m plus a matching 1m price-action setup. Neutral/conflicting context, weak candles, insufficient history, or missing confluence returns HOLD (no signal).
+- Actionable signals are scheduled for the next 1-minute candle boundary and expire 1 minute after that entry boundary. Performance scoring compares the entry-minute open with the close of the 1-minute candle ending at entry + 1 minute for `FOREX_STRUCTURE_PA_M1_MTF` signals. Historical M30 signals retain their 30-minute scoring; legacy strategies retain their 5-minute scoring rule. This is an OHLC-based historical fill proxy; spread, slippage, broker execution, and payout are not modeled. The bot does not place trades or guarantee profitability.
 
 ## Entry timing
 
-Signals are prepared for the upcoming 30-minute entry candle. The latest fully closed M30 candle is used for analysis, and the entry is scheduled at the next 30-minute boundary. Actionable signals expose `expiry_minutes=30` and an expiry timestamp 30 minutes after the scheduled entry boundary.
+Signals are prepared for the upcoming 1-minute entry candle. The latest fully closed M1 candle is used for analysis, with M5/M15 context built only from completed M1 candles. Actionable signals expose `expiry_minutes=1` and an expiry timestamp one minute after the scheduled entry boundary.
 
 ## Performance
 
-Performance for the current M30 strategy is scored after the 30-minute expiry using the entry-minute open as a historical fill proxy and the close of the 1-minute candle ending at entry + 30 minutes:
+Performance for the current M1 strategy is scored after the 1-minute expiry using the entry-minute open as a historical fill proxy and the close of the 1-minute candle ending at entry + 1 minute. Historical M30 and legacy 5-minute strategy records retain their original expiry rules:
 
 - BUY + expiry close above entry-minute open → লাভ
 - BUY + expiry close below entry-minute open → লস
