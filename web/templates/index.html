@@ -307,7 +307,7 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
 <div class="modal" id="modal"><div class="modal-card"><button class="modal-close" id="modal-close">×</button><h3 id="modal-title">Notice</h3><p id="modal-body">—</p><div id="modal-extra"></div></div></div><div class="toast" id="toast"></div>
 <script src="{{ url_for('static',filename='signal_alert.js') }}?v=20261012-confidence-gate-5"></script>
 <script src="{{ url_for('static',filename='candle_timer.js') }}?v=20261012-clean-1"></script>
-<script src="{{ url_for('static',filename='live_stream_chart.js') }}?v=20261119-livechart-fix2"></script>
+<script src="{{ url_for('static',filename='live_stream_chart.js') }}?v=20261119-livechart-fix3"></script>
 <script>
 (()=>{
 'use strict';
@@ -839,7 +839,7 @@ ensurePerformanceCard();
   }).catch(()=>{if(state.auto)$('auto-status').textContent='AUTO SIGNAL চালু • মার্কেট সিঙ্ক হয়নি'});
 })();
 
-function updateChartSelection(){window.dispatchEvent(new Event('mmc-market-changed'))}
+function updateChartSelection(){window.dispatchEvent(new Event('mmc-market-changed'));window.__mmcLiveChartRefresh?.()}
 const MMC_THEMES=[
   {id:'ocean',name:'Ocean Blue',sub:'বর্তমান',bg:'#06172e',side:'#061426',panel:'#071f3a',panel2:'#061a31',border:'#12365d',accent:'#1684ee',accent2:'#0759ba',soft:'#0a2440'},
   {id:'royal',name:'Royal Purple',sub:'Purple',bg:'#170d2e',side:'#120a25',panel:'#24133f',panel2:'#1b1031',border:'#4b2a70',accent:'#9b5cff',accent2:'#6d28d9',soft:'#2b1749'},
