@@ -240,10 +240,10 @@ def generate_quotex_price_action_signal(
         return _hold(f"Technical confirmation calculation incomplete ({confirmations['total']}/127); সিগন্যাল বাদ", details)
     if confirmations["agreement"] < 0.55:
         return _hold(f"১২৭টি confirmation-এ directional agreement মাত্র {confirmations['agreement']:.0%} (প্রয়োজন ৫৫%); সিগন্যাল বাদ", details)
-    if bias1 == "NEUTRAL" or bias5 == "NEUTRAL" or bias15 == "NEUTRAL":
-        return _hold("১/৫/১৫-মিনিট market structure পরিষ্কার নয়; অপেক্ষা", details)
-    if not (bias1 == bias5 == bias15):
-        return _hold("১/৫/১৫-মিনিট market structure পরস্পরবিরোধী; সিগন্যাল বাদ", details)
+    # M1 is the decision timeframe. M5/M15 are informational context only
+    # and must never veto a valid, confirmed M1 setup.
+    if bias1 == "NEUTRAL":
+        return _hold("১-মিনিট market structure পরিষ্কার নয়; অপেক্ষা", details)
     if body < 0.18 * atr or candle_range < 0.25 * atr:
         return _hold("১-মিনিট confirmation candle দুর্বল/Doji; সিগন্যাল বাদ", details)
 
@@ -258,7 +258,7 @@ def generate_quotex_price_action_signal(
         action = "SELL"
         setup = "LIQUIDITY_SWEEP_RECLAIM" if bearish_sweep else "BREAK_OF_STRUCTURE" if bearish_bos else "SUPPLY_REJECTION"
     else:
-        return _hold("৫/১৫-মিনিট bias ও ১-মিনিট confirmation একদিকে মেলেনি; সিগন্যাল বাদ", details)
+        return _hold("১-মিনিট market structure, price-action setup ও ১২৭ confirmation একদিকে মেলেনি; সিগন্যাল বাদ", details)
 
     confidence = 0.70
     if (bullish_sweep if action == "BUY" else bearish_sweep):
@@ -269,9 +269,9 @@ def generate_quotex_price_action_signal(
         confidence += 0.04
     confidence = min(0.85, confidence)
     details.update({"direction": action, "setup": setup, "confidence": confidence,
-                    "confirmation": f"{bias15} 15m + {bias5} 5m + {bias1} 1m structure aligned with 1m {setup.lower()}",
+                    "confirmation": f"{bias1} 1m structure aligned with 1m {setup.lower()}; M5/M15 context is informational",
                     "entry_invalidation_level": level_low if action == "BUY" else level_high})
-    reason = f"{action}: ১/৫/১৫-মিনিট structure aligned; ১-মিনিটে {setup} confirmation; ১ মিনিট expiry."
+    reason = f"{action}: ১-মিনিট structure ও {setup} confirmation; ১ মিনিট expiry."
     return PriceActionSignal(action, confidence, reason,
                              "PA_BULLISH" if action == "BUY" else "PA_BEARISH",
                              "FOREX_STRUCTURE_PA_M1_MTF", details)
