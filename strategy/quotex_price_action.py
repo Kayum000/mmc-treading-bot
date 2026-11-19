@@ -147,6 +147,23 @@ def _technical_confirmation_matrix(x: pd.DataFrame) -> dict:
     for p in (10,14,20,30,50):
         top,bottom=high.rolling(p).max().iloc[-1],low.rolling(p).min().iloc[-1]
         add(f"DONCHIAN_{p}",close.iloc[-1]-(top+bottom)/2)
+    # 4 ADX directional checks using +DI/-DI across common M1 periods.
+    up_move=high.diff()
+    down_move=-low.diff()
+    plus_dm=up_move.where((up_move>down_move)&(up_move>0),0.0)
+    minus_dm=down_move.where((down_move>up_move)&(down_move>0),0.0)
+    tr=pd.concat([high-low,(high-close.shift(1)).abs(),(low-close.shift(1)).abs()],axis=1).max(axis=1)
+    for p in (7,10,14,20):
+        atr_p=tr.ewm(alpha=1/p,adjust=False,min_periods=p).mean()
+        plus_di=100*plus_dm.ewm(alpha=1/p,adjust=False,min_periods=p).mean()/atr_p.replace(0,np.nan)
+        minus_di=100*minus_dm.ewm(alpha=1/p,adjust=False,min_periods=p).mean()/atr_p.replace(0,np.nan)
+        add(f"ADX_DI_{p}",plus_di.iloc[-1]-minus_di.iloc[-1])
+    # 4 Williams %R checks across different lookbacks.
+    for p in (7,10,14,20):
+        hh=high.rolling(p).max().iloc[-1]
+        ll=low.rolling(p).min().iloc[-1]
+        williams=-100*(hh-close.iloc[-1])/max(float(hh-ll),1e-12)
+        add(f"WILLIAMS_R_{p}",williams+50)
     items=list(votes.items())
     buy=sum(v==1 for _,v in items); sell=sum(v==-1 for _,v in items); neutral=sum(v==0 for _,v in items)
     return {"total":len(items),"buy":buy,"sell":sell,"neutral":neutral,
@@ -221,8 +238,10 @@ def generate_quotex_price_action_signal(
         "confidence_basis": "rule_strength_not_win_probability",
         "risk_note": "1m price-action setups are probabilistic; no signal guarantees profit.",
     }
-    if confirmations["total"] != 127 or confirmations["agreement"] < 0.60:
-        return _hold("১২৭টি Technical Confirmation-এ যথেষ্ট directional agreement নেই; সিগন্যাল বাদ", details)
+    if confirmations["total"] != 127:
+        return _hold(f"Technical confirmation calculation incomplete ({confirmations['total']}/127); সিগন্যাল বাদ", details)
+    if confirmations["agreement"] < 0.55:
+        return _hold(f"১২৭টি confirmation-এ directional agreement মাত্র {confirmations['agreement']:.0%} (প্রয়োজন ৫৫%); সিগন্যাল বাদ", details)
     if bias1 == "NEUTRAL" or bias5 == "NEUTRAL" or bias15 == "NEUTRAL":
         return _hold("১/৫/১৫-মিনিট market structure পরিষ্কার নয়; অপেক্ষা", details)
     if not (bias1 == bias5 == bias15):
