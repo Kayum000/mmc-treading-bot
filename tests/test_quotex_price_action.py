@@ -18,11 +18,11 @@ def make_candles(count=240, flat=False):
     return pd.DataFrame(rows)
 
 
-class ForexStructureStrategyTests(unittest.TestCase):
+class OneMinuteForexStructureStrategyTests(unittest.TestCase):
     def test_insufficient_history_returns_hold(self):
         result = generate_quotex_price_action_signal(make_candles(90))
         self.assertEqual(result.action, "HOLD")
-        self.assertEqual(result.mmc_analysis["expiry_minutes"], 30)
+        self.assertEqual(result.mmc_analysis["expiry_minutes"], 1)
 
     def test_flat_market_returns_hold(self):
         result = generate_quotex_price_action_signal(make_candles(900, flat=True))
