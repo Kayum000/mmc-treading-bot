@@ -42,12 +42,11 @@ def _hold_condition(reason: str, regime: str = "", strategy: str = "") -> str:
 
 
 def _entry_candle_time(signal_at_utc: datetime, automatic: bool, latest_closed_open=None) -> datetime:
-    """Schedule entry at the next 30-minute candle boundary after closed-candle analysis."""
+    """Schedule entry at the next 1-minute candle boundary after closed-candle analysis."""
     current = signal_at_utc.astimezone(timezone.utc)
-    minute_of_hour = (current.minute // 30) * 30
-    current_boundary = current.replace(minute=minute_of_hour, second=0, microsecond=0)
-    # A signal is never backdated into an already-open M30 candle.
-    return current_boundary + timedelta(minutes=30)
+    current_boundary = current.replace(second=0, microsecond=0)
+    # A signal is never backdated into an already-open M1 candle.
+    return current_boundary + timedelta(minutes=1)
 
 
 def _entry_delay_seconds(signal_at_utc: datetime, entry_at_utc: datetime) -> int:
@@ -68,17 +67,15 @@ def _biquote_real_signal(pair: str, automatic: bool) -> dict:
         from data.biquote import fetch_biquote_candles, fetch_biquote_quote, normalize_biquote_symbol
         symbol = normalize_biquote_symbol(pair)
         candles = fetch_biquote_candles(symbol, count=1200, interval="1m")
-        candles_30m = fetch_biquote_candles(symbol, count=100, interval="30m")
-        candles_1h = fetch_biquote_candles(symbol, count=100, interval="1h")
         live_quote = fetch_biquote_quote(symbol)
-        source_label = "biquote live bid/ask + completed M30/H1 OHLC candles"
+        source_label = "biquote live bid/ask + completed M1 OHLC candles"
     else:
         raise RuntimeError("MARKET_DATA_PROVIDER must be 'biquote' or 'oanda'.")
     signal_at_utc = datetime.now(timezone.utc)
     latest = candles.iloc[-1]
     latest_open = latest["timestamp"]
     signal_candle = _entry_candle_time(signal_at_utc, automatic, latest_open)
-    result = generate_quotex_price_action_signal(candles, candles_30m=candles_30m if provider == "biquote" else None, candles_1h=candles_1h if provider == "biquote" else None)
+    result = generate_quotex_price_action_signal(candles)
     signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
     is_entry = result.action in {"BUY", "SELL"}
     score = int(round(float(result.confidence) * 100)) if is_entry else 0
@@ -108,8 +105,8 @@ def _biquote_real_signal(pair: str, automatic: bool) -> dict:
         "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds") if is_entry else None,
         "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S") if is_entry else None,
         "entry_delay_seconds": _entry_delay_seconds(signal_at_utc, signal_candle) if is_entry else None,
-        "timeframe": f"30-minute/{result.strategy.lower()}",
-        "entry_timeframe": "next 30-minute candle after closed-candle analysis",
+        "timeframe": f"1-minute/{result.strategy.lower()}",
+        "entry_timeframe": "next 1-minute candle after closed-candle analysis",
         "automatic": automatic, "confidence": result.confidence,
         "mmc_level_type": None, "mmc_level_price": None,
         "regime": result.regime, "strategy": result.strategy,
@@ -165,7 +162,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
             score = int(round(float(result.confidence) * 100))
             is_entry = result.action in {"BUY", "SELL"}
             signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
-            return {"pair": pair, "requested_pair": pair, "market_mode": "real", "source": "Quotex Real Market browser WebSocket", "signal": result.action, "market_bias": result.action, "entry_signal": result.action, "buy_score": score if result.action == "BUY" else 0, "sell_score": score if result.action == "SELL" else 0, "reason": _bengali_reason(f"[{result.regime} / {result.strategy}] {result.reason}"), "hold_condition": _hold_condition(result.reason, result.regime, result.strategy) if result.action == "HOLD" else None, "signal_created_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None, "signal_created_bd": signal_at_utc.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None, "signal_time_utc": signal_candle.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": signal_candle.isoformat(timespec="seconds"), "analysis_candle_time_utc": None, "entry_price": None, "entry_price_type": "closed_candle_model", "entry_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_delay_seconds": 0, "timeframe": "30-minute closed-candle price action", "entry_timeframe": "next 30-minute candle after closed-candle analysis", "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None, "regime": result.regime, "strategy": result.strategy, "strategy_mode": "quotex_price_action", "mmc_analysis": result.mmc_analysis}
+            return {"pair": pair, "requested_pair": pair, "market_mode": "real", "source": "Quotex Real Market browser WebSocket", "signal": result.action, "market_bias": result.action, "entry_signal": result.action, "buy_score": score if result.action == "BUY" else 0, "sell_score": score if result.action == "SELL" else 0, "reason": _bengali_reason(f"[{result.regime} / {result.strategy}] {result.reason}"), "hold_condition": _hold_condition(result.reason, result.regime, result.strategy) if result.action == "HOLD" else None, "signal_created_utc": signal_at_utc.isoformat(timespec="seconds") if is_entry else None, "signal_created_bd": signal_at_utc.astimezone(timezone(timedelta(hours=6))).strftime("%d %b %Y, %H:%M:%S") if is_entry else None, "signal_time_utc": signal_candle.isoformat(timespec="seconds"), "signal_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "candle_time": signal_candle.isoformat(timespec="seconds"), "analysis_candle_time_utc": None, "entry_price": None, "entry_price_type": "closed_candle_model", "entry_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_candle_time_utc": signal_candle.isoformat(timespec="seconds"), "entry_candle_time_bd": signal_bd.strftime("%d %b %Y, %H:%M:%S"), "entry_delay_seconds": 0, "timeframe": "1-minute closed-candle price action", "entry_timeframe": "next 30-minute candle after closed-candle analysis", "automatic": automatic, "confidence": result.confidence, "mmc_level_type": None, "mmc_level_price": None, "regime": result.regime, "strategy": result.strategy, "strategy_mode": "quotex_price_action", "mmc_analysis": result.mmc_analysis}
         return {
             "pair": pair, "requested_pair": pair, "market_mode": "real",
             "source": "Quotex Real Market browser WebSocket", "signal": "HOLD",
@@ -187,7 +184,7 @@ def _real_signal(pair: str, automatic: bool) -> dict:
 
     analysis_candle_time = candles.iloc[-1]["timestamp"]
     result = generate_quotex_price_action_signal(candles)
-    timeframe = f"30-minute/{result.strategy.lower()}"
+    timeframe = f"1-minute/{result.strategy.lower()}"
     regime = result.regime
     strategy_name = result.strategy
     signal_bd = signal_candle.astimezone(timezone(timedelta(hours=6)))
@@ -301,18 +298,18 @@ def get_signal(pair: str, market_mode: str = "real", automatic: bool = False, st
     else:
         raise ValueError("Unsupported market mode")
 
-    # All actionable entries use a thirty-minute expiry measured from the scheduled
+    # All actionable entries use a one-minute expiry measured from the scheduled
     # entry candle boundary. HOLD states never expose a fake expiry timestamp.
-    result["expiry_minutes"] = 30
+    result["expiry_minutes"] = 1
     entry_stamp = result.get("signal_time_utc") or result.get("entry_time_utc")
     if result.get("signal") in {"BUY", "SELL"} and entry_stamp:
         entry_dt = pd.to_datetime(entry_stamp, utc=True, errors="coerce")
         if not pd.isna(entry_dt):
-            expiry_dt = entry_dt + pd.Timedelta(minutes=30)
+            expiry_dt = entry_dt + pd.Timedelta(minutes=1)
             result["expiry_time_utc"] = expiry_dt.isoformat(timespec="seconds")
             result["expiry_time_bd"] = expiry_dt.tz_convert("Asia/Dhaka").strftime("%d %b %Y, %H:%M:%S")
     else:
         result["expiry_time_utc"] = None
         result["expiry_time_bd"] = None
-    result["entry_timeframe"] = "৩০-মিনিট closed-candle analysis; ৩০ মিনিট expiry"
+    result["entry_timeframe"] = "১-মিনিট closed-candle analysis; ১ মিনিট expiry"
     return result
