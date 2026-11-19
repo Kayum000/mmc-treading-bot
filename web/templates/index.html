@@ -301,6 +301,9 @@ html:has(.modal.open .performance-modal),body:has(.modal.open .performance-modal
     <article class="indicator-card" data-category="oscillator" data-name="Williams %R"><div class="indicator-card-top"><h3>Williams %R</h3></div><span class="indicator-category">Oscillator / Momentum</span><div class="indicator-summary">Shows close location within a recent high-low range.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
     <article class="indicator-card" data-category="oscillator" data-name="Weis Waves Volume Oscillator"><div class="indicator-card-top"><h3>Weis Waves Volume Oscillator</h3></div><span class="indicator-category">Oscillator / Volume</span><div class="indicator-summary">Uses signed 5/20-candle volume/tick-count proxy; requires recent tick history and is not full Weis-wave segmentation.</div><span class="indicator-state">Live value: waiting for candle data</span></article>
   </div>
+  <div class="indicators-head" style="margin-top:18px"><div><h3>127 Technical Confirmation Checks — M1</h3><p>প্রতিটি বন্ধ ১-মিনিট candle থেকে ১২৭টি parameterized confirmation vote।</p></div></div>
+  <div id="confirmation127-summary" class="indicators-count">Waiting for M1 analysis…</div>
+  <div id="confirmation127-list" class="indicator-grid"></div>
 </section>
 <section class="indicators-panel" id="strategies-section" aria-labelledby="strategies-title">
   <div class="indicators-head">
@@ -458,6 +461,13 @@ async function loadLiveAnalysis(){
     });
     const fmtSignal=s=>s==='BUY'?'BUY vote':s==='SELL'?'SELL vote':s==='DETECTED'?'DETECTED':s==='NEUTRAL'?'NEUTRAL':'N/A';
     const mmc=data.mmc_analysis||{};
+    const matrix=mmc.technical_confirmation_127||{};
+    const matrixList=$('confirmation127-list'), matrixSummary=$('confirmation127-summary');
+    if(matrixList&&matrix.checks){
+      const entries=Object.entries(matrix.checks);
+      matrixSummary.textContent='Total '+(matrix.total||entries.length)+' · BUY '+(matrix.buy||0)+' · SELL '+(matrix.sell||0)+' · Neutral '+(matrix.neutral||0)+' · Agreement '+Math.round((matrix.agreement||0)*100)+'%';
+      matrixList.innerHTML=entries.map(([name,vote])=>'<article class="indicator-card"><div class="indicator-card-top"><h3>'+escapeHtml(name)+'</h3></div><span class="indicator-category">M1 confirmation</span><span class="indicator-state">'+escapeHtml(vote)+' vote</span></article>').join('');
+    }else if(matrixSummary){matrixSummary.textContent='127 M1 confirmations unavailable';}
     const conceptVotes=mmc.concepts||{};
     const conceptAliases={
       'buy side liquidity bsl':'Buy-Side Liquidity',
