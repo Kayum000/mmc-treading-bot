@@ -543,8 +543,8 @@ def auto_signal():
             f"confidence={result.get('confidence', 'N/A')} "
             f"analysis_candle={result.get('analysis_candle_time_utc') or 'N/A'} "
             f"candle_count={analysis.get('candle_count', analysis.get('count', 'N/A'))} "
-            f"m30_count={analysis.get('m30_count', 'N/A')} h1_count={analysis.get('h1_count', 'N/A')} "
-            f"bias_30m={analysis.get('bias_30m', 'N/A')} bias_1h={analysis.get('bias_1h', 'N/A')} "
+            f"m1_count={analysis.get('m1_count', 'N/A')} m5_count={analysis.get('m5_count', 'N/A')} m15_count={analysis.get('m15_count', 'N/A')} "
+            f"bias_1m={analysis.get('bias_1m', 'N/A')} bias_5m={analysis.get('bias_5m', 'N/A')} bias_15m={analysis.get('bias_15m', 'N/A')} "
             f"setup={analysis.get('setup', 'N/A')} reason={str(result.get('reason') or 'N/A')[:220]}",
             flush=True,
         )
@@ -822,8 +822,9 @@ def _score_pending_performance_once() -> None:
             """SELECT * FROM performance
                WHERE result='অপেক্ষমাণ'
                   OR outcome_basis IS NULL
+                  OR (strategy='FOREX_STRUCTURE_PA_M1_MTF' AND outcome_basis NOT LIKE '১-মিনিট expiry%%')
                   OR (strategy='FOREX_STRUCTURE_PA_30M_MTF' AND outcome_basis NOT LIKE '৩০-মিনিট expiry%%')
-                  OR (COALESCE(strategy, '') != 'FOREX_STRUCTURE_PA_30M_MTF' AND outcome_basis NOT LIKE '৫-মিনিট expiry%%')
+                  OR (COALESCE(strategy, '') NOT IN ('FOREX_STRUCTURE_PA_30M_MTF','FOREX_STRUCTURE_PA_M1_MTF') AND outcome_basis NOT LIKE '৫-মিনিট expiry%%')
                   OR (result IN ('লাভ','লস','DOJI') AND result_notified=0)
                ORDER BY updated_at DESC LIMIT 200"""
         ).fetchall()]
@@ -840,10 +841,11 @@ def _score_pending_performance_once() -> None:
         entry_epoch = _utc_epoch(row.get("signal_time_utc"))
         if signal not in {"BUY", "SELL"} or not pair or entry_epoch is None:
             continue
-        # Keep pending rows eligible for a retry. M30 strategy signals expire
-        # after 30 minutes; legacy strategies retain their original 5-minute expiry.
+        # Keep pending rows eligible for a retry. Preserve historical M30 and legacy
+        # 5m strategies; the current M1 strategy expires after one minute.
         key = (mode, pair)
-        expiry_minutes = 30 if str(row.get("strategy") or "").upper() == "FOREX_STRUCTURE_PA_30M_MTF" else 5
+        strategy_name = str(row.get("strategy") or "").upper()
+        expiry_minutes = 1 if strategy_name == "FOREX_STRUCTURE_PA_M1_MTF" else 30 if strategy_name == "FOREX_STRUCTURE_PA_30M_MTF" else 5
         entry_minute = int(entry_epoch // 60) * 60
         expiry_epoch = entry_minute + expiry_minutes * 60
         if now < expiry_epoch:
