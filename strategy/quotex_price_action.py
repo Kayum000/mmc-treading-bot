@@ -88,6 +88,72 @@ def _structure_bias(x: pd.DataFrame) -> tuple[str, dict]:
     return "NEUTRAL", info
 
 
+
+def _technical_confirmation_matrix(x: pd.DataFrame) -> dict:
+    """Return 127 parameterized technical checks over completed M1 OHLC candles."""
+    close, high, low = x["close"], x["high"], x["low"]
+    votes: dict[str, int] = {}
+    def add(name: str, value) -> None:
+        try:
+            n=float(value)
+            votes[name]=1 if n>0 else -1 if n<0 else 0
+        except (TypeError,ValueError):
+            votes[name]=0
+    for p in (5,8,9,10,12,13,20,21,26,34,50,55,89,100,144,200):
+        e=close.ewm(span=p,adjust=False,min_periods=p).mean()
+        add(f"Price_vs_EMA_{p}",close.iloc[-1]-e.iloc[-1])
+    for p in (5,8,9,10,12,13,20,21,26,34,50,55,89,100,144,200):
+        ma=close.rolling(p,min_periods=p).mean()
+        add(f"Price_vs_SMA_{p}",close.iloc[-1]-ma.iloc[-1])
+    for fast,slow in ((5,10),(8,13),(9,21),(10,20),(12,26),(13,34),(20,50),(21,55),(50,100),(50,200)):
+        ef=close.ewm(span=fast,adjust=False,min_periods=fast).mean().iloc[-1]
+        es=close.ewm(span=slow,adjust=False,min_periods=slow).mean().iloc[-1]
+        add(f"EMA_{fast}_{slow}",ef-es)
+    for fast,slow in ((5,10),(8,13),(9,21),(10,20),(12,26),(13,34),(20,50),(21,55),(50,100),(50,200)):
+        sf=close.rolling(fast,min_periods=fast).mean().iloc[-1]
+        ss=close.rolling(slow,min_periods=slow).mean().iloc[-1]
+        add(f"SMA_{fast}_{slow}",sf-ss)
+    delta=close.diff()
+    gain,loss=delta.clip(lower=0),-delta.clip(upper=0)
+    for p in (6,7,9,14,21):
+        ag=gain.ewm(alpha=1/p,adjust=False,min_periods=p).mean().iloc[-1]
+        al=loss.ewm(alpha=1/p,adjust=False,min_periods=p).mean().iloc[-1]
+        rsi=100-100/(1+float(ag)/max(float(al),1e-12))
+        for threshold in (45,50,55,60,65):
+            add(f"RSI_{p}_{threshold}",rsi-threshold)
+    for fast,slow,sig in ((5,13,4),(6,19,5),(8,17,6),(8,21,5),(10,20,7),(12,26,9),(15,30,9),(19,39,9)):
+        line=close.ewm(span=fast,adjust=False).mean()-close.ewm(span=slow,adjust=False).mean()
+        signal=line.ewm(span=sig,adjust=False).mean()
+        add(f"MACD_{fast}_{slow}_{sig}",line.iloc[-1]-signal.iloc[-1])
+    for k,d in ((5,3),(7,3),(9,3),(10,3),(14,3),(14,5),(21,5),(8,3)):
+        ll,hh=low.rolling(k).min().iloc[-1],high.rolling(k).max().iloc[-1]
+        pctk=100*(close.iloc[-1]-ll)/max(float(hh-ll),1e-12)
+        add(f"STOCH_{k}_{d}",pctk-50)
+    tp=(high+low+close)/3
+    for p,level in ((10,-100),(10,100),(14,-100),(14,100),(20,-100),(20,100),(30,-100),(30,100)):
+        sma=tp.rolling(p).mean()
+        mad=tp.rolling(p).apply(lambda a: np.mean(np.abs(a-np.mean(a))),raw=True)
+        cci=(tp-sma)/(0.015*mad.replace(0,np.nan))
+        add(f"CCI_{p}_{level}",cci.iloc[-1]-level)
+    for p in (3,5,7,9,12,14,20,26):
+        add(f"ROC_{p}",(close.iloc[-1]/close.iloc[-1-p]-1)*100 if len(close)>p else 0)
+    for p in (3,5,7,9,12,14,20,26):
+        add(f"MOMENTUM_{p}",close.iloc[-1]-close.iloc[-1-p] if len(close)>p else 0)
+    for p,mult in ((10,2.0),(14,2.0),(20,2.0),(20,2.5),(30,2.0)):
+        mid=close.rolling(p).mean().iloc[-1]
+        sd=close.rolling(p).std(ddof=0).iloc[-1]
+        upper,lower=mid+mult*sd,mid-mult*sd
+        add(f"BOLLINGER_{p}_{mult}",close.iloc[-1]-upper if close.iloc[-1]>upper else close.iloc[-1]-lower if close.iloc[-1]<lower else close.iloc[-1]-mid)
+    for p in (10,14,20,30,50):
+        top,bottom=high.rolling(p).max().iloc[-1],low.rolling(p).min().iloc[-1]
+        add(f"DONCHIAN_{p}",close.iloc[-1]-(top+bottom)/2)
+    items=list(votes.items())
+    buy=sum(v==1 for _,v in items); sell=sum(v==-1 for _,v in items); neutral=sum(v==0 for _,v in items)
+    return {"total":len(items),"buy":buy,"sell":sell,"neutral":neutral,
+            "direction":"BUY" if buy>sell else "SELL" if sell>buy else "NEUTRAL",
+            "agreement":round(max(buy,sell)/max(buy+sell,1),4),
+            "checks":{n:("BUY" if v==1 else "SELL" if v==-1 else "NEUTRAL") for n,v in items}}
+
 def generate_quotex_price_action_signal(
     candles: pd.DataFrame,
     candles_30m: pd.DataFrame | None = None,
@@ -140,8 +206,10 @@ def generate_quotex_price_action_signal(
     bullish_rejection = low <= recent_low + 0.12 * atr and close > recent_low and close > op and lower_wick >= max(body, 0.25 * candle_range) and close_position >= 0.65
     bearish_rejection = high >= recent_high - 0.12 * atr and close < recent_high and close < op and upper_wick >= max(body, 0.25 * candle_range) and close_position <= 0.35
 
+    confirmations = _technical_confirmation_matrix(m1)
     details = {
         "available": True, "expiry_minutes": 1, "analysis_timeframe": "1m",
+        "technical_confirmation_127": confirmations,
         "candle_count": int(len(x)), "m1_count": int(len(m1)), "m5_count": int(len(m5)), "m15_count": int(len(m15)),
         "latest_closed_candle_time_utc": last["timestamp"].isoformat(),
         "context_timeframes": ["5m", "15m"], "bias_1m": bias1, "bias_5m": bias5, "bias_15m": bias15,
@@ -153,6 +221,8 @@ def generate_quotex_price_action_signal(
         "confidence_basis": "rule_strength_not_win_probability",
         "risk_note": "1m price-action setups are probabilistic; no signal guarantees profit.",
     }
+    if confirmations["total"] != 127 or confirmations["agreement"] < 0.60:
+        return _hold("১২৭টি Technical Confirmation-এ যথেষ্ট directional agreement নেই; সিগন্যাল বাদ", details)
     if bias1 == "NEUTRAL" or bias5 == "NEUTRAL" or bias15 == "NEUTRAL":
         return _hold("১/৫/১৫-মিনিট market structure পরিষ্কার নয়; অপেক্ষা", details)
     if not (bias1 == bias5 == bias15):
@@ -164,10 +234,10 @@ def generate_quotex_price_action_signal(
     sell_setup = bearish_sweep or bearish_bos or bearish_rejection
     if buy_setup and sell_setup:
         return _hold("একই ১-মিনিট candle-এ পরস্পরবিরোধী price-action setup; সিগন্যাল বাদ", details)
-    if bias1 == "BULLISH" and buy_setup:
+    if bias1 == "BULLISH" and buy_setup and confirmations["direction"] == "BUY":
         action = "BUY"
         setup = "LIQUIDITY_SWEEP_RECLAIM" if bullish_sweep else "BREAK_OF_STRUCTURE" if bullish_bos else "DEMAND_REJECTION"
-    elif bias1 == "BEARISH" and sell_setup:
+    elif bias1 == "BEARISH" and sell_setup and confirmations["direction"] == "SELL":
         action = "SELL"
         setup = "LIQUIDITY_SWEEP_RECLAIM" if bearish_sweep else "BREAK_OF_STRUCTURE" if bearish_bos else "SUPPLY_REJECTION"
     else:
