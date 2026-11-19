@@ -1,7 +1,7 @@
 import unittest
 import pandas as pd
 
-from strategy.quotex_price_action import generate_quotex_price_action_signal, _resample_closed, _structure_bias
+from strategy.quotex_price_action import generate_quotex_price_action_signal, _resample_closed, _structure_bias, _technical_confirmation_matrix
 
 
 def make_candles(count=240, flat=False):
@@ -32,6 +32,12 @@ class OneMinuteForexStructureStrategyTests(unittest.TestCase):
         x = make_candles(241)
         m5 = _resample_closed(x, 5)
         self.assertTrue(((m5["timestamp"] + pd.Timedelta(minutes=5)) <= (x.iloc[-1]["timestamp"] + pd.Timedelta(minutes=1))).all())
+
+    def test_127_parameterized_technical_confirmations_are_returned(self):
+        matrix = _technical_confirmation_matrix(make_candles(900))
+        self.assertEqual(matrix["total"], 127)
+        self.assertEqual(len(matrix["checks"]), 127)
+        self.assertEqual(matrix["buy"] + matrix["sell"] + matrix["neutral"], 127)
 
     def test_confidence_is_not_win_probability(self):
         result = generate_quotex_price_action_signal(make_candles(900))
