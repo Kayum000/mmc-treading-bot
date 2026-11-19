@@ -466,7 +466,7 @@ async function loadLiveAnalysis(){
     if(matrixList&&matrix.checks){
       const entries=Object.entries(matrix.checks);
       matrixSummary.textContent='Total '+(matrix.total||entries.length)+' · BUY '+(matrix.buy||0)+' · SELL '+(matrix.sell||0)+' · Neutral '+(matrix.neutral||0)+' · Agreement '+Math.round((matrix.agreement||0)*100)+'%';
-      matrixList.innerHTML=entries.map(([name,vote])=>'<article class="indicator-card"><div class="indicator-card-top"><h3>'+escapeHtml(name)+'</h3></div><span class="indicator-category">M1 confirmation</span><span class="indicator-state">'+escapeHtml(vote)+' vote</span></article>').join('');
+      matrixList.innerHTML=entries.map(([name,vote])=>'<article class="indicator-card"><div class="indicator-card-top"><h3>'+name+'</h3></div><span class="indicator-category">M1 confirmation</span><span class="indicator-state">'+vote+' vote</span></article>').join('');
     }else if(matrixSummary){matrixSummary.textContent='127 M1 confirmations unavailable';}
     const conceptVotes=mmc.concepts||{};
     const conceptAliases={
