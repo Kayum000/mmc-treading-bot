@@ -786,7 +786,8 @@ def _outcome_candles(mode: str, pair: str) -> list[dict]:
             frame = fetch_oanda_candles(pair, count=1000)
         elif provider == "biquote":
             from data.biquote import fetch_biquote_candles
-            frame = fetch_biquote_candles(pair, count=1000)
+            # Historical scoring may use older candles; signal generation still requires fresh data.
+            frame = fetch_biquote_candles(pair, count=1000, require_fresh=False)
 
         if frame is not None:
             now_epoch = time.time()
