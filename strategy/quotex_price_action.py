@@ -137,8 +137,6 @@ def _technical_confirmation_matrix(x: pd.DataFrame) -> dict:
         add(f"CCI_{p}_{level}",cci.iloc[-1]-level)
     for p in (3,5,7,9,12,14,20,26):
         add(f"ROC_{p}",(close.iloc[-1]/close.iloc[-1-p]-1)*100 if len(close)>p else 0)
-    for p in (3,5,7,9,12,14,20,26):
-        add(f"MOMENTUM_{p}",close.iloc[-1]-close.iloc[-1-p] if len(close)>p else 0)
     for p,mult in ((10,2.0),(14,2.0),(20,2.0),(20,2.5),(30,2.0)):
         mid=close.rolling(p).mean().iloc[-1]
         sd=close.rolling(p).std(ddof=0).iloc[-1]
