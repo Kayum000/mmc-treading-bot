@@ -187,8 +187,14 @@ def init_quotex_browser_ingest(app):
                     quote = fetch_oanda_quote(asset)
                 else:
                     from data.biquote import fetch_biquote_candles, fetch_biquote_quote
-                    frame = fetch_biquote_candles(asset, count=180)
-                    quote = fetch_biquote_quote(asset)
+                    # Charts may display historical candles when the feed is stale;
+                    # signal generation still enforces fresh candles separately.
+                    frame = fetch_biquote_candles(asset, count=180, require_fresh=False)
+                    try:
+                        quote = fetch_biquote_quote(asset)
+                    except Exception as quote_exc:
+                        quote = None
+                        logger.warning("FOREX_PROVIDER_CHART_QUOTE_STALE provider=%s asset=%s reason=%s", provider, asset, str(quote_exc)[:160])
                 bars = []
                 for _, row in frame.iterrows():
                     stamp = row["timestamp"]
@@ -201,12 +207,19 @@ def init_quotex_browser_ingest(app):
                     })
                 latest = frame.iloc[-1]
                 latest_ts = int(latest["timestamp"].timestamp())
-                quote["timestamp"] = int(quote["timestamp"])
+                if quote:
+                    quote["timestamp"] = int(quote["timestamp"])
+                candle_age = round(max(0, now - (latest_ts + 60)), 1)
+                quote_fresh = bool(quote)
                 payload = {
                     "ok": bool(bars), "asset": asset, "bars": bars, "quote": quote,
-                    "updated_at": now, "age_seconds": round(max(0, now - latest_ts), 1),
-                    "fresh": bool(bars), "source": source_label,
-                    "note": "OANDA quote is live bid/ask midpoint; bars are completed provider M1 candles." if use_oanda else "biquote live bid/ask midpoint with completed provider M1 candles; prices may differ from Quotex.",
+                    "updated_at": now, "age_seconds": candle_age,
+                    "candle_age_seconds": candle_age, "quote_fresh": quote_fresh,
+                    "fresh": quote_fresh, "source": source_label,
+                    "note": ("OANDA quote is live bid/ask midpoint; bars are completed provider M1 candles."
+                             if use_oanda else
+                             ("biquote live bid/ask midpoint with completed provider M1 candles; prices may differ from Quotex."
+                              if quote_fresh else "Historical biquote candles shown; live quote is unavailable or stale.")),
                 }
                 with _PROVIDER_CHART_CACHE_LOCK:
                     _PROVIDER_CHART_CACHE[asset] = {"cached_at": now, "payload": payload}
