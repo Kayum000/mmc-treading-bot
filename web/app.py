@@ -819,7 +819,13 @@ def _score_pending_performance_once() -> None:
     con = _performance_db()
     try:
         rows = [_performance_row(r) for r in con.execute(
-            "SELECT * FROM performance WHERE result='অপেক্ষমাণ' OR outcome_basis IS NULL OR outcome_basis NOT LIKE '৫-মিনিট expiry%%' OR (result IN ('লাভ','লস','DOJI') AND result_notified=0) ORDER BY updated_at DESC LIMIT 200"
+            """SELECT * FROM performance
+               WHERE result='অপেক্ষমাণ'
+                  OR outcome_basis IS NULL
+                  OR (strategy='FOREX_STRUCTURE_PA_30M_MTF' AND outcome_basis NOT LIKE '৩০-মিনিট expiry%%')
+                  OR (COALESCE(strategy, '') != 'FOREX_STRUCTURE_PA_30M_MTF' AND outcome_basis NOT LIKE '৫-মিনিট expiry%%')
+                  OR (result IN ('লাভ','লস','DOJI') AND result_notified=0)
+               ORDER BY updated_at DESC LIMIT 200"""
         ).fetchall()]
     finally:
         con.close()
@@ -834,12 +840,12 @@ def _score_pending_performance_once() -> None:
         entry_epoch = _utc_epoch(row.get("signal_time_utc"))
         if signal not in {"BUY", "SELL"} or not pair or entry_epoch is None:
             continue
-        # Keep old pending rows eligible for a retry. If historical price data
-        # is unavailable, the row remains pending; never invent an outcome.
+        # Keep pending rows eligible for a retry. M30 strategy signals expire
+        # after 30 minutes; legacy strategies retain their original 5-minute expiry.
         key = (mode, pair)
-        # Five-minute expiry is measured from the scheduled entry-minute boundary.
+        expiry_minutes = 30 if str(row.get("strategy") or "").upper() == "FOREX_STRUCTURE_PA_30M_MTF" else 5
         entry_minute = int(entry_epoch // 60) * 60
-        expiry_epoch = entry_minute + 5 * 60
+        expiry_epoch = entry_minute + expiry_minutes * 60
         if now < expiry_epoch:
             continue
         if key not in candle_cache:
@@ -848,8 +854,8 @@ def _score_pending_performance_once() -> None:
             except Exception as exc:
                 print(f"[MMC Performance] candle lookup failed mode={mode} pair={pair}: {exc}", flush=True)
                 candle_cache[key] = []
-        # Score against the close of the M1 candle that ends at entry + 5 minutes.
-        # The entry-minute open is used as the consistent historical fill proxy.
+        # Score against the close of the M1 candle that ends at the configured
+        # expiry. The entry-minute open is the consistent historical fill proxy.
         entry_candle = next((
             b for b in candle_cache[key]
             if int(float(b["t"]) // 60) * 60 == entry_minute
@@ -862,7 +868,7 @@ def _score_pending_performance_once() -> None:
         ), None)
         if not entry_candle or not expiry_candle:
             continue
-        basis = "৫-মিনিট expiry close বনাম entry-minute open"
+        basis = f"{expiry_minutes}-মিনিট expiry close বনাম entry-minute open"
         needs_rescore = row.get("result") == "অপেক্ষমাণ" or row.get("outcome_basis") != basis
         if needs_rescore:
             try:
@@ -882,8 +888,8 @@ def _score_pending_performance_once() -> None:
             con = _performance_db()
             try:
                 con.execute(
-                    "UPDATE performance SET result=?, entry_price=?, outcome_price=?, outcome_candle_time_utc=?, outcome_basis=?, result_notified=0, updated_at=? WHERE id=? AND (result='অপেক্ষমাণ' OR outcome_basis IS NULL OR outcome_basis NOT LIKE '৫-মিনিট expiry%%')",
-                    (outcome, entry_price, expiry_price, outcome_time, basis, time.time(), row["id"])
+                    "UPDATE performance SET result=?, entry_price=?, outcome_price=?, outcome_candle_time_utc=?, outcome_basis=?, result_notified=0, updated_at=? WHERE id=? AND (result='অপেক্ষমাণ' OR outcome_basis IS NULL OR outcome_basis != ?)",
+                    (outcome, entry_price, expiry_price, outcome_time, basis, time.time(), row["id"], basis)
                 )
                 con.commit()
                 row["result"] = outcome
