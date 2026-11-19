@@ -37,7 +37,7 @@ class BiquoteChartEndpointTests(unittest.TestCase):
         self.assertEqual(payload["source"], "biquote live bid/ask + completed M1 candles")
         self.assertEqual(payload["bars"][0]["close"], 1.105)
         self.assertEqual(payload["quote"]["price"], 1.105)
-        fetch.assert_called_once_with("EURUSD", count=180)
+        fetch.assert_called_once_with("EURUSD", count=180, require_fresh=False)
 
     def test_provider_failure_does_not_fall_back_to_quotex_prices(self):
         with patch.dict(os.environ, {"MARKET_DATA_PROVIDER": "biquote"}, clear=False), patch(
